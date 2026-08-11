@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0B5AEE">
+  <title>Facilite — Acessar o sistema</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Leckerli+One&display=swap">
+
+  <link rel="stylesheet" href="assets/css/login.css">
+</head>
+<body>
+
+  <!-- Fundo: foto da cidade + véu azul da marca -->
+  <div class="backdrop" aria-hidden="true"></div>
+
+  <main class="screen">
+
+    <!-- ============ Card de suporte ============ -->
+    <aside class="card support" aria-labelledby="support-title">
+      <div class="support__heading">
+        <h2 class="support__title" id="support-title">Suporte</h2>
+        <svg class="swoosh swoosh--underline" viewBox="0 0 240 32" fill="none" aria-hidden="true">
+          <path d="M4 25C54 29 146 23 236 6"
+                stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <p class="support__text">Precisa de ajuda para entrar no seu sistema?</p>
+      <p class="support__text">Abra um ticket</p>
+
+      <a class="btn btn--amber" href="#" data-action="ticket">Abrir</a>
+    </aside>
+
+    <!-- ============ Card de login ============ -->
+    <section class="card login" aria-labelledby="brand-name">
+      <p class="login__by">By <span class="login__by-brand">SimpleSoft</span></p>
+
+      <div class="brand">
+        <h1 class="brand__word" id="brand-name">
+          <span class="brand__ink">Faci</span><span class="brand__accent">lit</span><span class="brand__ink">e</span>
+        </h1>
+        <svg class="swoosh brand__swoosh" viewBox="0 0 150 42" fill="none" aria-hidden="true">
+          <path d="M5 13C13 30 45 38 84 33c23-3 41-13 52-27"
+                stroke="currentColor" stroke-width="7" stroke-linecap="round"/>
+          <path d="M120 11 136 6 135 23"
+                stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <form class="login__form" id="login-form" novalidate>
+        <div class="field">
+          <label class="field__label" for="usuario">Login</label>
+          <input class="field__input" id="usuario" name="usuario" type="text"
+                 placeholder="Digite seu login aqui!"
+                 autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="senha">Senha</label>
+          <input class="field__input" id="senha" name="senha" type="password"
+                 placeholder="Digite sua senha aqui!"
+                 autocomplete="current-password" required>
+          <a class="field__forgot" href="#" data-action="recuperar-senha">Esqueceu a senha? Clique aqui!</a>
+        </div>
+
+        <button class="btn btn--amber btn--submit" type="submit">
+          <span class="btn__label">ENTRAR</span>
+        </button>
+
+        <p class="login__feedback" id="login-feedback" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+  </main>
+
+  <script src="assets/js/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+/* Barra de vidro flutuando acima da borda inferior, centralizada entre as
+   abas "Voltar" (esquerda) e "Suporte" (direita). Diferente das abas, o dock
+   não fica "pendurado": ele flutua, com todos os cantos arredondados. */
+.window-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  /* Acima da faixa azul (10) e das abas flutuantes (5); ainda abaixo dos
+     popups de Suporte (60) e dos modais (70/80), que devem cobrir o dock. */
+  z-index: 30;
+  padding: 8px 10px;
+  border-radius: 22px;
+  /* Nada de overflow/clip aqui: o ícone cresce para FORA da barra (como no
+     dock do macOS), junto com o rótulo e o "x". Qualquer recorte nesta
+     cadeia corta a animação pela metade. */
+  overflow: visible;
+  /* Vidro azulado: legível tanto sobre o miolo branco da tela inicial
+     quanto sobre o azul dos módulos internos. */
+  background: rgba(10, 76, 203, .58);
+  border: 1px solid rgba(255, 255, 255, .3);
+  box-shadow: 0 14px 36px rgba(4, 30, 82, .34);
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+}
+
+.window-dock__list {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: visible;
+}
+
+.window-dock__slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* O item sob o cursor/foco sobe na pilha para nunca passar por baixo do
+   vizinho enquanto cresce. */
+.window-dock__slot:hover,
+.window-dock__slot:focus-within {
+  z-index: 2;
+}
+
+/* ---------- Ícone ---------- */
+.window-dock__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 15px;
+  background: var(--tile-yellow);
+  color: var(--white);
+  cursor: pointer;
+  /* cresce a partir da base, como no dock do macOS */
+  transform-origin: bottom center;
+  transition: transform .2s cubic-bezier(.2, .8, .3, 1.25), background-color .15s var(--ease);
+}
+
+.window-dock__item svg {
+  width: 28px;
+  height: 28px;
+}
+
+.window-dock__initial {
+  font-family: var(--font-ui);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.window-dock__slot:hover .window-dock__item,
+.window-dock__slot:focus-within .window-dock__item {
+  background: var(--tile-yellow-hover);
+  transform: scale(1.45) translateY(-6px);
+}
+
+/* Vizinhos crescem um pouco menos — o efeito de "onda" do dock.
+   Vale para hover e para foco, para quem navega pelo teclado ver o mesmo. */
+.window-dock__slot:hover + .window-dock__slot .window-dock__item,
+.window-dock__slot:focus-within + .window-dock__slot .window-dock__item,
+.window-dock__slot:has(+ .window-dock__slot:hover) .window-dock__item,
+.window-dock__slot:has(+ .window-dock__slot:focus-within) .window-dock__item {
+  transform: scale(1.18) translateY(-2px);
+}
+
+/* ---------- Rótulo (fora do ícone, para não esticar junto) ---------- */
+.window-dock__label {
+  position: absolute;
+  /* O ícone ampliado sobe ~32px acima do slot (escala 1.45 a partir da base
+     + deslocamento). O rótulo precisa ficar acima disso, senão o próprio
+     ícone passa por cima dele durante a animação. */
+  bottom: calc(100% + 46px);
+  left: 50%;
+  /* acima do ícone dentro do slot */
+  z-index: 5;
+  transform: translateX(-50%) translateY(6px);
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(6, 20, 46, .92);
+  border: 1px solid rgba(255, 255, 255, .18);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .16s var(--ease), transform .16s var(--ease), visibility .16s;
+}
+
+.window-dock__slot:hover .window-dock__label,
+.window-dock__slot:focus-within .window-dock__label {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ---------- Fechar ---------- */
+.window-dock__close {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .5);
+  border-radius: 50%;
+  background: #d6281c;
+  color: var(--white);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .16s var(--ease), visibility .16s, transform .16s var(--ease);
+}
+
+.window-dock__slot:hover .window-dock__close,
+.window-dock__slot:focus-within .window-dock__close {
+  opacity: 1;
+  visibility: visible;
+}
+
+.window-dock__close:hover {
+  transform: scale(1.15);
+}
+
+.window-dock__close svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ---------- Ponto de janela ativa ---------- */
+.window-dock__dot {
+  width: 5px;
+  height: 5px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background-color .15s var(--ease);
+}
+
+.window-dock__dot--on {
+  background: var(--white);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .window-dock__item,
+  .window-dock__label,
+  .window-dock__close {
+    transition: none;
+  }
+
+  .window-dock__slot:hover .window-dock__item,
+  .window-dock__slot:focus-within .window-dock__item,
+  .window-dock__slot:hover + .window-dock__slot .window-dock__item,
+  .window-dock__slot:has(+ .window-dock__slot:hover) .window-dock__item {
+    transform: none;
+  }
+}
+
+/* Em telas estreitas as abas de baixo ocupam quase toda a largura, então o
+   dock sobe para acima delas em vez de disputar o mesmo espaço. */
+@media (max-width: 900px) {
+  .window-dock {
+    bottom: 96px;
+  }
+}
+
+@media (max-width: 640px) {
+  .window-dock {
+    bottom: 86px;
+    padding: 6px 8px;
+    border-radius: 18px;
+  }
+
+  .window-dock__list { gap: 6px; }
+  .window-dock__item { width: 44px; height: 44px; border-radius: 13px; }
+  .window-dock__item svg { width: 24px; height: 24px; }
+}

@@ -1,0 +1,178 @@
+@keyframes branches-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes branches-modal-in {
+  from { transform: translateY(18px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.branches-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 20, 46, 0.55);
+  animation: branches-overlay-in 0.18s var(--ease);
+}
+
+.branches-modal {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(560px, 90vh);
+  display: flex;
+  flex-direction: column;
+  padding: 30px 34px 26px;
+  background: var(--blue-panel);
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: 30px;
+  box-shadow: var(--shadow-card);
+  animation: branches-modal-in 0.22s var(--ease);
+}
+
+.branches-modal__close {
+  position: absolute;
+  top: 22px;
+  right: 26px;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--amber);
+  color: #d6281c;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(4, 30, 82, 0.35);
+  transition: transform 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+
+.branches-modal__close:hover {
+  background: var(--amber-hover);
+  transform: scale(1.05);
+}
+
+.branches-modal__close svg {
+  width: 22px;
+  height: 22px;
+}
+
+.branches-modal__title {
+  align-self: center;
+  margin: 0 0 20px;
+  font-family: var(--font-brand);
+  font-size: 42px;
+  color: var(--white);
+}
+
+.branches-modal__header,
+.branches-modal__row {
+  display: grid;
+  grid-template-columns: 90px 1fr 190px 46px;
+  align-items: center;
+  gap: 16px;
+}
+
+.branches-modal__header {
+  padding: 0 18px 10px;
+  color: var(--white);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.branches-modal__body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+  scrollbar-color: var(--white) rgba(255, 255, 255, 0.22);
+  scrollbar-width: thin;
+}
+
+.branches-modal__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.branches-modal__body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+
+.branches-modal__body::-webkit-scrollbar-thumb {
+  background: var(--white);
+  border-radius: 4px;
+}
+
+.branches-modal__row {
+  min-height: 56px;
+  padding: 10px 18px;
+  border-radius: 14px;
+  background: var(--blue-panel-edge);
+  color: var(--white);
+  font-size: 16px;
+}
+
+.branches-modal__row--empty {
+  opacity: 0.55;
+}
+
+.branches-modal__code {
+  text-align: center;
+  font-weight: 600;
+}
+
+.branches-modal__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branches-modal__select {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9px;
+  background: var(--tile-yellow);
+  color: var(--white);
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease);
+}
+
+.branches-modal__select:hover {
+  background: var(--tile-yellow-hover);
+}
+
+.branches-modal__select svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 640px) {
+  .branches-modal {
+    padding: 26px 18px 20px;
+    border-radius: 24px;
+  }
+
+  .branches-modal__title {
+    font-size: 34px;
+  }
+
+  .branches-modal__header,
+  .branches-modal__row {
+    grid-template-columns: 56px 1fr 40px;
+  }
+
+  .branches-modal__header span:nth-child(3),
+  .branches-modal__cnpj {
+    display: none;
+  }
+}

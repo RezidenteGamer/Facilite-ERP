@@ -1,0 +1,533 @@
+/* =============================================================
+   Facilite — Tela de Login
+   Fontes: "Leckerli One" (marca) · "Inter" (interface)
+   Tokens de marca em src/styles/tokens.css (compartilhados com o resto do app).
+   ============================================================= */
+
+/* ---------- Fundo ---------- */
+/* Foto cinemática (entardecer, laranja -> azul): mantém as cores originais,
+   só escurece as bordas onde os cards se apoiam para garantir contraste. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: url("../../assets/img/tela-de-login-cinematica.webp") center / cover no-repeat;
+}
+
+.backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(200deg, rgba(6, 16, 40, .12) 0%, rgba(6, 16, 40, 0) 35%, rgba(4, 22, 56, .38) 100%),
+    linear-gradient(to top, rgba(3, 14, 40, .55) 0%, rgba(3, 14, 40, 0) 30%);
+}
+
+/* ---------- Palco ---------- */
+/* Flex em vez de posicionamento absoluto: o card de login entra no fluxo
+   normal da página, então se o conteúdo precisar de mais altura do que a
+   tela tem, é a PÁGINA que cresce e rola — nada de caixa com scroll
+   escondida dentro do card. */
+.screen {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 68px 26px 26px;
+}
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--blue-panel);
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+/* =============================================================
+   Card de login (direita)
+   ============================================================= */
+.login {
+  /* min() em vez de largura fixa: no espaço estreito, ocupa o que a
+     faixa de padding do .screen deixar disponível. */
+  width: min(476px, 100%);
+  min-height: calc(100dvh - 94px);
+  padding: 34px 52px 40px;
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+}
+
+.login__by {
+  align-self: flex-end;
+  line-height: 1.2;
+  font-size: 12px;
+  font-weight: 300;
+  font-style: italic;
+  letter-spacing: .2px;
+  opacity: .95;
+}
+
+.login__by-brand {
+  font-family: var(--font-brand);
+  font-style: normal;
+  font-size: 15px;
+  letter-spacing: .3px;
+}
+
+/* ---------- Marca ---------- */
+.brand {
+  position: relative;
+  align-self: center;
+  margin-top: -14px;
+}
+
+.brand__word {
+  font-family: var(--font-brand);
+  font-size: 72px;
+  font-weight: 400;
+  line-height: 1.06;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+
+.brand__ink    { color: var(--white); }
+.brand__accent { color: var(--yellow); }
+
+.swoosh {
+  position: absolute;
+  color: var(--white);
+  pointer-events: none;
+}
+
+.brand__swoosh {
+  left: 6%;
+  bottom: -22px;
+  width: 52%;
+}
+
+/* =============================================================
+   Formulário
+   ============================================================= */
+.login__form {
+  margin-top: 86px;
+  display: flex;
+  flex-direction: column;
+}
+
+.field + .field { margin-top: 44px; }
+
+.field__label {
+  display: block;
+  padding-left: 26px;
+  margin-bottom: 6px;
+  line-height: 1.2;
+  font-size: 23px;
+  font-weight: 400;
+  letter-spacing: .2px;
+}
+
+.field__input {
+  display: block;
+  width: 100%;
+  height: 56px;
+  padding: 0 26px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  color: var(--ink);
+  font-size: 21px;
+  font-weight: 400;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease);
+}
+
+.field__input::placeholder {
+  color: var(--ink-placeholder);
+  font-weight: 400;
+}
+
+.field__input:hover { box-shadow: 0 4px 14px rgba(3, 26, 74, .18); }
+
+.field__input:focus {
+  outline: none;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 4px rgba(255, 164, 20, .32);
+}
+
+.field__input[aria-invalid="true"] {
+  border-color: #FF6B6B;
+  box-shadow: 0 0 0 4px rgba(255, 107, 107, .3);
+}
+
+.field__input:-webkit-autofill,
+.field__input:-webkit-autofill:hover,
+.field__input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  -webkit-box-shadow: 0 0 0 1000px var(--white) inset;
+  caret-color: var(--ink);
+}
+
+.field__forgot {
+  display: block;
+  margin-top: 3px;
+  padding-right: 22px;
+  text-align: right;
+  line-height: 1.2;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: .1px;
+  opacity: .96;
+  transition: opacity .18s var(--ease);
+}
+
+.field__forgot:hover { opacity: 1; text-decoration: underline; }
+
+.login__feedback {
+  min-height: 18px;
+  margin-top: 16px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #FFE1E1;
+}
+
+/* =============================================================
+   Botões
+   ============================================================= */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 58px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--amber);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 34px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: background-color .18s var(--ease),
+              transform .18s var(--ease),
+              box-shadow .18s var(--ease);
+}
+
+.btn:hover {
+  background: var(--amber-hover);
+  box-shadow: 0 10px 24px rgba(255, 149, 0, .34);
+  transform: translateY(-1px);
+}
+
+.btn:active { background: var(--amber-active); transform: translateY(0); }
+
+.btn--submit { margin-top: 58px; }
+
+.btn[data-loading="true"] {
+  pointer-events: none;
+  background: var(--amber-active);
+}
+
+.btn[data-loading="true"] .btn__label { opacity: .55; }
+
+/* =============================================================
+   Card de suporte (inferior esquerdo)
+   ============================================================= */
+.support {
+  /* Fixo na janela (não no fluxo da página) — continua grudado no canto
+     mesmo que o card de login cresça e a página role. */
+  position: fixed;
+  left: 10px;
+  bottom: 0;
+  width: 352px;
+  padding: 22px 54px 34px;
+  border-radius: 22px 22px 0 0;
+  transition: max-width .2s var(--ease), padding .2s var(--ease);
+  /* Em telas estreitas os dois cards podem se sobrepor na borda inferior —
+     o Suporte (menor, recolhido) sempre fica por cima do login nesse caso. */
+  z-index: 2;
+}
+
+/* Só vira botão de verdade (cursor, clique útil) na versão recolhida —
+   ver media query mais abaixo. No tamanho normal o card já vem aberto. */
+.support__toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.support__body {
+  display: block;
+}
+
+.support__heading {
+  position: relative;
+  display: block;
+  width: max-content;
+  margin: 0 auto 11px;
+}
+
+.support__title {
+  font-family: var(--font-brand);
+  font-size: 68px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: .5px;
+}
+
+.swoosh--underline {
+  left: -2px;
+  bottom: -10px;
+  width: 102%;
+}
+
+.support__text {
+  max-width: 15ch;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.23;
+  letter-spacing: .1px;
+}
+
+.support .btn {
+  width: 100%;
+  margin-top: 8px;
+  letter-spacing: .2px;
+}
+
+/* Chat que substitui o conteúdo do card (não uma janela separada por cima
+   dele) — mesma posição/tamanho do card, só o miolo troca de conteúdo. */
+.support__chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* Borda em volta da região do chat (mensagens + campo), separando-a
+   visualmente do resto do card. */
+.support__chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1.5px solid rgba(255, 255, 255, .32);
+  border-radius: 16px;
+}
+
+.support__chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.support__chat-bubble {
+  max-width: 90%;
+  margin: 0;
+  padding: 9px 13px;
+  border-radius: 13px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.support__chat-bubble--bot {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, .14);
+  border-bottom-left-radius: 4px;
+}
+
+.support__chat-bubble--user {
+  align-self: flex-end;
+  background: var(--amber);
+  color: var(--white);
+  border-bottom-right-radius: 4px;
+}
+
+.support__chat-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.support__chat-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.support__chat-input {
+  width: 100%;
+  height: 44px;
+  /* espaço à direita reservado pro ícone de anexo, pra não sobrepor o texto */
+  padding: 0 40px 0 16px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.support__chat-input::placeholder {
+  color: var(--ink-placeholder);
+}
+
+.support__chat-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 164, 20, .35);
+}
+
+.support__chat-attach {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-placeholder);
+  cursor: pointer;
+  transition: background-color .15s var(--ease), color .15s var(--ease);
+}
+
+.support__chat-attach:hover {
+  background: rgba(11, 86, 228, .1);
+  color: var(--blue-panel);
+}
+
+.support__chat-attach svg {
+  width: 16px;
+  height: 16px;
+}
+
+.support__chat-send {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--amber);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color .18s var(--ease);
+}
+
+.support__chat-send:hover {
+  background: var(--amber-hover);
+}
+
+.support__chat-send svg {
+  width: 18px;
+  height: 18px;
+}
+
+.support__chat-back {
+  align-self: center;
+  margin-top: 2px;
+  border: 0;
+  background: none;
+  color: var(--white);
+  opacity: .8;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.support__chat-back:hover {
+  opacity: 1;
+}
+
+/* =============================================================
+   Responsivo
+   Os dois cards ficam sempre ancorados no canto — nunca viram um bloco
+   centralizado (isso é o que mudava de aparência com o zoom do navegador,
+   já que zoom encolhe o viewport em pixels CSS do mesmo jeito que uma
+   janela menor). Em vez de reorganizar tudo, cada card só encolhe:
+   o de login fica fluido (nunca estoura a tela), e o de Suporte vira uma
+   aba recolhida — clique para abrir — quando o espaço aperta.
+   ============================================================= */
+@media (max-width: 1180px) {
+  .login  { width: min(430px, 100%); padding: 30px 44px 36px; }
+  .brand__word    { font-size: 64px; }
+  .login__form    { margin-top: 74px; }
+  .btn--submit    { margin-top: 48px; }
+  .field + .field { margin-top: 38px; }
+
+  .support        { width: 322px; padding: 26px 44px 30px; }
+  .support__title { font-size: 58px; }
+  .support__text  { font-size: 20px; }
+  .btn            { font-size: 28px; }
+}
+
+/* Aperta o espaço vertical do formulário — entra bem antes do card de
+   Suporte recolher, para o conteúdo nunca depender de rolar dentro do card. */
+@media (max-height: 620px) {
+  .login          { padding-top: 22px; padding-bottom: 22px; }
+  .brand          { margin-top: -4px; }
+  .brand__word    { font-size: 52px; }
+  .login__form    { margin-top: 40px; }
+  .field + .field { margin-top: 22px; }
+  .btn--submit    { margin-top: 26px; }
+}
+
+@media (max-height: 460px) {
+  .brand         { margin-top: 0; }
+  .brand__word   { font-size: 38px; }
+  .login__form   { margin-top: 20px; }
+  .field + .field { margin-top: 12px; }
+  .field__label  { font-size: 16px; margin-bottom: 2px; }
+  .field__input  { height: 42px; font-size: 15px; }
+  .btn--submit   { margin-top: 14px; }
+  .btn           { height: 42px; font-size: 20px; }
+  .login__by     { font-size: 10px; }
+}
+
+/* Card de Suporte recolhido — vira uma aba com só o título; clicar abre
+   o conteúdo por cima, sem empurrar o card de login nem mudar de layout. */
+@media (max-width: 900px), (max-height: 620px) {
+  .support {
+    width: auto;
+    max-width: 190px;
+    padding: 14px 26px 14px;
+  }
+
+  .support__toggle { cursor: pointer; }
+  .support__body { display: none; }
+  .support__heading { margin-bottom: 0; }
+  .support__title { font-size: 40px; }
+  .support .swoosh--underline { display: none; }
+
+  .support--expanded {
+    max-width: min(320px, calc(100vw - 20px));
+    padding: 22px 40px 26px;
+  }
+
+  .support--expanded .support__heading { margin-bottom: 11px; }
+  .support--expanded .support__title { font-size: 56px; }
+  .support--expanded .swoosh--underline { display: block; }
+  .support--expanded .support__body { display: block; }
+}
+
+@media (max-width: 480px) {
+  .field__label  { font-size: 19px; }
+  .field__input  { height: 52px; font-size: 17px; }
+  .btn           { height: 54px; font-size: 24px; }
+  .support__text { font-size: 18px; }
+  .login         { padding-left: 24px; padding-right: 24px; }
+}

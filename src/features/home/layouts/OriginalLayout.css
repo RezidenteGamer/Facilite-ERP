@@ -1,0 +1,62 @@
+/* Grade de módulos — o resto da tela (cabeçalho, abas flutuantes) vem de
+   AppShell (src/components/AppShell.css), compartilhado com outras telas. */
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 30px 16px;
+  max-width: 830px;
+}
+
+/* Disposição "Lateral" — os mesmos ícones, encostados à esquerda numa faixa
+   mais estreita que a grade larga padrão. Usa mais colunas (4) que a grade
+   larga usaria nesse espaço para caber sem rolar, mesmo com ícone grande. */
+.module-grid--sidebar {
+  grid-template-columns: repeat(4, minmax(0, 96px));
+  max-width: 420px;
+  gap: 14px 12px;
+}
+
+.module-grid--sidebar .module-tile {
+  width: 96px;
+  gap: 6px;
+}
+
+.module-grid--sidebar .module-tile__icon {
+  width: 82px;
+  height: 82px;
+  border-radius: 20px;
+}
+
+.module-grid--sidebar .module-tile__icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.module-grid--sidebar .module-tile__badge {
+  width: 24px;
+  height: 24px;
+  font-size: 15px;
+}
+
+.module-grid--sidebar .module-tile__label {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 640px) {
+  .module-grid,
+  .module-grid--sidebar {
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    max-width: none;
+    justify-items: center;
+  }
+
+  /* Empilhado, o rail lateral vira a mesma grade — os ícones voltam ao
+     tamanho normal (senão ficariam pequenos demais para tocar). */
+  .module-grid--sidebar .module-tile { width: 92px; gap: 10px; }
+  .module-grid--sidebar .module-tile__icon { width: 72px; height: 72px; border-radius: 18px; }
+  .module-grid--sidebar .module-tile__icon svg { width: 36px; height: 36px; }
+  .module-grid--sidebar .module-tile__badge { width: 26px; height: 26px; font-size: 16px; }
+  .module-grid--sidebar .module-tile__label { font-size: 12px; line-height: 1.25; }
+}

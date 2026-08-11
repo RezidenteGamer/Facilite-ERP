@@ -1,0 +1,45 @@
+.registry-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: var(--blue-panel);
+  /* Sobre o miolo azul o painel some sem um contorno que o delimite. */
+  border: 1.5px solid rgba(255, 255, 255, .28);
+  color: var(--white);
+}
+
+.registry-actions__title {
+  margin: 0 0 6px;
+  text-align: center;
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.registry-actions__btn {
+  flex-shrink: 0;
+  height: 52px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--amber);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background-color .15s var(--ease), transform .15s var(--ease);
+}
+
+.registry-actions__btn--detached {
+  margin-top: 34px;
+}
+
+.registry-actions__btn:hover:not(:disabled) {
+  background: var(--amber-hover);
+  transform: translateY(-1px);
+}
+
+.registry-actions__btn:disabled {
+  opacity: .55;
+  cursor: default;
+}

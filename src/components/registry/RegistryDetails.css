@@ -1,0 +1,187 @@
+.registry-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.registry-details__search-label {
+  align-self: center;
+  font-size: 19px;
+  color: var(--white);
+}
+
+.registry-details__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px 5px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+}
+
+.registry-details__search-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(11, 86, 228, .08);
+  color: var(--tile-yellow);
+}
+
+.registry-details__search-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.registry-details__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+}
+
+.registry-details__card {
+  flex: 1;
+  min-height: 0;
+  margin-top: 8px;
+  padding: 14px 18px 20px;
+  border-radius: 18px;
+  background: var(--blue-panel-edge);
+  color: var(--white);
+  overflow-y: auto;
+}
+
+.registry-details__status-title {
+  margin: 0;
+  text-align: center;
+  font-size: 16px;
+}
+
+.registry-details__status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.registry-details__status-side {
+  font-size: 15px;
+}
+
+/* Interruptor Ativo/Inativo — o "botão" branco desliza sobre o trilho verde. */
+.registry-details__switch {
+  position: relative;
+  width: 74px;
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: #A8E063;
+  cursor: pointer;
+}
+
+.registry-details__switch:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.registry-details__switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: 0 2px 6px rgba(4, 30, 82, .3);
+  transition: transform .18s var(--ease);
+}
+
+.registry-details__switch--on .registry-details__switch-knob {
+  transform: translateX(34px);
+}
+
+.registry-details__fields {
+  margin: 22px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.registry-details__field {
+  display: flex;
+  gap: 6px;
+  font-size: 15px;
+}
+
+.registry-details__field dt {
+  flex-shrink: 0;
+}
+
+.registry-details__field dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Área de imagem ---------- */
+.registry-details__media-label {
+  margin: 6px 0 0;
+  font-size: 15px;
+}
+
+.registry-details__media-frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--white);
+}
+
+.registry-details__media-frame svg {
+  width: 108px;
+  height: auto;
+}
+
+.registry-details__media-hint {
+  position: absolute;
+  padding: 2px 8px;
+  background: var(--blue-panel-edge);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.registry-details__media--stacked {
+  display: flex;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+/* Rótulo ao lado da imagem, como no desenho de Produtos. */
+.registry-details__media--inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.registry-details__media--inline .registry-details__media-label {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1100px) {
+  .registry-details__card { flex: none; }
+}

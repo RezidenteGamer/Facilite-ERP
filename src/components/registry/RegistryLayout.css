@@ -1,0 +1,34 @@
+/* Três colunas: ações | tabela | ficha do selecionado. */
+.registry {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  /* Empilhado não faz sentido prender a altura na janela: cada bloco assume
+     seu tamanho natural e quem rola é a página. */
+  .registry {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
+
+  /* A ficha (com o campo de busca) fica por último na ordem natural do
+     código — nesta largura a página rola, e as abas "Voltar"/"Suporte"
+     ficam fixas no rodapé da tela. Se a busca ficasse mesmo por último,
+     ela cairia bem na faixa onde essas abas ficam, sendo tampada por elas
+     ao carregar a página. Reordenar para logo após as ações resolve os
+     dois problemas: a busca não fica escondida, e ainda aparece antes da
+     tabela, que é o bloco mais longo. */
+  .registry > .registry-details {
+    order: -1;
+  }
+
+  .registry > .registry-actions {
+    order: -2;
+  }
+}

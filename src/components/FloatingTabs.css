@@ -1,0 +1,72 @@
+/* Abas azuis encostadas na borda inferior da tela — mesmo recurso visual
+   já usado no card "Suporte" do login (bottom: 0, cantos retos embaixo). */
+.floating-tab {
+  position: fixed;
+  /* Fica parcialmente escondido abaixo da borda da tela — quando a animação
+     de subida existir, vai parecer que a aba está sendo puxada para cima. */
+  bottom: -16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--blue-panel);
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: 22px 22px 0 0;
+  box-shadow: var(--shadow-card);
+  color: var(--white);
+  cursor: pointer;
+  transition: background-color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+
+.floating-tab:hover {
+  transform: translateY(-2px);
+}
+
+.floating-tab--back {
+  left: 16px;
+  width: 72px;
+  height: 60px;
+  padding: 0;
+}
+
+.floating-tab--back img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+/* A aba do Suporte herda o mesmo "peek" (bottom: -16px) das outras abas —
+   e o painel que ela abre usa exatamente a mesma posição/largura, para
+   manter a continuidade visual entre os dois estados (recolhido/estendido). */
+.floating-tab--support {
+  right: 24px;
+  width: 340px;
+  padding: 18px 16px 16px;
+  font-family: var(--font-brand);
+  font-size: 42px;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .floating-tab {
+    bottom: -10px;
+  }
+
+  .floating-tab--support {
+    right: 12px;
+    width: min(340px, calc(100vw - 24px));
+    padding: 14px 12px 12px;
+    font-size: 32px;
+  }
+
+  .floating-tab--back {
+    left: 12px;
+    width: 60px;
+    height: 50px;
+  }
+
+  .floating-tab--back img {
+    width: 26px;
+    height: 26px;
+  }
+}
