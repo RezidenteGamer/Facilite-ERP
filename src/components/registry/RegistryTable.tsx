@@ -15,9 +15,20 @@ export type RegistryTab = {
   label: string;
 };
 
+export type RegistryTableAction = {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  onClick?: () => void;
+  /** "danger" pinta o botão de vermelho (ex.: "Excluir definitivo"). */
+  tone?: "default" | "danger";
+};
+
 type RegistryTableProps<T> = {
-  /** Título cursivo acima do quadro (ex.: "Pedidos de venda"). */
+  /** Título acima do quadro (ex.: "Pedidos de venda"). */
   title?: string;
+  /** "brand" (padrão): fonte cursiva do logo. "plain": texto normal, à esquerda. */
+  titleVariant?: "brand" | "plain";
   columns: RegistryColumn<T>[];
   rows: T[];
   getRowId: (row: T) => string;
@@ -29,11 +40,14 @@ type RegistryTableProps<T> = {
   onTabChange?: (id: string) => void;
   /** Quantas linhas o quadro mostra mesmo com poucos cadastros. */
   minRows?: number;
+  /** Botões centralizados no rodapé do próprio painel (ex.: Tributações). */
+  footerActions?: RegistryTableAction[];
 };
 
 /** Tabela dos módulos de cadastro: abas opcionais + linhas selecionáveis. */
 export default function RegistryTable<T>({
   title,
+  titleVariant = "brand",
   columns,
   rows,
   getRowId,
@@ -43,13 +57,22 @@ export default function RegistryTable<T>({
   activeTab,
   onTabChange,
   minRows = 7,
+  footerActions,
 }: RegistryTableProps<T>) {
   const gridTemplate = columns.map((column) => column.width).join(" ");
   const placeholders = Math.max(0, minRows - rows.length);
 
   return (
     <section className="registry-table">
-      {title && <h2 className="registry-table__title">{title}</h2>}
+      {title && (
+        <h2
+          className={`registry-table__title${
+            titleVariant === "plain" ? " registry-table__title--plain" : ""
+          }`}
+        >
+          {title}
+        </h2>
+      )}
 
       {tabs && tabs.length > 0 && (
         <div className="registry-table__tabs" role="tablist">
@@ -110,6 +133,25 @@ export default function RegistryTable<T>({
             </div>
           ))}
         </div>
+
+        {footerActions && footerActions.length > 0 && (
+          <div className="registry-table__footer">
+            {footerActions.map((action) => (
+              <button
+                key={action.id}
+                className={`registry-table__footer-btn${
+                  action.tone === "danger" ? " registry-table__footer-btn--danger" : ""
+                }`}
+                type="button"
+                data-action={action.id}
+                disabled={action.disabled}
+                onClick={action.onClick}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

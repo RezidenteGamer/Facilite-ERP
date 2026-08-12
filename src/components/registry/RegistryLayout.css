@@ -8,6 +8,16 @@
   min-height: 0;
 }
 
+/* Duas colunas: tabela | controles — sem a coluna de ações à esquerda. */
+.registry--table-controls {
+  grid-template-columns: minmax(0, 1fr) 260px;
+}
+
+/* Uma coluna só: a tabela ocupa a largura toda (Tributações). */
+.registry--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 @media (max-width: 1100px) {
   /* Empilhado não faz sentido prender a altura na janela: cada bloco assume
      seu tamanho natural e quem rola é a página. */

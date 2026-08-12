@@ -8,6 +8,13 @@ export type RegistryAction = {
   onClick?: () => void;
   /** Abre um espaço maior antes do botão — separa ações destrutivas das demais. */
   detached?: boolean;
+  /** "danger" pinta o botão de vermelho (ex.: "Cancelar", "Excluir definitivo"). */
+  tone?: "default" | "danger";
+};
+
+export type RegistryActionField = {
+  label: string;
+  value?: string;
 };
 
 type RegistryActionsProps = {
@@ -19,6 +26,10 @@ type RegistryActionsProps = {
     value: string;
     onChange: (value: string) => void;
   };
+  /** Subtítulo acima da lista de campos (ex.: "Vencimento" no Financeiro). */
+  fieldsTitle?: string;
+  /** Ficha resumida do item selecionado, sem caixa (ex.: Documento, Emissão). */
+  fields?: RegistryActionField[];
   actions: RegistryAction[];
 };
 
@@ -27,6 +38,8 @@ export default function RegistryActions({
   title,
   titleVariant = "default",
   search,
+  fieldsTitle,
+  fields,
   actions,
 }: RegistryActionsProps) {
   return (
@@ -54,10 +67,24 @@ export default function RegistryActions({
         </label>
       )}
 
+      {(fieldsTitle || fields) && (
+        <dl className="registry-actions__fields">
+          {fieldsTitle && <p className="registry-actions__fields-title">{fieldsTitle}</p>}
+          {fields?.map((field) => (
+            <div className="registry-actions__field" key={field.label}>
+              <dt>{field.label}:</dt>
+              <dd>{field.value ?? ""}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
       {actions.map((action) => (
         <button
           key={action.id}
-          className={`registry-actions__btn${action.detached ? " registry-actions__btn--detached" : ""}`}
+          className={`registry-actions__btn${action.detached ? " registry-actions__btn--detached" : ""}${
+            action.tone === "danger" ? " registry-actions__btn--danger" : ""
+          }`}
           type="button"
           data-action={action.id}
           disabled={action.disabled}

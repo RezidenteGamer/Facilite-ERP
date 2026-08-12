@@ -61,6 +61,33 @@
   font-size: 15px;
 }
 
+.registry-actions__fields {
+  margin: -6px 0 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.registry-actions__fields-title {
+  margin: 0;
+}
+
+.registry-actions__field {
+  display: flex;
+  gap: 4px;
+}
+
+.registry-actions__field dt {
+  flex-shrink: 0;
+}
+
+.registry-actions__field dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .registry-actions__btn {
   flex-shrink: 0;
   height: 52px;
@@ -81,6 +108,14 @@
 .registry-actions__btn:hover:not(:disabled) {
   background: var(--amber-hover);
   transform: translateY(-1px);
+}
+
+.registry-actions__btn--danger {
+  background: var(--danger);
+}
+
+.registry-actions__btn--danger:hover:not(:disabled) {
+  background: var(--danger-hover);
 }
 
 .registry-actions__btn:disabled {

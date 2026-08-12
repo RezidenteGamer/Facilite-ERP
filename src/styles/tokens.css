@@ -11,6 +11,10 @@
   --amber-active:    #F08A00;
   --yellow:          #FFD62E;
 
+  /* Ações destrutivas/de cancelamento (ex.: botão "Cancelar" em Notas emitidas). */
+  --danger:          #D6281C;
+  --danger-hover:    #C22114;
+
   --ink:             #1F2733;
   --ink-placeholder: #9AA3AE;
   --white:           #FFFFFF;

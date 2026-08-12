@@ -3,10 +3,9 @@ import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
-import { RegistryActions, RegistryTable, type RegistryColumn } from "../../components/registry";
+import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
 import { SaleOrdersIcon } from "../home/icons";
 import { SALE_ORDERS, formatOrderTotal, type SaleOrder } from "./saleOrders";
-import "./SaleOrdersPage.css";
 
 const COLUNAS: RegistryColumn<SaleOrder>[] = [
   { key: "code", label: "Codigo", width: "90px", align: "center", render: (o) => o.code },
@@ -60,7 +59,7 @@ export default function SaleOrdersPage() {
 
   return (
     <AppShell navItems={navItems} secondaryText="Pedidos de venda" contentTone="blue" fillViewport>
-      <div className="sale-orders">
+      <RegistryLayout variant="table-controls">
         <RegistryTable
           title="Pedidos de venda"
           columns={COLUNAS}
@@ -83,7 +82,7 @@ export default function SaleOrdersPage() {
             { id: "excluir", label: "Excluir", disabled: !selected },
           ]}
         />
-      </div>
+      </RegistryLayout>
     </AppShell>
   );
 }
