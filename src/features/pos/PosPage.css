@@ -113,7 +113,10 @@
   border: 0;
   outline: 0;
   font-family: var(--font-ui);
-  font-size: 14px;
+  /* Nunca abaixo de 16px: abaixo disso o Safari iOS dá zoom automático
+     ao focar o campo — pior ainda num caixa que também usa leitor de
+     código de barras via este mesmo campo. */
+  font-size: var(--font-size-input);
   color: var(--ink);
 }
 
@@ -158,8 +161,8 @@
 }
 
 .pos__view-btn {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -374,21 +377,21 @@
 }
 
 .pos__cart-controls button {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 7px;
+  border-radius: 9px;
   background: #F1F3F6;
   color: #5B6472;
   cursor: pointer;
 }
 
 .pos__cart-controls svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .pos__cart-items {
@@ -435,23 +438,26 @@
 .pos__cart-line-qty {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
+/* Botão mais tocado do carrinho — perto do alvo de 44px recomendado,
+   sem estourar a largura enxuta da linha (nome + preço + total também
+   disputam espaço nela). */
 .pos__cart-line-qty button {
-  width: 20px;
-  height: 20px;
+  width: 32px;
+  height: 32px;
   border: 1px solid #D9DEE7;
-  border-radius: 5px;
+  border-radius: 8px;
   background: var(--white);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
 }
 
 .pos__cart-line-qty span {
-  min-width: 16px;
+  min-width: 18px;
   text-align: center;
   font-size: 13px;
 }
@@ -478,7 +484,7 @@
   border-radius: 8px;
   padding: 9px 12px;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--font-size-input);
   outline: 0;
   transition: border-color .15s var(--ease);
 }
@@ -495,12 +501,12 @@
 }
 
 .pos__discount-input {
-  width: 64px;
+  width: 72px;
   border: 1px solid #D9DEE7;
   border-radius: 8px;
   padding: 6px 8px;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--font-size-input);
 }
 
 .pos__discount-toggle {
@@ -553,14 +559,16 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 4px;
+  min-height: 46px;
   padding: 8px 2px;
   border: 1.5px solid #BFD6FA;
   border-radius: 8px;
   background: var(--white);
   color: var(--blue-panel);
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: 11px;
   cursor: pointer;
   transition: background-color .15s var(--ease), color .15s var(--ease);
 }
@@ -599,7 +607,7 @@
   border-radius: 8px;
   padding: 6px 8px;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--font-size-input);
 }
 
 .pos__troco {

@@ -372,7 +372,9 @@
   background: var(--white);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
+  /* Nunca abaixo de 16px: abaixo disso o Safari iOS dá zoom automático
+     ao focar o campo. */
+  font-size: var(--font-size-input);
 }
 
 .support__chat-input::placeholder {
@@ -492,9 +494,12 @@
   .login__form   { margin-top: 20px; }
   .field + .field { margin-top: 12px; }
   .field__label  { font-size: 16px; margin-bottom: 2px; }
-  .field__input  { height: 42px; font-size: 15px; }
+  /* height/font-size nunca abaixo de --tap-target/--font-size-input,
+     mesmo neste extremo de tela baixa (celular deitado): abaixo disso
+     o campo vira alvo difícil de acertar e ainda dispara zoom no iOS. */
+  .field__input  { height: var(--tap-target); font-size: var(--font-size-input); }
   .btn--submit   { margin-top: 14px; }
-  .btn           { height: 42px; font-size: 20px; }
+  .btn           { height: var(--tap-target); font-size: 20px; }
   .login__by     { font-size: 10px; }
 }
 
