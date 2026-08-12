@@ -87,6 +87,7 @@ export default function PosPage() {
     setCart((current) => {
       const existing = current.find((line) => line.product.id === product.id);
       if (existing) {
+        if (existing.quantity >= product.stock) return current;
         return current.map((line) =>
           line.product.id === product.id ? { ...line, quantity: line.quantity + 1 } : line,
         );
@@ -99,7 +100,9 @@ export default function PosPage() {
     setCart((current) =>
       current
         .map((line) =>
-          line.product.id === productId ? { ...line, quantity: line.quantity + delta } : line,
+          line.product.id === productId
+            ? { ...line, quantity: Math.min(line.quantity + delta, line.product.stock) }
+            : line,
         )
         .filter((line) => line.quantity > 0),
     );
@@ -110,7 +113,8 @@ export default function PosPage() {
   }
 
   const subtotal = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
-  const discountValue = Number(discount.replace(",", ".")) || 0;
+  const discountValueRaw = Math.max(0, Number(discount.replace(",", ".")) || 0);
+  const discountValue = discountMode === "percent" ? Math.min(discountValueRaw, 100) : discountValueRaw;
   const discountAmount = discountMode === "percent" ? subtotal * (discountValue / 100) : discountValue;
   const total = Math.max(0, subtotal - discountAmount);
   const receivedValue = Number(received.replace(",", ".")) || 0;
@@ -126,7 +130,13 @@ export default function PosPage() {
   }
 
   useEffect(() => {
+    function isTypingInField() {
+      const active = document.activeElement;
+      return active instanceof HTMLElement && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
+      if (isTypingInField()) return;
       if (event.key === "F2") {
         event.preventDefault();
         searchRef.current?.focus();

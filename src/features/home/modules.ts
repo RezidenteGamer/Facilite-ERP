@@ -51,5 +51,5 @@ export const HOME_MODULES: HomeModule[] = [
   { id: "controle-caixa", label: "Controle de caixa", icon: CashControlIcon, path: "/controle-caixa" },
   { id: "relatorios", label: "Relatórios", icon: ReportsIcon },
   { id: "usuarios-operadores", label: "Usuarios e Operadores", icon: UsersIcon, path: "/usuarios-operadores" },
-  { id: "condicionais", label: "Condicionais", icon: RefreshIcon },
+  { id: "condicionais", label: "Condicionais", icon: RefreshIcon, path: "/condicionais" },
 ];

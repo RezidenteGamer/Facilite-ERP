@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { OpenWindowsProvider } from "./components/openWindows";
 import LoginPage from "./features/auth/LoginPage";
 import CashControlPage from "./features/cashcontrol/CashControlPage";
+import ConditionalsPage from "./features/conditionals/ConditionalsPage";
 import CustomersPage from "./features/customers/CustomersPage";
 import FinancePage from "./features/finance/FinancePage";
 import HomePage from "./features/home/HomePage";
@@ -37,6 +38,7 @@ function App() {
           <Route path="/ajuste-estoque" element={<StockAdjustPage />} />
           <Route path="/controle-caixa" element={<CashControlPage />} />
           <Route path="/usuarios-operadores" element={<UsersPage />} />
+          <Route path="/condicionais" element={<ConditionalsPage />} />
           <Route path="/configuracoes" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
