@@ -3,7 +3,7 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   useSensor,
   useSensors,
@@ -40,8 +40,15 @@ export default function ModuleGrid({ arrangement = "grid" }: ModuleGridProps) {
   }
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    // Mouse continua respondendo rápido (6px) — quem usa mouse não tromba
+    // com a rolagem do jeito que um dedo tromba.
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    // Touch: precisa segurar 5s parado no ícone para começar a arrastar.
+    // Antes disso (ou se o dedo escorregar mais que a tolerância), o toque
+    // é liberado para o navegador tratar como rolagem normal da página —
+    // é o comportamento nativo do TouchSensor com "delay", não precisa de
+    // nada extra aqui.
+    useSensor(TouchSensor, { activationConstraint: { delay: 5000, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
