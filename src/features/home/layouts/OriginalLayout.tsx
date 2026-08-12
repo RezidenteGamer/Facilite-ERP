@@ -24,6 +24,12 @@ export default function OriginalLayout() {
 
   function handleContentContextMenu(event: MouseEvent) {
     event.preventDefault();
+    // Em touch o "clique direito" é sintetizado por um toque longo — e
+    // agora esse mesmo gesto já significa "arrastar para reordenar" (ver
+    // ModuleGrid). O menu de layout é um atalho de desktop sem
+    // equivalente de uso em campo, então em touch ele nem abre: só
+    // suprime o contextmenu nativo e sai.
+    if (window.matchMedia("(hover: none)").matches) return;
     setMenuPosition({
       x: Math.min(event.clientX, window.innerWidth - MENU_WIDTH - 8),
       y: Math.min(event.clientY, window.innerHeight - MENU_HEIGHT - 8),
