@@ -17,6 +17,8 @@
   justify-content: center;
   padding: 24px;
   background: rgba(6, 20, 46, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   animation: branches-overlay-in 0.18s var(--ease);
 }
 
@@ -27,11 +29,17 @@
   display: flex;
   flex-direction: column;
   padding: 30px 34px 26px;
-  background: var(--blue-panel);
+  background: var(--acrylic-accent);
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
   border: 1px solid var(--blue-panel-edge);
-  border-radius: 30px;
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-8);
   animation: branches-modal-in 0.22s var(--ease);
+}
+
+.branches-modal:focus-visible {
+  outline: none;
 }
 
 .branches-modal__close {
@@ -112,10 +120,15 @@
 .branches-modal__row {
   min-height: 56px;
   padding: 10px 18px;
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--blue-panel-edge);
   color: var(--white);
   font-size: 16px;
+  transition: background-color .15s var(--ease);
+}
+
+.branches-modal__row:not(.branches-modal__row--empty):hover {
+  background: color-mix(in srgb, var(--blue-panel-edge), white 8%);
 }
 
 .branches-modal__row--empty {
@@ -140,7 +153,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--tile-yellow);
   color: var(--white);
   cursor: pointer;

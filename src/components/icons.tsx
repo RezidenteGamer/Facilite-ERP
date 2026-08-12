@@ -94,3 +94,27 @@ export function CloseIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function SunIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="4.2" />
+      <line x1="12" y1="2.5" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="21.5" />
+      <line x1="4.2" y1="4.2" x2="6" y2="6" />
+      <line x1="18" y1="18" x2="19.8" y2="19.8" />
+      <line x1="2.5" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="21.5" y2="12" />
+      <line x1="4.2" y1="19.8" x2="6" y2="18" />
+      <line x1="18" y1="6" x2="19.8" y2="4.2" />
+    </svg>
+  );
+}
+
+export function MoonIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M20 14.2A8.5 8.5 0 1 1 9.8 4a6.7 6.7 0 0 0 10.2 10.2Z" />
+    </svg>
+  );
+}

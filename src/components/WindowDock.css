@@ -10,18 +10,19 @@
      popups de Suporte (60) e dos modais (70/80), que devem cobrir o dock. */
   z-index: 30;
   padding: 8px 10px;
-  border-radius: 22px;
+  border-radius: var(--radius-xl);
   /* Nada de overflow/clip aqui: o ícone cresce para FORA da barra (como no
      dock do macOS), junto com o rótulo e o "x". Qualquer recorte nesta
      cadeia corta a animação pela metade. */
   overflow: visible;
-  /* Vidro azulado: legível tanto sobre o miolo branco da tela inicial
+  /* Vidro azulado: legível tanto sobre o canvas neutro da tela inicial
      quanto sobre o azul dos módulos internos. */
-  background: rgba(10, 76, 203, .58);
+  background: var(--acrylic-accent);
   border: 1px solid rgba(255, 255, 255, .3);
-  box-shadow: 0 14px 36px rgba(4, 30, 82, .34);
-  backdrop-filter: blur(18px) saturate(1.5);
-  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: var(--shadow-4);
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  transition: background-color .2s var(--ease);
 }
 
 .window-dock__list {
@@ -59,7 +60,7 @@
   height: 52px;
   padding: 0;
   border: 0;
-  border-radius: 15px;
+  border-radius: var(--radius-md);
   background: var(--tile-yellow);
   color: var(--white);
   cursor: pointer;
@@ -106,9 +107,10 @@
   z-index: 5;
   transform: translateX(-50%) translateY(6px);
   padding: 6px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: rgba(6, 20, 46, .92);
   border: 1px solid rgba(255, 255, 255, .18);
+  box-shadow: var(--shadow-4);
   color: var(--white);
   font-family: var(--font-ui);
   font-size: 13px;

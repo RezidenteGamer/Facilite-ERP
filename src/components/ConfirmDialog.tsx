@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useRef } from "react";
 import "./ConfirmDialog.css";
 
 type ConfirmDialogProps = {
@@ -10,7 +11,11 @@ type ConfirmDialogProps = {
   onCancel: () => void;
 };
 
-/** Diálogo de confirmação genérico — mesma moldura visual usada nos outros popups. */
+/**
+ * Diálogo de confirmação genérico — mesma moldura visual usada nos outros
+ * popups. O foco (trap, devolução ao gatilho, Escape, clique fora) é
+ * gerenciado pelo Radix Dialog; este componente só estiliza.
+ */
 export default function ConfirmDialog({
   title,
   message,
@@ -19,40 +24,45 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="confirm-dialog__overlay" onClick={onCancel}>
-      <div
-        className="confirm-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <p className="confirm-dialog__title">{title}</p>
-        {message && <p className="confirm-dialog__message">{message}</p>}
-
-        <div className="confirm-dialog__actions">
-          <button className="confirm-dialog__btn confirm-dialog__btn--cancel" type="button" onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button
-            className="confirm-dialog__btn confirm-dialog__btn--confirm"
-            type="button"
-            onClick={onConfirm}
-            autoFocus
+    <Dialog.Root open onOpenChange={(open) => !open && onCancel()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="confirm-dialog__overlay">
+          <Dialog.Content
+            className="confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            {...(message ? {} : { "aria-describedby": undefined })}
+            onOpenAutoFocus={(event) => {
+              // Confirmar (não o diálogo em si) é o alvo padrão do Enter,
+              // como já era antes da migração para o Radix.
+              event.preventDefault();
+              confirmRef.current?.focus();
+            }}
           >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+            <Dialog.Title className="confirm-dialog__title" asChild>
+              <p>{title}</p>
+            </Dialog.Title>
+            {message && <Dialog.Description className="confirm-dialog__message">{message}</Dialog.Description>}
+
+            <div className="confirm-dialog__actions">
+              <button className="confirm-dialog__btn confirm-dialog__btn--cancel" type="button" onClick={onCancel}>
+                {cancelLabel}
+              </button>
+              <button
+                ref={confirmRef}
+                className="confirm-dialog__btn confirm-dialog__btn--confirm"
+                type="button"
+                onClick={onConfirm}
+              >
+                {confirmLabel}
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Overlay>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

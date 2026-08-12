@@ -1,37 +1,33 @@
 /* =============================================================
    Tokens de marca — compartilhados por todas as telas e layouts
    (login, home, e os futuros layouts "Foco" e "Desktop").
+
+   Estrutura, de cima para baixo:
+     1. Tokens independentes de tema (tipografia, espaçamento,
+        radius, breakpoints, motion) — não mudam entre claro/escuro.
+     2. Tema claro (padrão, em :root) — cores, superfícies, sombras,
+        acrylic.
+     3. Tema escuro (:root[data-theme="dark"]) — só redefine as
+        variáveis que precisam mudar; nenhum componente conhece a
+        palavra "dark", eles só consomem os tokens.
+   Quem decide qual tema está ativo é o ThemeProvider (ver
+   src/theme/), que aplica o atributo data-theme na tag <html> — a
+   troca de tema inteira acontece revalidando estas variáveis, sem
+   duplicar CSS por componente.
    ============================================================= */
 :root {
-  --blue-panel:      #0B56E4;
-  --blue-panel-edge: #0A4CCB;
-
-  --amber:           #FFA414;
-  --amber-hover:     #FF9500;
-  --amber-active:    #F08A00;
-  --yellow:          #FFD62E;
-
-  /* Ações destrutivas/de cancelamento (ex.: botão "Cancelar" em Notas emitidas). */
-  --danger:          #D6281C;
-  --danger-hover:    #C22114;
-
-  --ink:             #1F2733;
-  --ink-placeholder: #9AA3AE;
-  --white:           #FFFFFF;
-
-  /* Grade de módulos (telas internas do ERP) */
-  --tile-yellow:       #FFC331;
-  --tile-yellow-hover: #FFB800;
-  --badge-blue:        #0B56E4;
-
+  /* ---------- Tipografia ----------
+     Segoe UI Variable é a fonte "nativa" do Fluent, mas não é uma
+     web font pública — Inter é o substituto mais próximo (mesma
+     altura-x generosa, mesmos pesos), com a mesma pilha de fallback
+     de sistema que o Windows usaria. */
   --font-ui:    "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
   --font-brand: "Leckerli One", "Brush Script MT", cursive;
 
-  --radius-card:  26px;
-  --radius-pill:  999px;
-
-  --shadow-card:  0 24px 60px rgba(4, 30, 82, .30);
-  --ease:         cubic-bezier(.4, 0, .2, 1);
+  --font-weight-regular:  400;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
 
   /* ==============================================================
      Breakpoints — referência única para todo o sistema.
@@ -61,6 +57,40 @@
      elemento tocável em campo — dedo, não cursor. */
   --tap-target: 44px;
 
+  /* ---------- Cantos arredondados ----------
+     Escala Fluent: controles pequenos (chips, linhas, inputs "sm")
+     ficam nos primeiros degraus; painéis e cards sobem a escala;
+     --radius-pill continua sendo o "infinito" para pílulas/botões
+     redondos, como já era. --radius-card é mantido como alias de
+     --radius-2xl — vários componentes fora do escopo desta reforma
+     ainda apontam para o nome antigo. */
+  --radius-xs:  6px;
+  --radius-sm:  10px;
+  --radius-md:  14px;
+  --radius-lg:  18px;
+  --radius-xl:  22px;
+  --radius-2xl: 26px;
+  --radius-card: var(--radius-2xl);
+  --radius-pill: 999px;
+
+  /* ---------- Motion ----------
+     Curva "decelerate" do Fluent 2 (rápida no início, assentando
+     suave no fim) — troca o cubic-bezier "standard" genérico que
+     havia antes por algo que combina com o vocabulário de hover/
+     expansão que já existe no app (dock, cabeçalho, linhas de
+     tabela). --ease-accelerate fica disponível para quem precisar
+     de uma saída mais abrupta (ex.: itens saindo de tela). */
+  --ease:            cubic-bezier(.1, .9, .2, 1);
+  --ease-accelerate: cubic-bezier(.7, 0, 1, .5);
+
+  /* ---------- Acrylic ----------
+     Blur/saturação usados em qualquer superfície "vidraça"
+     (cabeçalho, dock, modais, dropdowns). A cor de fundo em si
+     é definida por tema mais abaixo (--acrylic-accent /
+     --acrylic-neutral), porque muda de tom entre claro e escuro. */
+  --acrylic-blur:     20px;
+  --acrylic-saturate: 1.6;
+
   /* ---------- Tipografia fluida ----------
      clamp() interpola entre o tamanho mobile e o desktop conforme a
      viewport, então não existe um "salto" nem risco de ficar
@@ -79,4 +109,137 @@
   /* Piso de qualquer input/select/textarea — abaixo de 16px o
      Safari iOS força zoom ao focar o campo. */
   --font-size-input: 16px;
+}
+
+/* =============================================================
+   Tema claro (padrão) — também serve de fallback caso o
+   ThemeProvider ainda não tenha rodado (ex.: primeiro paint).
+   ============================================================= */
+:root,
+:root[data-theme="light"] {
+  /* ---------- Accent (marca) ----------
+     Mantido igual ao azul histórico do Facilite — a auditoria
+     considerou trocar para o azul "nativo" do Windows 11, mas a
+     decisão foi preservar a cor de marca e organizar a escala ao
+     redor dela. */
+  --accent:        #0B56E4;
+  --accent-hover:  #0A4CCB;
+  --accent-active: #083FA3;
+  --accent-soft:        rgba(11, 86, 228, .08);
+  --accent-soft-strong: rgba(11, 86, 228, .16);
+
+  /* Painéis "de marca" — o azul usado como superfície de cartão em
+     quase todo módulo interno. Continua sendo o mesmo tom do
+     --accent no claro; no escuro escurece para não competir com o
+     canvas neutro. */
+  --blue-panel:      #0B56E4;
+  --blue-panel-edge: #0A4CCB;
+
+  --amber:        #FFA414;
+  --amber-hover:  #FF9500;
+  --amber-active: #F08A00;
+  --yellow:       #FFD62E;
+
+  /* Ações destrutivas/de cancelamento (ex.: botão "Cancelar" em Notas emitidas). */
+  --danger:       #D6281C;
+  --danger-hover: #C22114;
+
+  /* Grade de módulos (telas internas do ERP) */
+  --tile-yellow:       #FFC331;
+  --tile-yellow-hover: #FFB800;
+  --badge-blue:        #0B56E4;
+
+  /* ---------- Texto sobre superfícies claras/brancas ----------
+     --ink é o texto escuro usado dentro de controles brancos
+     (campo de busca, inputs) — não muda de tema porque esses
+     controles continuam claros mesmo no escuro só quando fora do
+     escopo desta reforma; onde a reforma chegou (--surface-control),
+     o par certo é --text-on-control. */
+  --ink:             #1F2733;
+  --ink-placeholder: #9AA3AE;
+  --white:           #FFFFFF;
+
+  /* ---------- Canvas + superfícies neutras ----------
+     Pilar que faltava: um fundo neutro por trás dos painéis de
+     marca, no lugar do azul cobrindo a tela inteira. */
+  --canvas:          #F3F3F6;
+  --canvas-alt:       #E8EAF0;
+  --surface-1:       #FFFFFF;
+  --surface-2:       #F7F8FA;
+  --surface-control:    #FFFFFF;
+  --text-on-control:    var(--ink);
+
+  --text-primary:    #1F2733;
+  --text-secondary:  rgba(31, 39, 51, .64);
+  --border-neutral:  rgba(15, 23, 42, .09);
+  --border-strong:   rgba(15, 23, 42, .16);
+
+  /* ---------- Acrylic ---------- */
+  --acrylic-accent:  rgba(15, 68, 189, .70);
+  --acrylic-neutral: rgba(255, 255, 255, .72);
+
+  /* ---------- Elevação (sombras em camadas) ----------
+     1: repouso (linha/tile em hover) · 2: card/painel · 4:
+     dropdown/tooltip/dock · 8: modal/flyout — o nível mais alto. */
+  --shadow-1: 0 1px 2px rgba(4, 30, 82, .07), 0 1px 1px rgba(4, 30, 82, .05);
+  --shadow-2: 0 4px 12px rgba(4, 30, 82, .12), 0 1.5px 4px rgba(4, 30, 82, .08);
+  --shadow-4: 0 10px 28px rgba(4, 30, 82, .18), 0 3px 8px rgba(4, 30, 82, .10);
+  --shadow-8: 0 24px 60px rgba(4, 30, 82, .30), 0 8px 20px rgba(4, 30, 82, .16);
+  /* Alias histórico — vários componentes fora do escopo desta
+     reforma ainda apontam para --shadow-card diretamente. */
+  --shadow-card: var(--shadow-8);
+}
+
+/* =============================================================
+   Tema escuro — o ThemeProvider aplica data-theme="dark" na tag
+   <html> (manualmente, ou resolvendo prefers-color-scheme na
+   primeira visita). Só o necessário é redefinido; tudo que não
+   aparece aqui herda o valor do tema claro.
+   ============================================================= */
+:root[data-theme="dark"] {
+  --accent:        #5B9CFF;
+  --accent-hover:  #7CB0FF;
+  --accent-active: #3C82F0;
+  --accent-soft:        rgba(91, 156, 255, .14);
+  --accent-soft-strong: rgba(91, 156, 255, .24);
+
+  /* O azul de marca vira uma superfície escura e dessaturada — lê
+     como "card" sobre o canvas neutro escuro, em vez de competir
+     com ele. */
+  --blue-panel:      #17335E;
+  --blue-panel-edge: #0F2748;
+
+  --amber:        #FFB03D;
+  --amber-hover:  #FFC15E;
+  --amber-active: #F0A02E;
+  --yellow:       #FFD62E;
+
+  --danger:       #F0463A;
+  --danger-hover: #FF5B4F;
+
+  --tile-yellow:       #FFC331;
+  --tile-yellow-hover: #FFD35C;
+  --badge-blue:        #5B9CFF;
+
+  --surface-control:    #2B2E36;
+  --text-on-control:    #F3F4F6;
+
+  --canvas:          #17181C;
+  --canvas-alt:      #1E2026;
+  --surface-1:       #202329;
+  --surface-2:       #262A31;
+
+  --text-primary:    #F3F4F6;
+  --text-secondary:  rgba(243, 244, 246, .64);
+  --border-neutral:  rgba(255, 255, 255, .09);
+  --border-strong:   rgba(255, 255, 255, .16);
+
+  --acrylic-accent:  rgba(10, 20, 40, .70);
+  --acrylic-neutral: rgba(32, 35, 41, .74);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .45);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, .50);
+  --shadow-4: 0 10px 30px rgba(0, 0, 0, .55);
+  --shadow-8: 0 26px 64px rgba(0, 0, 0, .60);
+  --shadow-card: var(--shadow-8);
 }

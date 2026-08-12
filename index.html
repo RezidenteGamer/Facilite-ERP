@@ -7,6 +7,20 @@
     <meta name="theme-color" content="#0B56E4" />
     <title>Facilite — Acessar o sistema</title>
 
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("facilite:theme");
+          var theme = stored === "light" || stored === "dark"
+            ? stored
+            : (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

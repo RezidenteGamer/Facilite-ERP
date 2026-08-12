@@ -8,6 +8,7 @@
 .form-field__label {
   padding-left: 6px;
   font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
   line-height: 1.2;
   color: var(--white);
 }
@@ -20,17 +21,22 @@
   height: 54px;
   padding: 0 10px 0 22px;
   border-radius: var(--radius-pill);
-  background: var(--white);
+  background: var(--surface-control);
+  box-shadow: var(--shadow-1);
   transition: background-color .15s var(--ease), box-shadow .15s var(--ease);
 }
 
 /* Campo preenchido por outro cadastro — cinza enquanto não houver origem. */
 .form-field__control--disabled {
-  background: #a9a9a9;
+  background: var(--border-strong);
+  box-shadow: none;
 }
 
+/* Glow em âmbar (não no accent azul): o campo já fica sobre um painel
+   azul — um anel na mesma cor do fundo praticamente sumiria. O âmbar é
+   a cor de "atenção/ação" já usada em todo o resto do sistema. */
 .form-field__control:focus-within {
-  box-shadow: 0 0 0 3px rgba(255, 164, 20, .45);
+  box-shadow: 0 0 0 3px rgba(255, 164, 20, .45), var(--shadow-2);
 }
 
 .form-field__input {
@@ -39,7 +45,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--text-on-control);
   font-family: var(--font-ui);
   /* Nunca abaixo de 16px (--font-size-input): é o piso que impede o
      zoom automático do Safari iOS ao focar o campo. */
@@ -66,7 +72,7 @@
 }
 
 .form-field__lookup:hover:not(:disabled) {
-  background: rgba(11, 86, 228, .1);
+  background: var(--accent-soft);
   color: var(--tile-yellow-hover);
 }
 

@@ -3,11 +3,14 @@
   flex-direction: column;
   gap: 14px;
   padding: 20px 22px;
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--blue-panel);
-  /* Sobre o miolo azul o painel some sem um contorno que o delimite. */
+  /* Contorno sutil + sombra de elevação: o painel agora flutua sobre um
+     canvas neutro, não sobre um fundo da mesma cor. */
   border: 1.5px solid rgba(255, 255, 255, .28);
+  box-shadow: var(--shadow-2);
   color: var(--white);
+  transition: background-color .2s var(--ease), box-shadow .2s var(--ease);
 }
 
 .registry-actions__title {
@@ -41,7 +44,13 @@
   gap: 10px;
   padding: 5px 12px 5px 6px;
   border-radius: var(--radius-pill);
-  background: var(--white);
+  background: var(--surface-control);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow .15s var(--ease);
+}
+
+.registry-actions__search:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft-strong);
 }
 
 .registry-actions__search-icon {
@@ -52,7 +61,7 @@
   height: 32px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: rgba(11, 86, 228, .08);
+  background: var(--accent-soft);
   color: var(--tile-yellow);
 }
 
@@ -67,7 +76,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--text-on-control);
   font-family: var(--font-ui);
   font-size: 15px;
 }
@@ -156,13 +165,15 @@
   min-height: var(--tap-target);
   padding: 0 18px;
   border: 1.5px solid rgba(255, 255, 255, .28);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: var(--blue-panel);
+  box-shadow: var(--shadow-1);
   color: var(--white);
   font-family: var(--font-ui);
   font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
+  transition: background-color .15s var(--ease);
 }
 
 .registry-actions__trigger::after {
@@ -192,6 +203,8 @@
   display: flex;
   align-items: flex-end;
   background: rgba(6, 20, 46, .55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   animation: registry-actions-overlay-in .18s var(--ease);
 }
 
@@ -200,9 +213,10 @@
   width: 100%;
   max-height: min(80vh, 640px);
   overflow-y: auto;
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   border: 1px solid var(--blue-panel-edge);
   border-bottom: 0;
+  box-shadow: var(--shadow-8);
   padding: 10px 22px calc(22px + env(safe-area-inset-bottom, 0px));
   animation: registry-actions-sheet-in .22s var(--ease);
 }

@@ -11,8 +11,9 @@ import BackTab from "./BackTab";
 import BranchesModal from "./BranchesModal";
 import SupportWidget from "./SupportWidget";
 import WindowDock from "./WindowDock";
-import { SearchIcon } from "./icons";
+import { MoonIcon, SearchIcon, SunIcon } from "./icons";
 import { useSupportMenu } from "./useSupportMenu";
+import { useTheme } from "../theme/ThemeProvider";
 import "./AppShell.css";
 
 export type HeaderNavItem = {
@@ -70,6 +71,7 @@ export default function AppShell({
   children,
 }: AppShellProps) {
   const supportMenu = useSupportMenu();
+  const { theme, toggleTheme } = useTheme();
   const [branchesOpen, setBranchesOpen] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
@@ -240,6 +242,16 @@ export default function AppShell({
               <input type="search" placeholder="Digite aqui o que você busca!" />
             </div>
           </div>
+
+          <button
+            className="app-theme-toggle"
+            type="button"
+            aria-label={theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+            title={theme === "dark" ? "Tema claro" : "Tema escuro"}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+          </button>
         </div>
 
         <p className="app-header__branch">{secondaryText}</p>
