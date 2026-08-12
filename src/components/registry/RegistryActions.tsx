@@ -18,18 +18,23 @@ export type RegistryActionField = {
 };
 
 type RegistryActionsProps = {
-  title: string;
+  /** Sem título o painel começa direto na busca/campos (ex.: Compras). */
+  title?: string;
   /** "brand" usa a fonte cursiva do logo (ex.: painel "Controles"). */
   titleVariant?: "default" | "brand";
   search?: {
     label: string;
     value: string;
     onChange: (value: string) => void;
+    /** Mostra o rótulo acima do campo, em vez de só placeholder/aria-label. */
+    showLabel?: boolean;
   };
   /** Subtítulo acima da lista de campos (ex.: "Vencimento" no Financeiro). */
   fieldsTitle?: string;
   /** Ficha resumida do item selecionado, sem caixa (ex.: Documento, Emissão). */
   fields?: RegistryActionField[];
+  /** Subtítulo logo acima dos botões (ex.: "Opções para compras"). */
+  actionsTitle?: string;
   actions: RegistryAction[];
 };
 
@@ -40,31 +45,42 @@ export default function RegistryActions({
   search,
   fieldsTitle,
   fields,
+  actionsTitle,
   actions,
 }: RegistryActionsProps) {
   return (
     <aside className="registry-actions">
-      <p
-        className={`registry-actions__title${
-          titleVariant === "brand" ? " registry-actions__title--brand" : ""
-        }`}
-      >
-        {title}
-      </p>
+      {title && (
+        <p
+          className={`registry-actions__title${
+            titleVariant === "brand" ? " registry-actions__title--brand" : ""
+          }`}
+        >
+          {title}
+        </p>
+      )}
 
       {search && (
-        <label className="registry-actions__search">
-          <span className="registry-actions__search-icon">
-            <SearchIcon />
-          </span>
-          <input
-            type="search"
-            aria-label={search.label}
-            placeholder={search.label}
-            value={search.value}
-            onChange={(event) => search.onChange(event.target.value)}
-          />
-        </label>
+        <div className="registry-actions__search-group">
+          {search.showLabel && (
+            <label className="registry-actions__search-label" htmlFor="registry-actions-search">
+              {search.label}
+            </label>
+          )}
+          <label className="registry-actions__search">
+            <span className="registry-actions__search-icon">
+              <SearchIcon />
+            </span>
+            <input
+              id="registry-actions-search"
+              type="search"
+              aria-label={search.label}
+              placeholder={search.showLabel ? undefined : search.label}
+              value={search.value}
+              onChange={(event) => search.onChange(event.target.value)}
+            />
+          </label>
+        </div>
       )}
 
       {(fieldsTitle || fields) && (
@@ -78,6 +94,8 @@ export default function RegistryActions({
           ))}
         </dl>
       )}
+
+      {actionsTitle && <p className="registry-actions__actions-title">{actionsTitle}</p>}
 
       {actions.map((action) => (
         <button

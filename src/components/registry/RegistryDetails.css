@@ -77,7 +77,8 @@
   font-size: 15px;
 }
 
-/* Interruptor Ativo/Inativo — o "botão" branco desliza sobre o trilho verde. */
+/* Interruptor Ativo/Inativo — o "botão" branco desliza sobre o trilho, que
+   fica verde quando ativo e vermelho quando inativo. */
 .registry-details__switch {
   position: relative;
   width: 74px;
@@ -86,8 +87,13 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-pill);
-  background: #A8E063;
+  background: var(--danger);
   cursor: pointer;
+  transition: background-color .18s var(--ease);
+}
+
+.registry-details__switch--on {
+  background: #A8E063;
 }
 
 .registry-details__switch:disabled {
@@ -107,7 +113,9 @@
   transition: transform .18s var(--ease);
 }
 
-.registry-details__switch--on .registry-details__switch-knob {
+/* Ativo: botão fica à esquerda, perto do rótulo "Ativo". Inativo (padrão):
+   desliza para a direita, perto do rótulo "Inativo". */
+.registry-details__switch:not(.registry-details__switch--on) .registry-details__switch-knob {
   transform: translateX(34px);
 }
 

@@ -23,12 +23,23 @@
   font-weight: 400;
 }
 
+.registry-actions__search-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.registry-actions__search-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .registry-actions__search {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 5px 12px 5px 6px;
-  margin-bottom: 6px;
   border-radius: var(--radius-pill);
   background: var(--white);
 }
@@ -86,6 +97,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.registry-actions__actions-title {
+  margin: 4px 0 -4px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .registry-actions__btn {
