@@ -9,7 +9,12 @@
   background: none;
   font-family: var(--font-ui);
   cursor: grab;
-  touch-action: none;
+  /* "none" bloqueava QUALQUER gesto de toque no ícone a nível de
+     navegador — inclusive rolar a página — mesmo antes do arraste
+     ativar. "pan-y" libera a rolagem vertical nativa; só quando o
+     toque segura parado os 5s do TouchSensor (ver ModuleGrid) o JS
+     assume e passa a interceptar o movimento. */
+  touch-action: pan-y;
 }
 
 .module-tile:active {
