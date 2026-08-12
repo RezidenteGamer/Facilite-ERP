@@ -7,7 +7,7 @@
 
 .form-field__label {
   padding-left: 6px;
-  font-size: 21px;
+  font-size: var(--font-size-lg);
   line-height: 1.2;
   color: var(--white);
 }
@@ -16,6 +16,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: var(--tap-target);
   height: 54px;
   padding: 0 10px 0 22px;
   border-radius: var(--radius-pill);
@@ -40,7 +41,9 @@
   background: transparent;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 17px;
+  /* Nunca abaixo de 16px (--font-size-input): é o piso que impede o
+     zoom automático do Safari iOS ao focar o campo. */
+  font-size: var(--font-size-input);
 }
 
 .form-field__input:disabled {
@@ -80,7 +83,7 @@
 }
 
 @media (max-width: 900px) {
-  .form-field__label { font-size: 18px; }
+  /* --font-size-lg (clamp) já encolhe o rótulo sozinho nesta largura. */
   .form-field__control { height: 48px; padding-left: 18px; }
   .form-field__lookup svg { width: 22px; height: 22px; }
 }

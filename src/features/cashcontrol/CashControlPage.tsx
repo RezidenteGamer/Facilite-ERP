@@ -27,7 +27,7 @@ const TABS: RegistryTab[] = [
 ];
 
 const OPERATIONAL_COLUMNS: RegistryColumn<OperationalCashRegister>[] = [
-  { key: "name", label: "Caixa", width: "150px", render: (c) => c.name },
+  { key: "name", label: "Caixa", width: "150px", primary: true, render: (c) => c.name },
   { key: "openedAt", label: "Data de abertura", width: "180px", render: (c) => c.openedAt },
   { key: "closedAt", label: "Data de fechamento", width: "minmax(0, 1fr)", render: (c) => c.closedAt },
   { key: "operator", label: "Operador", width: "160px", align: "right", render: (c) => c.operator },

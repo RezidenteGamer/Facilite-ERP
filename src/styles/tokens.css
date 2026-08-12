@@ -32,4 +32,51 @@
 
   --shadow-card:  0 24px 60px rgba(4, 30, 82, .30);
   --ease:         cubic-bezier(.4, 0, .2, 1);
+
+  /* ==============================================================
+     Breakpoints — referência única para todo o sistema.
+     CSS custom properties não funcionam dentro de @media (sem
+     plugin de "custom media"), então os valores abaixo são o
+     contrato: todo @media do projeto deve usar exatamente estes
+     números, não outros soltos.
+       mobile:  até 640px
+       tablet:  641px – 1024px
+       desktop: a partir de 1025px
+     Um breakpoint extra em 400px existe em alguns componentes só
+     para reapertar texto/ícones em aparelhos muito estreitos — não
+     é um nível novo do sistema, é ajuste fino dentro do "mobile".
+     ============================================================== */
+
+  /* ---------- Espaçamento ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ---------- Alvo de toque ---------- */
+  /* Área mínima recomendada (Apple HIG / Material) para qualquer
+     elemento tocável em campo — dedo, não cursor. */
+  --tap-target: 44px;
+
+  /* ---------- Tipografia fluida ----------
+     clamp() interpola entre o tamanho mobile e o desktop conforme a
+     viewport, então não existe um "salto" nem risco de ficar
+     minúsculo numa largura que nenhum breakpoint previu. Os valores
+     mínimos já nascem legíveis sem zoom (>=13px) e os inputs usam
+     --font-size-input separado, travado em 16px, para nunca disparar
+     o zoom automático do Safari iOS. */
+  --font-size-xs:    clamp(12px, 0.7rem + 0.15vw, 13px);
+  --font-size-sm:    clamp(13px, 0.75rem + 0.2vw, 15px);
+  --font-size-base:  clamp(15px, 0.85rem + 0.35vw, 17px);
+  --font-size-md:    clamp(16px, 0.95rem + 0.5vw, 19px);
+  --font-size-lg:    clamp(18px, 1rem + 0.9vw, 21px);
+  --font-size-xl:    clamp(21px, 1.1rem + 1.6vw, 26px);
+  --font-size-2xl:   clamp(24px, 1.2rem + 2.4vw, 32px);
+  --font-size-brand: clamp(26px, 1.3rem + 3.2vw, 42px);
+  /* Piso de qualquer input/select/textarea — abaixo de 16px o
+     Safari iOS força zoom ao focar o campo. */
+  --font-size-input: 16px;
 }

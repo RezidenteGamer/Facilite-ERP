@@ -80,3 +80,29 @@
   background: var(--amber-hover);
   transform: translateY(-1px);
 }
+
+/* Em mobile o diálogo ancora embaixo em vez de centralizar — com uma mão
+   só ocupada, o polegar alcança o rodapé da tela muito mais fácil que o
+   meio dela. */
+@media (max-width: 640px) {
+  @keyframes confirm-dialog-in-mobile {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .confirm-dialog__overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .confirm-dialog {
+    width: 100%;
+    padding: 28px 22px calc(22px + env(safe-area-inset-bottom, 0px));
+    border-radius: 24px 24px 0 0;
+    animation: confirm-dialog-in-mobile .22s var(--ease);
+  }
+
+  .confirm-dialog__btn {
+    height: var(--tap-target);
+  }
+}

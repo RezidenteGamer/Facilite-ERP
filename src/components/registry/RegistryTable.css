@@ -68,6 +68,20 @@
   border-top: 1.5px solid rgba(255, 255, 255, .28);
 }
 
+/* Envolve header + linhas: rola na horizontal como unidade só (os dois
+   filhos têm o mesmo min-width calculado a partir da soma das colunas),
+   então nunca fica o cabeçalho fora de sincronia com as linhas embaixo.
+   É a rede de segurança para tablets estreitos ou módulos com muitas
+   colunas — em mobile este bloco inteiro cede lugar aos cards. */
+.registry-table__scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .registry-table__header,
 .registry-table__row {
   display: grid;
@@ -76,6 +90,7 @@
 }
 
 .registry-table__header {
+  flex-shrink: 0;
   padding: 0 6px 8px;
   color: var(--white);
   font-size: 20px;
@@ -202,10 +217,125 @@
   cursor: default;
 }
 
-@media (max-width: 760px) {
+/* ---------- Cards (mobile) ----------
+   Escondidos por padrão — só aparecem abaixo do breakpoint mobile
+   (ver bloco @media (max-width: 640px) mais abaixo), trocando de
+   lugar com .registry-table__scroll. */
+.registry-table__cards {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
+  scrollbar-color: rgba(255, 255, 255, .55) rgba(255, 255, 255, .15);
+  scrollbar-width: thin;
+}
+
+.registry-table__card {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: var(--tap-target);
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--blue-panel-edge);
+  color: var(--white);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .15s var(--ease), color .15s var(--ease);
+}
+
+.registry-table__card:active {
+  background: #0a4bc4;
+}
+
+.registry-table__card--selected {
+  background: var(--tile-yellow);
+  color: var(--ink);
+}
+
+.registry-table__card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.registry-table__card-code {
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .18);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.registry-table__card--selected .registry-table__card-code {
+  background: rgba(31, 39, 51, .18);
+}
+
+.registry-table__card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.registry-table__card-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+}
+
+.registry-table__card-meta-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.registry-table__card-meta-item dt {
+  font-size: var(--font-size-xs);
+  opacity: .75;
+}
+
+.registry-table__card-meta-item dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.registry-table__cards-empty {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  opacity: .75;
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 1024px) {
   .registry-table__tab { font-size: 17px; padding: 10px 12px; }
   .registry-table__panel { padding: 14px 14px 16px; }
   .registry-table__header { font-size: 16px; }
   .registry-table__row { font-size: 15px; }
   .registry-table__row > span { padding: 0 10px; }
+}
+
+/* Mobile: a grade (com sua rolagem horizontal) cede lugar aos cards —
+   4-7 colunas lado a lado não cabem numa tela de celular de forma
+   legível, e nenhum destes módulos precisa comparar colunas entre si. */
+@media (max-width: 640px) {
+  .registry-table__scroll { display: none; }
+  .registry-table__cards { display: flex; }
+  .registry-table__panel { padding: 12px; }
 }

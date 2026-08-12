@@ -139,3 +139,107 @@
   opacity: .55;
   cursor: default;
 }
+
+/* ---------- Mobile: gatilho + folha ----------
+   Escondidos por padrão (desktop/tablet mostram .registry-actions--panel
+   normalmente); trocam de lugar abaixo do breakpoint mobile. */
+.registry-actions--trigger-slot {
+  display: none;
+}
+
+.registry-actions__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: 0 18px;
+  border: 1.5px solid rgba(255, 255, 255, .28);
+  border-radius: 14px;
+  background: var(--blue-panel);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.registry-actions__trigger::after {
+  content: "▾";
+  font-size: 13px;
+  opacity: .8;
+}
+
+.registry-actions__trigger:active {
+  background: var(--blue-panel-edge);
+}
+
+@keyframes registry-actions-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes registry-actions-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.registry-actions__sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(6, 20, 46, .55);
+  animation: registry-actions-overlay-in .18s var(--ease);
+}
+
+.registry-actions--sheet {
+  position: relative;
+  width: 100%;
+  max-height: min(80vh, 640px);
+  overflow-y: auto;
+  border-radius: 22px 22px 0 0;
+  border: 1px solid var(--blue-panel-edge);
+  border-bottom: 0;
+  padding: 10px 22px calc(22px + env(safe-area-inset-bottom, 0px));
+  animation: registry-actions-sheet-in .22s var(--ease);
+}
+
+.registry-actions__sheet-handle {
+  align-self: center;
+  width: 40px;
+  height: 4px;
+  margin: 4px auto 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .35);
+}
+
+.registry-actions__sheet-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .12);
+  color: var(--white);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .registry-actions--panel {
+    display: none;
+  }
+
+  .registry-actions--trigger-slot {
+    display: block;
+  }
+}

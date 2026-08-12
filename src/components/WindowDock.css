@@ -205,7 +205,57 @@
     border-radius: 18px;
   }
 
-  .window-dock__list { gap: 6px; }
+  .window-dock__list {
+    gap: 6px;
+    /* Muitas janelas abertas em tela estreita: rola por dentro do dock
+       em vez de estourar a largura ou espremer os ícones a ponto de
+       perder a área de toque. */
+    max-width: calc(100vw - 32px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .window-dock__list::-webkit-scrollbar { display: none; }
+
   .window-dock__item { width: 44px; height: 44px; border-radius: 13px; }
   .window-dock__item svg { width: 24px; height: 24px; }
+}
+
+/* ---------- Touch: sem hover, o botão de fechar precisa ser visível
+   e tocável direto — antes dependia de :hover/:focus-within, que não
+   existe em touch, e não havia como fechar uma janela pelo dock. */
+@media (hover: none) {
+  .window-dock__item,
+  .window-dock__slot:hover .window-dock__item,
+  .window-dock__slot:focus-within .window-dock__item,
+  .window-dock__slot:hover + .window-dock__slot .window-dock__item,
+  .window-dock__slot:focus-within + .window-dock__slot .window-dock__item,
+  .window-dock__slot:has(+ .window-dock__slot:hover) .window-dock__item,
+  .window-dock__slot:has(+ .window-dock__slot:focus-within) .window-dock__item {
+    /* Sem gesto de hover para "crescer", o dock fica com o tamanho
+       final o tempo todo — nada de animação que nunca dispara. */
+    transform: none;
+  }
+
+  .window-dock__close {
+    /* Continua sobre o canto do ícone (não empurra o layout), só que
+       agora sempre visível e com uma área de toque bem maior que os
+       10x10 do desenho original — 30px é o melhor que cabe encostado
+       no ícone de 44px sem os dois se atropelarem. */
+    top: -8px;
+    right: -8px;
+    width: 30px;
+    height: 30px;
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .window-dock__close svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .window-dock__label {
+    display: none;
+  }
 }

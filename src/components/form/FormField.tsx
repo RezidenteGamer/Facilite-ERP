@@ -42,6 +42,9 @@ export default function FormField({
           value={value}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
+          /* iOS Safari não redimensiona a viewport quando o teclado abre —
+             sem isto, um campo perto do rodapé some atrás dele ao focar. */
+          onFocus={(event) => event.target.scrollIntoView({ block: "center", behavior: "smooth" })}
         />
 
         {lookup && (

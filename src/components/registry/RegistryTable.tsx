@@ -8,6 +8,14 @@ export type RegistryColumn<T> = {
   width: string;
   align?: "left" | "center" | "right";
   render: (row: T) => ReactNode;
+  /**
+   * Em mobile a tabela vira uma lista de cards e esta coluna vira o
+   * título do card. Sem marcação explícita, cai na coluna
+   * "minmax(0, 1fr)" quando existir só uma — que na prática é sempre
+   * o nome/cliente/descrição em todos os módulos, exceto quando o
+   * módulo já marca a coluna certa aqui.
+   */
+  primary?: boolean;
 };
 
 export type RegistryTab = {
@@ -44,7 +52,33 @@ type RegistryTableProps<T> = {
   footerActions?: RegistryTableAction[];
 };
 
-/** Tabela dos módulos de cadastro: abas opcionais + linhas selecionáveis. */
+/** Largura mínima assumida para uma coluna flexível (ex.: "minmax(0, 1fr)")
+    ao calcular quanto a tabela precisa de largura antes de rolar na
+    horizontal — abaixo disso o texto da coluna principal fica ilegível. */
+const FLEX_COLUMN_MIN_WIDTH = 170;
+
+function columnMinWidth(width: string): number {
+  const px = /^(\d+(?:\.\d+)?)px$/.exec(width.trim());
+  return px ? parseFloat(px[1]) : FLEX_COLUMN_MIN_WIDTH;
+}
+
+function pickPrimaryColumn<T>(columns: RegistryColumn<T>[]): RegistryColumn<T> {
+  const marked = columns.find((column) => column.primary);
+  if (marked) return marked;
+
+  const flexColumns = columns.filter((column) => column.width.includes("1fr"));
+  if (flexColumns.length === 1) return flexColumns[0];
+
+  return columns[0];
+}
+
+/** Tabela dos módulos de cadastro: abas opcionais + linhas selecionáveis.
+    Em mobile (ver RegistryTable.css) a grade dá lugar a uma lista de
+    cards empilhados — telas de campo não comportam 4-7 colunas lado a
+    lado, e nenhum destes módulos precisa comparar colunas entre si, só
+    identificar o registro (código + nome/cliente) e ver o resto sob
+    demanda. Em tablet a grade original continua, com rolagem horizontal
+    como rede de segurança para os módulos com mais colunas. */
 export default function RegistryTable<T>({
   title,
   titleVariant = "brand",
@@ -60,7 +94,12 @@ export default function RegistryTable<T>({
   footerActions,
 }: RegistryTableProps<T>) {
   const gridTemplate = columns.map((column) => column.width).join(" ");
+  const tableMinWidth = columns.reduce((sum, column) => sum + columnMinWidth(column.width), 0);
   const placeholders = Math.max(0, minRows - rows.length);
+
+  const primaryColumn = pickPrimaryColumn(columns);
+  const codeColumn = columns.find((column) => column.key === "code" && column !== primaryColumn);
+  const metaColumns = columns.filter((column) => column !== primaryColumn && column !== codeColumn);
 
   return (
     <section className="registry-table">
@@ -92,46 +131,91 @@ export default function RegistryTable<T>({
       )}
 
       <div className={`registry-table__panel${tabs?.length ? "" : " registry-table__panel--solo"}`}>
-        <div className="registry-table__header" style={{ gridTemplateColumns: gridTemplate }}>
-          {columns.map((column) => (
-            <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
-              {column.label}
-            </span>
-          ))}
+        {/* Tablet/desktop: grade original, com rolagem horizontal própria
+            se a soma das colunas não couber — nunca aparece em mobile
+            (ver breakpoint em RegistryTable.css), onde vira cards. */}
+        <div className="registry-table__scroll">
+          <div
+            className="registry-table__header"
+            style={{ gridTemplateColumns: gridTemplate, minWidth: tableMinWidth }}
+          >
+            {columns.map((column) => (
+              <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
+                {column.label}
+              </span>
+            ))}
+          </div>
+
+          <div className="registry-table__rows">
+            {rows.map((row) => {
+              const id = getRowId(row);
+              return (
+                <button
+                  key={id}
+                  className={`registry-table__row${selectedId === id ? " registry-table__row--selected" : ""}`}
+                  style={{ gridTemplateColumns: gridTemplate, minWidth: tableMinWidth }}
+                  type="button"
+                  onClick={() => onSelect(id)}
+                >
+                  {columns.map((column) => (
+                    <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
+                      {column.render(row)}
+                    </span>
+                  ))}
+                </button>
+              );
+            })}
+
+            {Array.from({ length: placeholders }, (_, index) => (
+              <div
+                className="registry-table__row registry-table__row--empty"
+                style={{ gridTemplateColumns: gridTemplate, minWidth: tableMinWidth }}
+                key={`vazio-${index}`}
+                aria-hidden="true"
+              >
+                {columns.map((column) => (
+                  <span key={column.key} />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="registry-table__rows">
+        {/* Mobile: um card por registro — título (+ código, se houver)
+            sempre visível, o resto dos campos num grid compacto de
+            rótulo/valor. Só aparece abaixo do breakpoint mobile. */}
+        <div className="registry-table__cards">
           {rows.map((row) => {
             const id = getRowId(row);
             return (
               <button
                 key={id}
-                className={`registry-table__row${selectedId === id ? " registry-table__row--selected" : ""}`}
-                style={{ gridTemplateColumns: gridTemplate }}
+                className={`registry-table__card${selectedId === id ? " registry-table__card--selected" : ""}`}
                 type="button"
                 onClick={() => onSelect(id)}
               >
-                {columns.map((column) => (
-                  <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
-                    {column.render(row)}
-                  </span>
-                ))}
+                <div className="registry-table__card-head">
+                  {codeColumn && (
+                    <span className="registry-table__card-code">{codeColumn.render(row)}</span>
+                  )}
+                  <span className="registry-table__card-title">{primaryColumn.render(row)}</span>
+                </div>
+
+                {metaColumns.length > 0 && (
+                  <dl className="registry-table__card-meta">
+                    {metaColumns.map((column) => (
+                      <div className="registry-table__card-meta-item" key={column.key}>
+                        <dt>{column.label}</dt>
+                        <dd>{column.render(row)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
               </button>
             );
           })}
 
-          {Array.from({ length: placeholders }, (_, index) => (
-            <div
-              className="registry-table__row registry-table__row--empty"
-              style={{ gridTemplateColumns: gridTemplate }}
-              key={`vazio-${index}`}
-              aria-hidden="true"
-            >
-              {columns.map((column) => (
-                <span key={column.key} />
-              ))}
-            </div>
-          ))}
+          {rows.length === 0 && <p className="registry-table__cards-empty">Nenhum registro encontrado.</p>}
         </div>
 
         {footerActions && footerActions.length > 0 && (

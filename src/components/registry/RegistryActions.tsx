@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { SearchIcon } from "../icons";
 import "./RegistryActions.css";
 
@@ -38,7 +39,15 @@ type RegistryActionsProps = {
   actions: RegistryAction[];
 };
 
-/** Coluna da esquerda dos módulos de cadastro: título + botões de ação. */
+/**
+ * Coluna da esquerda dos módulos de cadastro: título + botões de ação.
+ *
+ * Em mobile este painel inteiro (busca + campos + botões) vira uma folha
+ * que sobe de baixo, atrás de um botão gatilho — do jeito que estava,
+ * empilhado, ele empurraria a tabela (o conteúdo mais importante) para
+ * bem longe do topo. O mesmo conteúdo é usado nos dois casos; só a
+ * moldura muda (ver RegistryActions.css).
+ */
 export default function RegistryActions({
   title,
   titleVariant = "default",
@@ -48,8 +57,19 @@ export default function RegistryActions({
   actionsTitle,
   actions,
 }: RegistryActionsProps) {
-  return (
-    <aside className="registry-actions">
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  useEffect(() => {
+    if (!sheetOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setSheetOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [sheetOpen]);
+
+  const body = (
+    <>
       {title && (
         <p
           className={`registry-actions__title${
@@ -106,11 +126,55 @@ export default function RegistryActions({
           type="button"
           data-action={action.id}
           disabled={action.disabled}
-          onClick={action.onClick}
+          onClick={() => {
+            action.onClick?.();
+            setSheetOpen(false);
+          }}
         >
           {action.label}
         </button>
       ))}
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="registry-actions registry-actions--panel">{body}</aside>
+
+      <div className="registry-actions--trigger-slot">
+        <button
+          type="button"
+          className="registry-actions__trigger"
+          onClick={() => setSheetOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={sheetOpen}
+        >
+          {title ?? actionsTitle ?? "Ações"}
+        </button>
+      </div>
+
+      {sheetOpen && (
+        <div className="registry-actions__sheet-overlay" onClick={() => setSheetOpen(false)}>
+          <aside
+            className="registry-actions registry-actions--sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={title ?? actionsTitle ?? "Ações"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="registry-actions__sheet-handle" aria-hidden="true" />
+            <button
+              type="button"
+              className="registry-actions__sheet-close"
+              aria-label="Fechar"
+              onClick={() => setSheetOpen(false)}
+            >
+              ×
+            </button>
+            {body}
+          </aside>
+        </div>
+      )}
+    </>
   );
 }

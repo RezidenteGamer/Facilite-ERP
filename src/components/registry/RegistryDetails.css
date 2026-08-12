@@ -190,6 +190,113 @@
   flex-shrink: 0;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1024px) {
   .registry-details__card { flex: none; }
+}
+
+/* ---------- Mobile: gatilho + folha ----------
+   O slot com a ficha inline e o gatilho trocam de lugar no breakpoint
+   mobile — a busca (acima) continua sempre visível nos dois casos. */
+.registry-details__trigger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--tap-target);
+  padding: 0 18px;
+  margin-top: 4px;
+  border: 1.5px dashed rgba(255, 255, 255, .35);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.registry-details__trigger::after {
+  content: "▾";
+  font-size: 12px;
+  opacity: .8;
+}
+
+.registry-details__trigger:active {
+  background: rgba(255, 255, 255, .08);
+}
+
+@keyframes registry-details-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes registry-details-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.registry-details__sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(6, 20, 46, .55);
+  animation: registry-details-overlay-in .18s var(--ease);
+}
+
+.registry-details__sheet {
+  position: relative;
+  width: 100%;
+  max-height: min(80vh, 640px);
+  overflow-y: auto;
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  border-radius: 22px 22px 0 0;
+  border: 1px solid var(--blue-panel-edge);
+  border-bottom: 0;
+  background: var(--blue-panel);
+  animation: registry-details-sheet-in .22s var(--ease);
+}
+
+.registry-details__sheet .registry-details__card {
+  margin-top: 24px;
+}
+
+.registry-details__sheet-handle {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 40px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .35);
+}
+
+.registry-details__sheet-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .12);
+  color: var(--white);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .registry-details__card-slot--panel {
+    display: none;
+  }
+
+  .registry-details__trigger {
+    display: flex;
+  }
 }

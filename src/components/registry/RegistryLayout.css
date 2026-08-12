@@ -18,7 +18,7 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1024px) {
   /* Empilhado não faz sentido prender a altura na janela: cada bloco assume
      seu tamanho natural e quem rola é a página. */
   .registry {
@@ -33,7 +33,11 @@
      ela cairia bem na faixa onde essas abas ficam, sendo tampada por elas
      ao carregar a página. Reordenar para logo após as ações resolve os
      dois problemas: a busca não fica escondida, e ainda aparece antes da
-     tabela, que é o bloco mais longo. */
+     tabela, que é o bloco mais longo.
+     Em mobile (<640px) RegistryActions e a ficha de RegistryDetails já
+     encolhem para um botão-gatilho de uma linha cada (ver os respectivos
+     CSS) — então mesmo aparecendo antes da tabela, o custo vertical real
+     é mínimo; quem domina a tela é a lista, que é o que importa em campo. */
   .registry > .registry-details {
     order: -1;
   }

@@ -73,7 +73,7 @@
 .branches-modal__header,
 .branches-modal__row {
   display: grid;
-  grid-template-columns: 90px 1fr 190px 46px;
+  grid-template-columns: 90px 1fr 190px 52px;
   align-items: center;
   gap: 16px;
 }
@@ -134,8 +134,8 @@
 }
 
 .branches-modal__select {
-  width: 34px;
-  height: 34px;
+  width: var(--tap-target);
+  height: var(--tap-target);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -156,19 +156,41 @@
   height: 18px;
 }
 
+/* Em mobile ancora embaixo (folha) em vez de centralizar — mais
+   alcançável pelo polegar, e evita competir com o teclado num quadro
+   com scroll interno. */
 @media (max-width: 640px) {
+  @keyframes branches-modal-in-mobile {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .branches-modal__overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
   .branches-modal {
-    padding: 26px 18px 20px;
-    border-radius: 24px;
+    width: 100%;
+    max-height: min(80vh, 640px);
+    padding: 24px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    border-radius: 24px 24px 0 0;
+    animation: branches-modal-in-mobile .22s var(--ease);
+  }
+
+  .branches-modal__close {
+    top: 16px;
+    right: 16px;
   }
 
   .branches-modal__title {
-    font-size: 34px;
+    font-size: 30px;
   }
 
   .branches-modal__header,
   .branches-modal__row {
-    grid-template-columns: 56px 1fr 40px;
+    grid-template-columns: 56px 1fr 52px;
+    gap: 10px;
   }
 
   .branches-modal__header span:nth-child(3),
