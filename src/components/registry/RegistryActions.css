@@ -17,6 +17,50 @@
   line-height: 1.25;
 }
 
+.registry-actions__title--brand {
+  font-family: var(--font-brand);
+  font-size: 32px;
+  font-weight: 400;
+}
+
+.registry-actions__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px 5px 6px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+}
+
+.registry-actions__search-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(11, 86, 228, .08);
+  color: var(--tile-yellow);
+}
+
+.registry-actions__search-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.registry-actions__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+}
+
 .registry-actions__btn {
   flex-shrink: 0;
   height: 52px;

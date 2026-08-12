@@ -16,6 +16,8 @@ export type RegistryTab = {
 };
 
 type RegistryTableProps<T> = {
+  /** Título cursivo acima do quadro (ex.: "Pedidos de venda"). */
+  title?: string;
   columns: RegistryColumn<T>[];
   rows: T[];
   getRowId: (row: T) => string;
@@ -31,6 +33,7 @@ type RegistryTableProps<T> = {
 
 /** Tabela dos módulos de cadastro: abas opcionais + linhas selecionáveis. */
 export default function RegistryTable<T>({
+  title,
   columns,
   rows,
   getRowId,
@@ -46,6 +49,8 @@ export default function RegistryTable<T>({
 
   return (
     <section className="registry-table">
+      {title && <h2 className="registry-table__title">{title}</h2>}
+
       {tabs && tabs.length > 0 && (
         <div className="registry-table__tabs" role="tablist">
           {tabs.map((tab) => (

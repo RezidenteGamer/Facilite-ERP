@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type ComponentType,
@@ -47,6 +46,7 @@ type AppShellProps = {
    * recolher nessas telas.
    */
   fillViewport?: boolean;
+  reserveHeaderScroll?: boolean;
   children: ReactNode;
 };
 
@@ -66,66 +66,95 @@ export default function AppShell({
   onBack,
   contentTone = "light",
   fillViewport = false,
+  reserveHeaderScroll = false,
   children,
 }: AppShellProps) {
   const supportMenu = useSupportMenu();
   const [branchesOpen, setBranchesOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
+  // Altura do cabeçalho totalmente aberto — recalibrada sempre que o topo da
+  // página é visitado (ver updateHeader), então acompanha sozinha qualquer
+  // mudança de conteúdo/responsivo sem precisar remedir manualmente.
   const expandedHeightRef = useRef(0);
-  const collapsedHeightRef = useRef(0);
-
-  // Mede as duas alturas do cabeçalho para saber quanto a página encolhe
-  // quando ele recolhe — é esse valor que decide se recolher é seguro.
-  useLayoutEffect(() => {
-    const height = headerRef.current?.offsetHeight ?? 0;
-    if (!height) return;
-    if (scrolled) collapsedHeightRef.current = height;
-    else expandedHeightRef.current = height;
-  }, [scrolled]);
 
   useEffect(() => {
-    // A faixa encolher muda a altura do cabeçalho, o que empurra o conteúdo
-    // e pode mexer no scroll no meio da transição. Defesas contra isso:
-    // 1) limiares diferentes para recolher/expandir (histerese) — sem isso,
-    //    um scroll de ida e volta bem no limiar fica ligando/desligando a
-    //    classe repetidas vezes e a animação nunca termina de vez;
-    // 2) só reagir uma vez por frame (requestAnimationFrame) em vez de a
-    //    cada evento de scroll, que dispara várias vezes por frame;
-    // 3) não recolher quando a página mal rola: recolher encurtaria a página
-    //    a ponto de zerar o próprio scroll, o que reexpandiria o cabeçalho e
-    //    voltaria a permitir o scroll — o loop infinito que aparecia quando
-    //    a rolagem ia só até a metade.
+    // A faixa encolher muda a própria altura do cabeçalho — e como ele fica
+    // no fluxo normal (sticky), isso encurta a página inteira. Se a página
+    // for curta o bastante, encolher tira o scroll de baixo dos pés: o
+    // navegador prende o scroll no novo limite (menor), o que cai o
+    // progresso, reexpande o cabeçalho, alonga a página de novo, e o ciclo
+    // recomeça a cada frame — o tremor visível ao rolar telas curtas (ex.:
+    // Realizar venda). A proteção mora aqui dentro, junto da própria
+    // animação, em vez de em um estado à parte que alguém possa desconectar
+    // sem perceber: só encolhe quando sobra bastante espaço de rolagem além
+    // da distância de recolhimento (COLLAPSE_DISTANCE + SAFETY_MARGIN),
+    // medido sempre como se o cabeçalho estivesse no tamanho cheio — valor
+    // que não muda conforme ele abre e fecha, então não tem como esse
+    // cálculo oscilar.
+    const COLLAPSE_DISTANCE = 110;
+    // Bem maior que o quanto o cabeçalho de fato encolhe hoje (~90-120px),
+    // de propósito: um ajuste futuro no tamanho do cabeçalho não deveria
+    // conseguir reabrir essa brecha sem alguém mexer aqui também.
+    const SAFETY_MARGIN = 220;
+
     let ticking = false;
 
-    function updateScrolled() {
+    function updateHeader() {
       ticking = false;
-      const y = window.scrollY;
+      const header = headerRef.current;
+      if (!header) return;
 
-      setScrolled((wasScrolled) => {
-        // Enquanto o cabeçalho nunca recolheu não dá para medir o quanto ele
-        // encolhe, então estimamos por cima (~55% da altura aberta). Estimar
-        // baixo demais aqui é justamente o que deixava passar o primeiro
-        // recolhimento indevido e causava o pisca-pisca.
-        const expandida = expandedHeightRef.current;
-        const recolhida = collapsedHeightRef.current;
-        const delta = recolhida > 0 ? Math.max(0, expandida - recolhida) : Math.round(expandida * 0.55);
-        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-        // Estimativa do quanto a página rolaria com o cabeçalho aberto —
-        // grandeza estável, que não muda conforme ele abre e fecha.
-        const maxScrollExpandido = maxScroll + (wasScrolled ? delta : 0);
+      const scrollY = window.scrollY;
 
-        if (maxScrollExpandido < delta + 80) return false;
+      // No topo o cabeçalho está sempre no tamanho cheio — aproveita pra
+      // recalibrar a altura "expandida" de referência.
+      if (scrollY < 1) {
+        expandedHeightRef.current = header.offsetHeight;
+      }
+      const expandedHeight = expandedHeightRef.current || header.offsetHeight;
 
-        return wasScrolled ? y > 12 : y > 56;
-      });
+      // Corrige o scrollHeight atual (que já pode refletir um cabeçalho
+      // parcialmente encolhido) para "como se ele estivesse aberto".
+      const maxScrollAtFullHeight =
+        document.documentElement.scrollHeight - header.offsetHeight + expandedHeight - window.innerHeight;
+      const hasRoomToCollapse = maxScrollAtFullHeight >= COLLAPSE_DISTANCE + SAFETY_MARGIN;
+
+      const progress = hasRoomToCollapse ? Math.min(Math.max(scrollY / COLLAPSE_DISTANCE, 0), 1) : 0;
+      const between = (from: number, to: number) => from + (to - from) * progress;
+      const style = header.style;
+
+      style.setProperty("--header-padding-top", `${between(18, 10)}px`);
+      style.setProperty("--brand-size", `${between(38, 24)}px`);
+      style.setProperty("--brand-padding-bottom", `${between(6, 0)}px`);
+      style.setProperty("--brand-swoosh-opacity", `${1 - progress}`);
+      style.setProperty("--brand-module-width", `${between(90, 0)}px`);
+      style.setProperty("--brand-module-opacity", `${0.9 * (1 - progress)}`);
+      style.setProperty("--nav-padding-top", `${between(12, 0)}px`);
+      style.setProperty("--nav-gap", `${between(26, 16)}px`);
+      style.setProperty("--nav-font-size", `${between(16, 13)}px`);
+      style.setProperty("--nav-icon-size", `${between(20, 18)}px`);
+      style.setProperty("--nav-item-gap", `${between(6, 0)}px`);
+      style.setProperty("--nav-label-width", `${between(132, 0)}px`);
+      style.setProperty("--nav-label-opacity", `${1 - progress}`);
+      style.setProperty("--search-label-height", `${between(17, 0)}px`);
+      style.setProperty("--search-label-opacity", `${1 - progress}`);
+      style.setProperty("--search-placeholder-opacity", `${1 - progress}`);
+      style.setProperty("--search-gap", `${between(6, 0)}px`);
+      style.setProperty("--search-width", `${between(340, 240)}px`);
+      style.setProperty("--search-padding-y", `${between(10, 6)}px`);
+      style.setProperty("--search-padding-x", `${between(18, 16)}px`);
+      style.setProperty("--branch-max-height", `${between(60, 0)}px`);
+      style.setProperty("--branch-opacity", `${1 - progress}`);
+      style.setProperty("--branch-margin-top", `${between(14, 0)}px`);
+      style.setProperty("--branch-padding-top", `${between(8, 0)}px`);
+      style.setProperty("--branch-padding-bottom", `${between(14, 0)}px`);
     }
 
     function handleScroll() {
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(updateScrolled);
+      requestAnimationFrame(updateHeader);
     }
 
     handleScroll();
@@ -151,8 +180,12 @@ export default function AppShell({
   }
 
   return (
-    <div className={`app-shell${fillViewport ? " app-shell--fill" : ""}`}>
-      <header ref={headerRef} className={`app-header${scrolled ? " app-header--compact" : ""}`}>
+    <div
+      className={`app-shell${fillViewport ? " app-shell--fill" : ""}${
+        reserveHeaderScroll ? " app-shell--scroll-reserve" : ""
+      }`}
+    >
+      <header ref={headerRef} className="app-header">
         <div className="app-header__row">
           <div className="app-brand">
             <h1 className="app-brand__word">

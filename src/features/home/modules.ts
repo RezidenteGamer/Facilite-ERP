@@ -40,7 +40,7 @@ export const HOME_MODULES: HomeModule[] = [
   },
   { id: "produtos", label: "Produtos", icon: ProductsIcon, path: "/produtos" },
   { id: "realizar-venda", label: "Realizar uma venda", icon: SaleHandIcon, path: "/realizar-venda" },
-  { id: "pedidos-venda", label: "Pedidos de venda", icon: SaleOrdersIcon },
+  { id: "pedidos-venda", label: "Pedidos de venda", icon: SaleOrdersIcon, path: "/pedidos-venda" },
   { id: "notas-emitidas", label: "Notas emitidas", icon: InvoicesIcon },
   { id: "financeiro", label: "Financeiro", icon: FinanceIcon },
   { id: "ponto-de-venda", label: "Ponto de venda", icon: PosIcon },

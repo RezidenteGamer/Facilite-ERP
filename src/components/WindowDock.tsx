@@ -43,7 +43,13 @@ export default function WindowDock() {
                 className="window-dock__close"
                 type="button"
                 aria-label={`Fechar ${window.label}`}
-                onClick={() => closeWindow(window.id)}
+                onClick={() => {
+                  closeWindow(window.id);
+                  /* Fechar a janela que está na tela não pode só sumir do
+                     dock — sem isto o conteúdo continua ali, e para quem
+                     clicou parece que nada aconteceu. */
+                  if (ativa) navigate("/inicio");
+                }}
               >
                 <CloseIcon />
               </button>

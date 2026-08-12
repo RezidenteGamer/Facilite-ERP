@@ -42,6 +42,7 @@ export default function OriginalLayout() {
       navItems={navItems}
       secondaryText="Filial 1 - (nome empresa)"
       moduleLabel="Comércio"
+      reserveHeaderScroll
       onContentContextMenu={handleContentContextMenu}
       onBack={() => setLogoutConfirmOpen(true)}
     >

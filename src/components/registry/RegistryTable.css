@@ -8,6 +8,15 @@
   min-height: 0;
 }
 
+.registry-table__title {
+  margin: 0 0 12px;
+  text-align: center;
+  font-family: var(--font-brand);
+  font-size: 32px;
+  font-weight: 400;
+  color: var(--white);
+}
+
 .registry-table__tabs {
   display: flex;
   gap: 4px;

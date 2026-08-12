@@ -8,14 +8,43 @@
   overflow-anchor: none;
 }
 
+.app-shell--scroll-reserve {
+  min-height: calc(100dvh + 220px);
+}
+
 /* ---------- Cabeçalho ---------- */
 /* Cantos de baixo arredondados — a faixa azul fica "pendurada" no topo,
    no mesmo estilo das abas flutuantes que ficam penduradas embaixo.
    Fixa (sticky) para continuar visível quando o conteúdo abaixo rolar. */
 .app-header {
+  --header-padding-top: 18px;
+  --brand-size: 38px;
+  --brand-padding-bottom: 6px;
+  --brand-swoosh-opacity: 1;
+  --brand-module-width: 90px;
+  --brand-module-opacity: .9;
+  --nav-padding-top: 12px;
+  --nav-gap: 26px;
+  --nav-font-size: 16px;
+  --nav-icon-size: 20px;
+  --nav-item-gap: 6px;
+  --nav-label-width: 132px;
+  --nav-label-opacity: 1;
+  --search-label-height: 17px;
+  --search-label-opacity: 1;
+  --search-placeholder-opacity: 1;
+  --search-gap: 6px;
+  --search-width: min(340px, 46vw);
+  --search-padding-y: 10px;
+  --search-padding-x: 18px;
+  --branch-max-height: 60px;
+  --branch-opacity: 1;
+  --branch-margin-top: 14px;
+  --branch-padding-top: 8px;
+  --branch-padding-bottom: 14px;
   background: var(--blue-panel);
   color: var(--white);
-  padding: 18px 32px 0;
+  padding: var(--header-padding-top) 32px 0;
   border-radius: 0 0 26px 26px;
   box-shadow: var(--shadow-card);
   position: sticky;
@@ -28,12 +57,6 @@
   overflow-anchor: none;
 }
 
-/* Rolou a página: a faixa encolhe — nome da filial recolhe pra cima e o
-   resto vira uma linha só, mais fina. Mesma faixa, menos altura. */
-.app-header--compact {
-  padding-top: 10px;
-}
-
 .app-header__row {
   display: flex;
   align-items: flex-start;
@@ -43,34 +66,22 @@
   transition: align-items .25s var(--ease);
 }
 
-.app-header--compact .app-header__row {
-  align-items: center;
-}
-
 .app-brand {
   position: relative;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding-bottom: 6px;
+  padding-bottom: var(--brand-padding-bottom);
   transition: padding-bottom .25s var(--ease);
-}
-
-.app-header--compact .app-brand {
-  padding-bottom: 0;
 }
 
 .app-brand__word {
   font-family: var(--font-brand);
-  font-size: 38px;
+  font-size: var(--brand-size);
   font-weight: 400;
   line-height: 1;
   white-space: nowrap;
   transition: font-size .25s var(--ease);
-}
-
-.app-header--compact .app-brand__word {
-  font-size: 24px;
 }
 
 .app-brand__ink { color: var(--white); }
@@ -83,44 +94,34 @@
   width: 46%;
   color: var(--white);
   pointer-events: none;
+  opacity: var(--brand-swoosh-opacity);
   transition: opacity .2s var(--ease);
-}
-
-.app-header--compact .app-brand__swoosh {
-  opacity: 0;
 }
 
 .app-brand__module {
   font-size: 13px;
   text-decoration: underline;
-  opacity: 0.9;
+  max-width: var(--brand-module-width);
+  overflow: hidden;
+  opacity: var(--brand-module-opacity);
   white-space: nowrap;
-}
-
-.app-header--compact .app-brand__module {
-  display: none;
 }
 
 .app-nav {
   display: flex;
   align-items: center;
-  gap: 26px;
-  padding-top: 12px;
+  gap: var(--nav-gap);
+  padding-top: var(--nav-padding-top);
   flex-wrap: wrap;
   transition: padding-top .25s var(--ease), gap .25s var(--ease);
-}
-
-.app-header--compact .app-nav {
-  padding-top: 0;
-  gap: 16px;
 }
 
 .app-nav__item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--nav-item-gap);
   color: var(--white);
-  font-size: 16px;
+  font-size: var(--nav-font-size);
   text-decoration: none;
   padding-bottom: 3px;
   border-bottom: 1.5px solid transparent;
@@ -128,20 +129,18 @@
   transition: font-size .2s var(--ease);
 }
 
-.app-header--compact .app-nav__item {
-  font-size: 13px;
-}
-
 .app-nav__item svg {
-  width: 20px;
-  height: 20px;
+  width: var(--nav-icon-size);
+  height: var(--nav-icon-size);
   flex-shrink: 0;
   transition: width .2s var(--ease), height .2s var(--ease);
 }
 
-.app-header--compact .app-nav__item svg {
-  width: 15px;
-  height: 15px;
+.app-nav__item-label {
+  max-width: var(--nav-label-width);
+  overflow: hidden;
+  opacity: var(--nav-label-opacity);
+  white-space: nowrap;
 }
 
 .app-nav__item:hover,
@@ -153,37 +152,29 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: var(--search-gap);
   padding-top: 2px;
   transition: padding-top .25s var(--ease);
 }
 
-.app-header--compact .app-search {
-  padding-top: 0;
-}
-
 .app-search__label {
   font-size: 14px;
-}
-
-.app-header--compact .app-search__label {
-  display: none;
+  height: var(--search-label-height);
+  max-height: var(--search-label-height);
+  overflow: hidden;
+  opacity: var(--search-label-opacity);
 }
 
 .app-search__box {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: min(340px, 46vw);
-  padding: 10px 18px;
+  width: var(--search-width);
+  padding: var(--search-padding-y) var(--search-padding-x);
   border-radius: var(--radius-pill);
   background: var(--white);
   color: var(--ink-placeholder);
   transition: padding .2s var(--ease);
-}
-
-.app-header--compact .app-search__box {
-  padding: 6px 16px;
 }
 
 .app-search__box svg {
@@ -204,29 +195,34 @@
 }
 
 .app-search__box input::placeholder {
-  color: var(--ink-placeholder);
+  color: rgb(from var(--ink-placeholder) r g b / var(--search-placeholder-opacity));
 }
 
 .app-header__branch {
-  max-height: 60px;
+  max-height: var(--branch-max-height);
   overflow: hidden;
-  margin: 14px 0 0;
-  padding: 8px 0 14px;
+  margin: var(--branch-margin-top) 0 0;
+  padding: var(--branch-padding-top) 0 var(--branch-padding-bottom);
   text-align: center;
   font-size: 15px;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
-  transition: max-height .25s var(--ease), opacity .2s var(--ease),
-              margin .25s var(--ease), padding .25s var(--ease),
-              border-color .2s var(--ease);
+  opacity: var(--branch-opacity);
 }
 
-.app-header--compact .app-header__branch {
-  max-height: 0;
-  opacity: 0;
-  margin-top: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-top-color: transparent;
+/* As dimensÃµes abaixo sÃ£o atualizadas a cada frame pela posiÃ§Ã£o do scroll.
+   Uma transiÃ§Ã£o CSS aqui tentaria alcanÃ§ar um novo alvo em toda rolagem e
+   criaria o efeito de tremor. O prÃ³prio scroll jÃ¡ fornece a suavidade. */
+.app-header,
+.app-header__row,
+.app-brand,
+.app-brand__word,
+.app-brand__swoosh,
+.app-nav,
+.app-nav__item,
+.app-nav__item svg,
+.app-search,
+.app-search__box {
+  transition: none;
 }
 
 /* ---------- Conteúdo ---------- */
@@ -274,25 +270,35 @@
 }
 
 @media (max-width: 900px) {
-  .app-header { padding: 16px 20px 0; }
+  .app-header { padding: 14px 20px 0; }
   .app-content { padding: 26px 20px 130px; }
 
   /* Tela de tablet: sem espaço para nome + ícone em cada item, então some
      o texto e sobra só o ícone (nome ainda acessível via title/leitor de
      tela). Isso também evita que a busca quebre linha e passe a disputar
      altura com o nome/nav de forma instável durante a animação de scroll. */
-  .app-nav { gap: 18px; }
+  .app-header__row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .app-brand { flex-shrink: 0; padding-bottom: 0; }
+  .app-brand__word { font-size: 30px; }
+  .app-brand__module { display: none; }
+
+  .app-nav {
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+    gap: 18px;
+    padding-top: 0;
+  }
 
   .app-nav__item { gap: 0; }
 
   .app-nav__item svg {
     width: 24px;
     height: 24px;
-  }
-
-  .app-header--compact .app-nav__item svg {
-    width: 18px;
-    height: 18px;
   }
 
   .app-nav__item-label {
@@ -311,7 +317,17 @@
      sobra só o campo, que já é autoexplicativo pelo ícone de lupa. */
   .app-search__label { display: none; }
 
-  .app-search__box { width: min(240px, 50vw); }
+  .app-search {
+    flex: 1 1 140px;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  .app-search__box {
+    width: 100%;
+    max-width: 240px;
+    margin-left: auto;
+  }
 
   /* O rabisco decorativo poderia "vazar" para a linha de baixo quando o
      cabeçalho quebra em várias linhas nessa largura. */
@@ -319,8 +335,22 @@
 }
 
 @media (max-width: 640px) {
-  .app-header__row { flex-direction: column; align-items: center; text-align: center; }
-  .app-search { align-items: center; }
-  .app-search__box { width: min(320px, 80vw); }
-  .app-nav { width: 100%; justify-content: center; row-gap: 10px; }
+  .app-header { padding: 10px 12px 0; }
+  .app-header__row { gap: 10px; }
+  .app-brand__word { font-size: 22px; }
+  .app-nav { gap: 10px; }
+  .app-nav__item svg { width: 20px; height: 20px; }
+  .app-search__box { padding: 7px 10px; }
+  .app-search__box svg { width: 16px; height: 16px; }
+  .app-search__box input { font-size: 12px; }
+}
+
+@media (max-width: 390px) {
+  .app-header__row { gap: 8px; }
+  .app-brand__word { font-size: 19px; }
+  .app-nav { gap: 8px; }
+  .app-nav__item svg { width: 18px; height: 18px; }
+  .app-search { flex-basis: 112px; }
+  .app-search__box { padding: 6px 8px; gap: 5px; }
+  .app-search__box input::placeholder { color: transparent; }
 }

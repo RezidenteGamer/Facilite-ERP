@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .wrangler
 
+# Cache local do npm — não é código do projeto.
+.npm-cache
+
 # Backup local do projeto — não faz sentido versionar um zip do próprio repo.
 FaciliteERP.zip
 
