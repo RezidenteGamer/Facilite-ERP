@@ -177,6 +177,16 @@
   transition: padding .2s var(--ease);
 }
 
+/* Clicar/focar a busca aumenta a largura dela — mais espaço para ler o
+   que foi digitado, sem ficar ocupando isso o tempo todo enquanto não
+   está em uso. Especificidade de :focus-within já é maior que a do
+   reset "transition: none" mais abaixo, então a transição funciona
+   aqui sem precisar mexer naquele bloco. */
+.app-search__box:focus-within {
+  width: min(420px, 70vw);
+  transition: width .2s var(--ease);
+}
+
 .app-search__box svg {
   width: 18px;
   height: 18px;
@@ -339,6 +349,13 @@
     margin-left: auto;
   }
 
+  /* Focada, cresce além do teto de 240px — ainda sem estourar a linha,
+     porque o item já é o único flexível dela (marca e nav são fixos). */
+  .app-search__box:focus-within {
+    width: 100%;
+    max-width: min(360px, 60vw);
+  }
+
   /* O rabisco decorativo poderia "vazar" para a linha de baixo quando o
      cabeçalho quebra em várias linhas nessa largura. */
   .app-brand__swoosh { display: none; }
@@ -357,6 +374,25 @@
      ao focar o campo — pior ainda em quem já está com dificuldade de
      leitura sob sol. */
   .app-search__box input { font-size: var(--font-size-input); }
+
+  /* Focar a busca quebra a linha do cabeçalho e ela desce para baixo da
+     marca+navegação, ocupando a largura toda da tela — bem mais fácil
+     de mirar e ler com o polegar do que a caixa comprimida de sempre.
+     Some assim que o foco sai (sem resultado/lista pendurada nela hoje,
+     então não há razão para ficar expandida depois de usada). */
+  .app-header__row:has(.app-search__box:focus-within) {
+    flex-wrap: wrap;
+  }
+
+  .app-header__row:has(.app-search__box:focus-within) .app-search {
+    flex: 1 1 100%;
+    padding-top: 6px;
+  }
+
+  .app-header__row:has(.app-search__box:focus-within) .app-search__box {
+    width: 100%;
+    max-width: none;
+  }
 }
 
 @media (max-width: 400px) {
