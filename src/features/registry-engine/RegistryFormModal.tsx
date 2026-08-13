@@ -1,14 +1,24 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
 import FormField from "../../components/form/FormField";
+import PhotoDropzone from "./PhotoDropzone";
 import type { ModuleFieldDefinition } from "./types";
 import "./RegistryFormModal.css";
+
+type RegistryFormModalMediaField = {
+  label: string;
+  imageUrl?: string | null;
+  hint?: string;
+  uploading?: boolean;
+  onFileSelected: (file: File) => void;
+};
 
 type RegistryFormModalProps = {
   title: string;
   fields: ModuleFieldDefinition[];
   initialValues?: Record<string, string>;
   submitLabel?: string;
+  mediaField?: RegistryFormModalMediaField;
   onSubmit: (values: Record<string, string>) => void;
   onCancel: () => void;
 };
@@ -23,6 +33,7 @@ export default function RegistryFormModal({
   fields,
   initialValues,
   submitLabel = "Salvar",
+  mediaField,
   onSubmit,
   onCancel,
 }: RegistryFormModalProps) {
@@ -58,6 +69,18 @@ export default function RegistryFormModal({
               <p className="registry-form-modal__error">
                 Preencha os campos obrigatórios: {missingFields.join(", ")}.
               </p>
+            )}
+
+            {mediaField && (
+              <div className="registry-form-modal__media">
+                <PhotoDropzone
+                  imageUrl={mediaField.imageUrl}
+                  hint={mediaField.hint ?? "Ou arraste para cá"}
+                  uploading={mediaField.uploading}
+                  onFileSelected={mediaField.onFileSelected}
+                />
+                <span className="registry-form-modal__media-label">{mediaField.label}</span>
+              </div>
             )}
 
             <div className="registry-form-modal__fields">

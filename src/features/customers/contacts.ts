@@ -13,5 +13,6 @@ export type Contact = {
   email?: string;
   whatsapp?: string;
   createdAt?: string;
+  photoUrl?: string;
 };
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import PhotoDropzone from "../../features/registry-engine/PhotoDropzone";
 import { SearchIcon } from "../icons";
 import "./RegistryDetails.css";
 
@@ -13,6 +14,11 @@ export type RegistryMedia = {
   hint?: string;
   /** "stacked": rótulo acima e imagem centralizada. "inline": lado a lado. */
   layout?: "stacked" | "inline";
+  /** Quando presente, a área vira clicável/arrastável (upload real). */
+  imageUrl?: string | null;
+  onFileSelected?: (file: File) => void;
+  uploading?: boolean;
+  disabled?: boolean;
 };
 
 type RegistryDetailsProps = {
@@ -58,24 +64,34 @@ export default function RegistryDetails({
   }, [sheetOpen]);
 
   const figura = media ? (
-    <div className="registry-details__media-frame">
-      <svg viewBox="0 0 64 52" fill="none" aria-hidden="true">
-        <rect x="12" y="4" width="46" height="34" rx="2" stroke="currentColor" strokeWidth="2.5" />
-        <rect
-          x="4"
-          y="12"
-          width="46"
-          height="34"
-          rx="2"
-          fill="var(--blue-panel-edge)"
-          stroke="currentColor"
-          strokeWidth="2.5"
-        />
-        <circle cx="38" cy="22" r="4" stroke="currentColor" strokeWidth="2.5" />
-        <path d="M6 40l12-11 9 8 7-6 15 13" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" />
-      </svg>
-      {media.hint && <span className="registry-details__media-hint">{media.hint}</span>}
-    </div>
+    media.onFileSelected ? (
+      <PhotoDropzone
+        imageUrl={media.imageUrl}
+        hint={media.hint}
+        uploading={media.uploading}
+        disabled={media.disabled}
+        onFileSelected={media.onFileSelected}
+      />
+    ) : (
+      <div className="registry-details__media-frame">
+        <svg viewBox="0 0 64 52" fill="none" aria-hidden="true">
+          <rect x="12" y="4" width="46" height="34" rx="2" stroke="currentColor" strokeWidth="2.5" />
+          <rect
+            x="4"
+            y="12"
+            width="46"
+            height="34"
+            rx="2"
+            fill="var(--blue-panel-edge)"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          />
+          <circle cx="38" cy="22" r="4" stroke="currentColor" strokeWidth="2.5" />
+          <path d="M6 40l12-11 9 8 7-6 15 13" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" />
+        </svg>
+        {media.hint && <span className="registry-details__media-hint">{media.hint}</span>}
+      </div>
+    )
   ) : null;
 
   const card = (

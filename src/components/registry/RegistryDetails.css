@@ -8,7 +8,7 @@
 .registry-details__search-label {
   align-self: center;
   font-size: 19px;
-  color: var(--white);
+  color: var(--text-primary);
 }
 
 .registry-details__search {

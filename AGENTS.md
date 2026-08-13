@@ -61,7 +61,19 @@ Decisão do usuário: aprofundar módulos é a prioridade (não refinar login), 
 - **Módulo Produtos** (`src/features/products/`) é o segundo módulo sobre o motor genérico (`modules.id = 'produtos'`), com tabela `products` própria (`branch_id`, preços numéricos de verdade — corrigindo uma inconsistência do mock antigo que tratava preço como string). Repositório/hook seguem o mesmo padrão de `contactsRepository.ts`/`useContactsData.ts`. Ação "Clonar" reaproveita o modal de criação com `initialValues` do produto selecionado.
 - Testado e confirmado: dois usuários sem vínculo com a mesma filial não enxergam os produtos um do outro, mesmo tentando ler via console diretamente (RLS bloqueia no banco, não só a UI).
 - **Lição aplicada desta vez**: as policies de gerência (`manage X`) já nasceram separadas por `insert`/`update`/`delete` (em vez de `for all`), evitando duplicar a cobertura de `SELECT` que a policy `read X` já dá — rodada anterior gerou avisos de "multiple permissive policies" que precisaram ser corrigidos depois; desta vez não apareceu nenhum.
-- **Fora de escopo por enquanto**: upload real de imagem de produto (o campo "Imagem" continua só um placeholder decorativo, igual ao "Foto" de Clientes); tela de administração de filiais (criar/editar filial, vincular usuários a filiais ainda só é feito via SQL — não há UI); demais módulos (compras, vendas, estoque etc.) continuam mock.
+- **Fora de escopo por enquanto**: upload real de imagem de produto (o campo "Imagem" continua só um placeholder decorativo — ver decisão de foto de contato abaixo, que resolveu isso só para Clientes); tela de administração de filiais (criar/editar filial, vincular usuários a filiais ainda só é feito via SQL — não há UI); demais módulos (compras, vendas, estoque etc.) continuam mock.
+
+### Decisão arquitetural: upload de foto do contato (13/08/2026, noite)
+
+Pedido do usuário: Clientes e Fornecedores não tinha nenhuma forma real de anexar imagem (o campo "Foto" na ficha era só um placeholder decorativo, mesmo já tendo o texto "Ou arraste para cá"). Implementado upload de verdade nos três pontos pedidos: no cadastro, na edição, e arrastando direto na ficha do registro selecionado.
+
+- **Storage**: bucket `contact-photos` no Supabase Storage (público para leitura — URLs de foto não são sensíveis). Caminho dos arquivos: `{contact_id}/{timestamp}.{ext}`. RLS em `storage.objects` usa a mesma `has_permission('clientes-fornecedores', ...)` já existente (insert exige `create` ou `edit`; update/delete exigem `edit`) — mesmo padrão de imposição no banco usado no resto do RBAC.
+- **Coluna nova**: `contacts.photo_url` (text, nullable).
+- **Componente compartilhado**: `src/features/registry-engine/PhotoDropzone.tsx` — clicável (abre seletor de arquivo) e arrastável (drag-and-drop), sem saber nada de domínio (cliente, produto etc.). Usado em dois lugares:
+  - `RegistryDetails` (`src/components/registry/RegistryDetails.tsx`) — o prop `media` ganhou `imageUrl`/`onFileSelected`/`uploading`/`disabled` opcionais; quando `onFileSelected` é passado, a área vira interativa (upload imediato ao soltar/escolher um arquivo para o registro selecionado). Sem esses props, continua sendo o placeholder estático de antes — é assim que Produtos (`ProductsPage.tsx`) permanece decorativo por enquanto.
+  - `RegistryFormModal` (`src/features/registry-engine/RegistryFormModal.tsx`) — novo prop opcional `mediaField`, renderizado dentro do modal de criação/edição.
+- **Fluxo de criação**: como o contato ainda não existe, o arquivo escolhido fica só em preview local (`URL.createObjectURL`) até o "Salvar" da ficha criar o registro; só então a foto é enviada e o `photo_url` é atualizado com o `id` real. Fluxo de edição/arrastar-para-a-tela: upload imediato, já que o `id` já existe.
+- **Débito técnico deliberado**: `src/lib/repositories/contactPhotos.ts` não normaliza/redimensiona a imagem (o Supabase Storage aceita qualquer imagem, sem limite de tamanho aplicado no cliente) — ok para uso interno, mas vale revisar se isso for para produção com usuários externos.
 
 ## Pontos de atenção
 

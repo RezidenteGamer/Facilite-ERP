@@ -52,6 +52,7 @@ export type Database = {
           kind: Database["public"]["Enums"]["contact_kind"];
           name: string;
           phone: string | null;
+          photo_url: string | null;
           rg: string | null;
           updated_at: string;
           whatsapp: string | null;
@@ -68,6 +69,7 @@ export type Database = {
           kind: Database["public"]["Enums"]["contact_kind"];
           name: string;
           phone?: string | null;
+          photo_url?: string | null;
           rg?: string | null;
           updated_at?: string;
           whatsapp?: string | null;
@@ -84,6 +86,7 @@ export type Database = {
           kind?: Database["public"]["Enums"]["contact_kind"];
           name?: string;
           phone?: string | null;
+          photo_url?: string | null;
           rg?: string | null;
           updated_at?: string;
           whatsapp?: string | null;

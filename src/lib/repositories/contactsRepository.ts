@@ -28,6 +28,7 @@ function toContact(row: ContactRow): Contact {
     email: row.email ?? undefined,
     whatsapp: row.whatsapp ?? undefined,
     createdAt: row.created_at ?? undefined,
+    photoUrl: row.photo_url ?? undefined,
   };
 }
 
@@ -43,6 +44,7 @@ function toUpdateRow(patch: Partial<Contact>): TablesUpdate<"contacts"> {
     ...(patch.phone !== undefined && { phone: patch.phone || null }),
     ...(patch.email !== undefined && { email: patch.email || null }),
     ...(patch.whatsapp !== undefined && { whatsapp: patch.whatsapp || null }),
+    ...(patch.photoUrl !== undefined && { photo_url: patch.photoUrl || null }),
   };
 }
 

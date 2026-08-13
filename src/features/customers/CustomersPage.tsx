@@ -5,6 +5,7 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
+import { uploadContactPhoto } from "../../lib/repositories/contactPhotos";
 import { buildDetailFields, buildFormFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
@@ -36,6 +37,10 @@ export default function CustomersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>("none");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
+  const [pendingPhotoPreview, setPendingPhotoPreview] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const {
     contacts,
@@ -89,8 +94,37 @@ export default function CustomersPage() {
     await updateContact(selected.id, { active: !selected.active });
   }
 
+  function clearPendingPhoto() {
+    setPendingPhotoFile(null);
+    setPendingPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }
+
+  function handleNewPhotoSelected(file: File) {
+    setPendingPhotoFile(file);
+    setPendingPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  }
+
+  async function handleExistingPhotoSelected(contactId: string, file: File) {
+    setPhotoUploading(true);
+    setPhotoError(null);
+    try {
+      const url = await uploadContactPhoto(contactId, file);
+      await updateContact(contactId, { photoUrl: url });
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : "Erro ao enviar foto.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
   async function handleCreateSubmit(values: Record<string, string>) {
-    await createContact({
+    const created = await createContact({
       name: values.name ?? "",
       document: values.document ?? "",
       active: true,
@@ -101,6 +135,17 @@ export default function CustomersPage() {
       email: values.email || undefined,
       whatsapp: values.whatsapp || undefined,
     });
+
+    if (pendingPhotoFile) {
+      try {
+        const url = await uploadContactPhoto(created.id, pendingPhotoFile);
+        await updateContact(created.id, { photoUrl: url });
+      } catch (err) {
+        setPhotoError(err instanceof Error ? err.message : "Erro ao enviar foto.");
+      }
+    }
+
+    clearPendingPhoto();
     setModal("none");
   }
 
@@ -211,16 +256,36 @@ export default function CustomersPage() {
             onToggle: toggleActive,
           }}
           fields={detailFields}
-          media={{ label: "Foto", hint: "Ou arraste para cá", layout: "stacked" }}
+          media={{
+            label: "Foto",
+            hint: "Ou arraste para cá",
+            layout: "stacked",
+            imageUrl: selected?.photoUrl ?? null,
+            uploading: photoUploading,
+            disabled: !selected || !canEdit,
+            onFileSelected: (file) => selected && handleExistingPhotoSelected(selected.id, file),
+          }}
         />
       </RegistryLayout>
+
+      {photoError && (
+        <p style={{ color: "var(--amber)", padding: "0 24px" }}>{photoError}</p>
+      )}
 
       {modal === "new" && (
         <RegistryFormModal
           title={`Novo ${termo}`}
           fields={formFields}
+          mediaField={{
+            label: "Foto",
+            imageUrl: pendingPhotoPreview,
+            onFileSelected: handleNewPhotoSelected,
+          }}
           onSubmit={handleCreateSubmit}
-          onCancel={() => setModal("none")}
+          onCancel={() => {
+            clearPendingPhoto();
+            setModal("none");
+          }}
         />
       )}
 
@@ -228,6 +293,12 @@ export default function CustomersPage() {
         <RegistryFormModal
           title={`Editar ${termo}`}
           fields={formFields}
+          mediaField={{
+            label: "Foto",
+            imageUrl: selected.photoUrl ?? null,
+            uploading: photoUploading,
+            onFileSelected: (file) => handleExistingPhotoSelected(selected.id, file),
+          }}
           initialValues={{
             name: selected.name,
             document: selected.document,

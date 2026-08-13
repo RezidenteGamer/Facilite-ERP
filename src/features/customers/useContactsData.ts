@@ -28,11 +28,12 @@ export function useContactsData(kind: ContactKind) {
     reload();
   }, [reload]);
 
-  async function createContact(input: NewContactInput) {
+  async function createContact(input: NewContactInput): Promise<Contact> {
     const repository = createContactsRepository(kind);
     // `code` é gerado pelo repositório; o placeholder abaixo nunca é usado.
-    await repository.create({ ...input, code: "" });
+    const created = await repository.create({ ...input, code: "" });
     await reload();
+    return created;
   }
 
   async function updateContact(id: string, patch: Partial<Contact>) {

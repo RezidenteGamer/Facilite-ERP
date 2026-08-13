@@ -45,6 +45,16 @@
   font-weight: 700;
 }
 
+.registry-form-modal__media {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.registry-form-modal__media-label {
+  font-size: 15px;
+}
+
 .registry-form-modal__error {
   margin: 0;
   font-size: 14px;
