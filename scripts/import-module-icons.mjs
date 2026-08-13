@@ -24,6 +24,7 @@ const MAP = {
   "tributacao.png": "tributacoes",
   "pedidos-venda.png": "pedidos-venda",
   "usuarios e operadores.png": "usuarios-operadores",
+  "relatorios.png": "relatorios",
 };
 
 // Exibido em ~64px CSS dentro do círculo de 84px (ver ModuleTile.css) — 256px

@@ -50,8 +50,10 @@
 }
 
 .module-tile__icon-image {
-  width: 60px;
-  height: 60px;
+  /* --module-icon-scale vem do inline style (ver ModuleTile.tsx) — só
+     definido quando o módulo pede um tamanho fora do padrão. */
+  width: calc(60px * var(--module-icon-scale, 1));
+  height: calc(60px * var(--module-icon-scale, 1));
 }
 
 .module-tile__icon-image img {
@@ -100,6 +102,9 @@
   .module-tile { width: 92px; }
   .module-tile__icon { width: 72px; height: 72px; border-radius: 18px; }
   .module-tile__icon svg { width: 36px; height: 36px; }
-  .module-tile__icon-image { width: 50px; height: 50px; }
+  .module-tile__icon-image {
+    width: calc(50px * var(--module-icon-scale, 1));
+    height: calc(50px * var(--module-icon-scale, 1));
+  }
   .module-tile__label { font-size: 12px; }
 }

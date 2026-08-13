@@ -1,5 +1,6 @@
 import type { DraggableAttributes } from "@dnd-kit/core";
 import type { DraggableSyntheticListeners } from "@dnd-kit/core";
+import type { CSSProperties } from "react";
 import FadeImage from "../../../components/FadeImage";
 import type { HomeModule } from "../modules";
 import "./ModuleTile.css";
@@ -43,6 +44,11 @@ export default function ModuleTile({
             placeholder={module.iconImagePlaceholder}
             alt=""
             className="module-tile__icon-image"
+            style={
+              module.iconScale
+                ? ({ "--module-icon-scale": module.iconScale } as CSSProperties)
+                : undefined
+            }
           />
         ) : (
           <Icon />

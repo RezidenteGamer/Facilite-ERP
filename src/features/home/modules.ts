@@ -19,6 +19,8 @@ import produtosIcon from "../../assets/icons/modules/produtos.webp";
 import { PRODUTOS_PLACEHOLDER } from "../../assets/icons/modules/produtos.placeholder";
 import realizarVendaIcon from "../../assets/icons/modules/realizar-venda.webp";
 import { REALIZAR_VENDA_PLACEHOLDER } from "../../assets/icons/modules/realizar-venda.placeholder";
+import relatoriosIcon from "../../assets/icons/modules/relatorios.webp";
+import { RELATORIOS_PLACEHOLDER } from "../../assets/icons/modules/relatorios.placeholder";
 import tributacoesIcon from "../../assets/icons/modules/tributacoes.webp";
 import { TRIBUTACOES_PLACEHOLDER } from "../../assets/icons/modules/tributacoes.placeholder";
 import usuariosOperadoresIcon from "../../assets/icons/modules/usuarios-operadores.webp";
@@ -48,6 +50,8 @@ export type HomeModule = {
   /** Se vier preenchido, o ModuleTile mostra esta imagem no lugar de `icon`. */
   iconImage?: string;
   iconImagePlaceholder?: string;
+  /** Multiplicador do tamanho padrão do ícone (60px) — só pra ajustes pontuais. */
+  iconScale?: number;
   badge?: "add";
   /** Rota do módulo — sem isto o ícone ainda não leva a lugar nenhum. */
   path?: string;
@@ -129,6 +133,7 @@ export const HOME_MODULES: HomeModule[] = [
     icon: PurchasesIcon,
     iconImage: comprasIcon,
     iconImagePlaceholder: COMPRAS_PLACEHOLDER,
+    iconScale: 1.25,
     path: "/compras",
   },
   { id: "devolucao-venda", label: "Devolução de venda", icon: SaleReturnIcon, path: "/devolucao-venda" },
@@ -149,12 +154,11 @@ export const HOME_MODULES: HomeModule[] = [
     path: "/controle-caixa",
   },
   {
-    // Só existe relatorios.png/.jpg com fundo branco sólido (sem canal alpha)
-    // até agora — mostraria um quadrado atrás no tile amarelo. Ícone vetorial
-    // até chegar uma versão com fundo transparente.
     id: "relatorios",
     label: "Relatórios",
     icon: ReportsIcon,
+    iconImage: relatoriosIcon,
+    iconImagePlaceholder: RELATORIOS_PLACEHOLDER,
   },
   {
     id: "usuarios-operadores",

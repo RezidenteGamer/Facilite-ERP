@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import "./FadeImage.css";
 import { useImagePreload } from "./useImagePreload";
 
@@ -7,6 +8,7 @@ type FadeImageProps = {
   /** Miniatura borrada em base64 — fica visível por baixo até a imagem real carregar. */
   placeholder?: string;
   className?: string;
+  style?: CSSProperties;
 };
 
 /**
@@ -19,13 +21,13 @@ type FadeImageProps = {
  * "completas" antes do React conseguir anexar o listener, e o evento onLoad
  * nunca dispara: o fade nunca acontece e só o placeholder borrado fica visível.
  */
-export default function FadeImage({ src, alt, placeholder, className }: FadeImageProps) {
+export default function FadeImage({ src, alt, placeholder, className, style }: FadeImageProps) {
   const loaded = useImagePreload(src);
 
   return (
     <span
       className={`fade-image${className ? ` ${className}` : ""}`}
-      style={placeholder ? { backgroundImage: `url(${placeholder})` } : undefined}
+      style={placeholder ? { ...style, backgroundImage: `url(${placeholder})` } : style}
     >
       <img
         src={src}
