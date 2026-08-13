@@ -275,7 +275,11 @@
 /* ---------- Conteúdo ---------- */
 .app-content {
   flex: 1;
-  padding: 32px 36px 140px;
+  /* --content-bottom-clearance: espaço para o conteúdo não terminar
+     embaixo da aba Voltar/Suporte/WindowDock, todos fixos no rodapé
+     da viewport — ver tokens.css para a explicação completa do
+     padrão. */
+  padding: 32px 36px var(--content-bottom-clearance);
 }
 
 /* Canvas neutro dos módulos internos (Registry). O azul de marca não é
@@ -303,7 +307,7 @@
   overflow: hidden;
   /* menos folga embaixo que o padrão: aqui não há rolagem para "passar por
      baixo" das abas flutuantes, então só o necessário para não cobri-las */
-  padding-bottom: 92px;
+  padding-bottom: var(--content-bottom-clearance-fit);
 }
 
 /* ---------- Responsivo ---------- */
@@ -318,12 +322,17 @@
 
   .app-content--fit {
     overflow: visible;
-    padding-bottom: 140px;
+    /* Virou tela que rola de verdade — mesma folga do padrão, não mais
+       a variante "fit". */
+    padding-bottom: var(--content-bottom-clearance);
   }
 }
 
 @media (max-width: 900px) {
   .app-header { padding: 14px 20px 0; }
+  /* 130px, não a --content-bottom-clearance de 140px: as abas também
+     encolhem um pouco nessa largura, então a folga pode ser um pouco
+     menor sem risco de sobrepor conteúdo. */
   .app-content { padding: 26px 20px 130px; }
 
   /* Tela de tablet: sem espaço para nome + ícone em cada item, então some

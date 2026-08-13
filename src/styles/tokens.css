@@ -109,6 +109,27 @@
   /* Piso de qualquer input/select/textarea — abaixo de 16px o
      Safari iOS força zoom ao focar o campo. */
   --font-size-input: 16px;
+
+  /* ---------- Folga para as abas flutuantes ----------
+     Padrão do sistema: toda tela com AppShell precisa de espaço vazio
+     no fim do conteúdo rolável, senão o último item da lista/formulário
+     fica embaixo da aba Voltar, do Suporte, ou (quando há janelas
+     abertas) do WindowDock — todos fixos no rodapé da viewport. Duas
+     variantes porque os dois tipos de tela do AppShell terminam de
+     jeitos diferentes:
+       --content-bottom-clearance:     tela que rola normalmente (o
+         conteúdo pode crescer além da viewport) — folga generosa
+         porque é a PÁGINA que precisa "passar por baixo" das abas.
+       --content-bottom-clearance-fit: tela travada na altura da janela
+         (AppShell fillViewport) — quem rola é uma lista interna, então
+         basta a folga mínima para as abas não cobrirem a borda do
+         painel.
+     Usados em AppShell.css; qualquer tela nova que role por conta
+     própria (fora do AppShell) deve reservar o mesmo espaço se tiver
+     algum elemento fixo no rodapé — ver LoginPage.css para um caso já
+     tratado à parte (cards ancorados, sem lista para rolar). */
+  --content-bottom-clearance: 140px;
+  --content-bottom-clearance-fit: 92px;
 }
 
 /* =============================================================
