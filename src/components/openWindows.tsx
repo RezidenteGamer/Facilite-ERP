@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
+import { HOME_MODULES } from "../features/home/modules";
 
 export type OpenWindow = {
   /** Mesmo id do módulo em HOME_MODULES quando a janela é um módulo do ERP. */
@@ -16,6 +17,10 @@ export type OpenWindow = {
   path: string;
   /** Ícone mostrado no dock; sem ele o dock cai para a inicial do rótulo. */
   icon?: ComponentType<SVGProps<SVGSVGElement>>;
+  /** Imagem do ícone (mesma usada na tela inicial); tem prioridade sobre `icon`. */
+  iconImage?: string;
+  iconImagePlaceholder?: string;
+  iconScale?: number;
 };
 
 type OpenWindowsValue = {
@@ -37,9 +42,26 @@ export function OpenWindowsProvider({ children }: { children: ReactNode }) {
   const [windows, setWindows] = useState<OpenWindow[]>([]);
 
   const openWindow = useCallback((next: OpenWindow) => {
-    setWindows((current) =>
-      current.some((item) => item.id === next.id) ? current : [...current, next],
-    );
+    setWindows((current) => {
+      if (current.some((item) => item.id === next.id)) return current;
+
+      /* O dock deve mostrar sempre o mesmo ícone da tela inicial — em vez
+         de cada página escolher seu próprio desenho, buscamos aqui pela
+         imagem oficial do módulo (HOME_MODULES), com o `icon` recebido
+         como fallback só para itens que ainda não têm iconImage. */
+      const module = HOME_MODULES.find((item) => item.id === next.id);
+      const withHomeIcon: OpenWindow = module
+        ? {
+            ...next,
+            iconImage: module.iconImage,
+            iconImagePlaceholder: module.iconImagePlaceholder,
+            iconScale: module.iconScale,
+            icon: module.iconImage ? undefined : module.icon,
+          }
+        : next;
+
+      return [...current, withHomeIcon];
+    });
   }, []);
 
   const closeWindow = useCallback((id: string) => {

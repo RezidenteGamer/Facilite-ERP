@@ -74,6 +74,19 @@
   height: 28px;
 }
 
+/* Mesma proporção do ícone-imagem da tela inicial (60px numa base de
+   84px), só que reduzida para a base de 52px do dock. */
+.window-dock__icon-image {
+  width: calc(37px * var(--module-icon-scale, 1));
+  height: calc(37px * var(--module-icon-scale, 1));
+}
+
+.window-dock__icon-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .window-dock__initial {
   font-family: var(--font-ui);
   font-size: 22px;

@@ -1,4 +1,6 @@
+import type { CSSProperties } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import FadeImage from "./FadeImage";
 import { CloseIcon } from "./icons";
 import { useOpenWindows } from "./openWindows";
 import "./WindowDock.css";
@@ -36,7 +38,23 @@ export default function WindowDock() {
                 aria-current={ativa ? "page" : undefined}
                 onClick={() => navigate(window.path)}
               >
-                {Icon ? <Icon /> : <span className="window-dock__initial">{window.label[0]}</span>}
+                {window.iconImage ? (
+                  <FadeImage
+                    src={window.iconImage}
+                    placeholder={window.iconImagePlaceholder}
+                    alt=""
+                    className="window-dock__icon-image"
+                    style={
+                      window.iconScale
+                        ? ({ "--module-icon-scale": window.iconScale } as CSSProperties)
+                        : undefined
+                    }
+                  />
+                ) : Icon ? (
+                  <Icon />
+                ) : (
+                  <span className="window-dock__initial">{window.label[0]}</span>
+                )}
               </button>
 
               <button
