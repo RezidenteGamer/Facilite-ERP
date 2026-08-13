@@ -133,7 +133,7 @@ export const HOME_MODULES: HomeModule[] = [
     icon: PurchasesIcon,
     iconImage: comprasIcon,
     iconImagePlaceholder: COMPRAS_PLACEHOLDER,
-    iconScale: 1.25,
+    iconScale: 1.5625,
     path: "/compras",
   },
   { id: "devolucao-venda", label: "Devolução de venda", icon: SaleReturnIcon, path: "/devolucao-venda" },
