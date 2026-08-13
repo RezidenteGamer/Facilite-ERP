@@ -20,8 +20,10 @@ const MAP = {
   "frente-caixa.svg": "ponto-de-venda",
   "compras.png": "compras",
   "controle-caixa.png": "controle-caixa",
-  "controle-estoque.png": "ajuste-estoque",
-  "tributacao.jpg": "tributacoes",
+  "ajuste-estoque.png": "ajuste-estoque",
+  "tributacao.png": "tributacoes",
+  "pedidos-venda.png": "pedidos-venda",
+  "usuarios e operadores.png": "usuarios-operadores",
 };
 
 // Exibido em ~64px CSS dentro do círculo de 84px (ver ModuleTile.css) — 256px

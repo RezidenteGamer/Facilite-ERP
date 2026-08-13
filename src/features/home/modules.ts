@@ -11,12 +11,18 @@ import financeiroIcon from "../../assets/icons/modules/financeiro.webp";
 import { FINANCEIRO_PLACEHOLDER } from "../../assets/icons/modules/financeiro.placeholder";
 import notasEmitidasIcon from "../../assets/icons/modules/notas-emitidas.webp";
 import { NOTAS_EMITIDAS_PLACEHOLDER } from "../../assets/icons/modules/notas-emitidas.placeholder";
+import pedidosVendaIcon from "../../assets/icons/modules/pedidos-venda.webp";
+import { PEDIDOS_VENDA_PLACEHOLDER } from "../../assets/icons/modules/pedidos-venda.placeholder";
 import pontoDeVendaIcon from "../../assets/icons/modules/ponto-de-venda.webp";
 import { PONTO_DE_VENDA_PLACEHOLDER } from "../../assets/icons/modules/ponto-de-venda.placeholder";
 import produtosIcon from "../../assets/icons/modules/produtos.webp";
 import { PRODUTOS_PLACEHOLDER } from "../../assets/icons/modules/produtos.placeholder";
 import realizarVendaIcon from "../../assets/icons/modules/realizar-venda.webp";
 import { REALIZAR_VENDA_PLACEHOLDER } from "../../assets/icons/modules/realizar-venda.placeholder";
+import tributacoesIcon from "../../assets/icons/modules/tributacoes.webp";
+import { TRIBUTACOES_PLACEHOLDER } from "../../assets/icons/modules/tributacoes.placeholder";
+import usuariosOperadoresIcon from "../../assets/icons/modules/usuarios-operadores.webp";
+import { USUARIOS_OPERADORES_PLACEHOLDER } from "../../assets/icons/modules/usuarios-operadores.placeholder";
 import {
   CashControlIcon,
   ClientsIcon,
@@ -77,7 +83,14 @@ export const HOME_MODULES: HomeModule[] = [
     iconImagePlaceholder: REALIZAR_VENDA_PLACEHOLDER,
     path: "/realizar-venda",
   },
-  { id: "pedidos-venda", label: "Pedidos de venda", icon: SaleOrdersIcon, path: "/pedidos-venda" },
+  {
+    id: "pedidos-venda",
+    label: "Pedidos de venda",
+    icon: SaleOrdersIcon,
+    iconImage: pedidosVendaIcon,
+    iconImagePlaceholder: PEDIDOS_VENDA_PLACEHOLDER,
+    path: "/pedidos-venda",
+  },
   {
     id: "notas-emitidas",
     label: "Notas emitidas",
@@ -103,12 +116,11 @@ export const HOME_MODULES: HomeModule[] = [
     path: "/ponto-de-venda",
   },
   {
-    // O ícone de teste (tributacao.jpg) veio sem fundo transparente — JPG não
-    // tem canal alpha — e mostraria um quadrado branco atrás no tile amarelo.
-    // Fica com o ícone vetorial até chegar uma versão com fundo transparente.
     id: "tributacoes",
     label: "Tributações",
     icon: TaxIcon,
+    iconImage: tributacoesIcon,
+    iconImagePlaceholder: TRIBUTACOES_PLACEHOLDER,
     path: "/tributacoes",
   },
   {
@@ -136,7 +148,22 @@ export const HOME_MODULES: HomeModule[] = [
     iconImagePlaceholder: CONTROLE_CAIXA_PLACEHOLDER,
     path: "/controle-caixa",
   },
-  { id: "relatorios", label: "Relatórios", icon: ReportsIcon },
-  { id: "usuarios-operadores", label: "Usuarios e Operadores", icon: UsersIcon, path: "/usuarios-operadores" },
+  {
+    // Só existe relatorios.png/.jpg com fundo branco sólido (sem canal alpha)
+    // até agora — mostraria um quadrado atrás no tile amarelo. Ícone vetorial
+    // até chegar uma versão com fundo transparente.
+    id: "relatorios",
+    label: "Relatórios",
+    icon: ReportsIcon,
+  },
+  {
+    id: "usuarios-operadores",
+    label: "Usuarios e Operadores",
+    icon: UsersIcon,
+    iconImage: usuariosOperadoresIcon,
+    iconImagePlaceholder: USUARIOS_OPERADORES_PLACEHOLDER,
+    path: "/usuarios-operadores",
+  },
+  // Condicionais fica de fora por enquanto (a pedido).
   { id: "condicionais", label: "Condicionais", icon: RefreshIcon, path: "/condicionais" },
 ];
