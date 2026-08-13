@@ -8,7 +8,11 @@
   border: 0;
   background: none;
   font-family: var(--font-ui);
-  cursor: grab;
+  /* É um botão (clique abre o módulo) antes de ser um item arrastável
+     — a mãozinha de "grab" sugeria arrastar como ação principal, mas
+     no mouse o normal é clicar. Some no hover; some "grabbing" só
+     aparece de fato durante o arraste (:active / overlay abaixo). */
+  cursor: default;
   /* "none" bloqueava QUALQUER gesto de toque no ícone a nível de
      navegador — inclusive rolar a página — mesmo antes do arraste
      ativar. "pan-y" libera a rolagem vertical nativa; só quando o
