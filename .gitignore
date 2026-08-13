@@ -19,6 +19,11 @@ dist-ssr
 # Backup local do projeto — não faz sentido versionar um zip do próprio repo.
 FaciliteERP.zip
 
+# Ícones brutos de teste/staging — depois de importados (ver
+# scripts/import-module-icons.mjs), o que entra no app fica em
+# src/assets/icons/modules; a pasta original não precisa ser versionada.
+Recursos de Desenvolvimento/
+
 # Segredos reais (o .env.example fica versionado como modelo).
 .env
 .env.local

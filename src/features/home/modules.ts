@@ -1,4 +1,22 @@
 import type { ComponentType, SVGProps } from "react";
+import ajusteEstoqueIcon from "../../assets/icons/modules/ajuste-estoque.webp";
+import { AJUSTE_ESTOQUE_PLACEHOLDER } from "../../assets/icons/modules/ajuste-estoque.placeholder";
+import clientesFornecedoresIcon from "../../assets/icons/modules/clientes-fornecedores.webp";
+import { CLIENTES_FORNECEDORES_PLACEHOLDER } from "../../assets/icons/modules/clientes-fornecedores.placeholder";
+import comprasIcon from "../../assets/icons/modules/compras.webp";
+import { COMPRAS_PLACEHOLDER } from "../../assets/icons/modules/compras.placeholder";
+import controleCaixaIcon from "../../assets/icons/modules/controle-caixa.webp";
+import { CONTROLE_CAIXA_PLACEHOLDER } from "../../assets/icons/modules/controle-caixa.placeholder";
+import financeiroIcon from "../../assets/icons/modules/financeiro.webp";
+import { FINANCEIRO_PLACEHOLDER } from "../../assets/icons/modules/financeiro.placeholder";
+import notasEmitidasIcon from "../../assets/icons/modules/notas-emitidas.webp";
+import { NOTAS_EMITIDAS_PLACEHOLDER } from "../../assets/icons/modules/notas-emitidas.placeholder";
+import pontoDeVendaIcon from "../../assets/icons/modules/ponto-de-venda.webp";
+import { PONTO_DE_VENDA_PLACEHOLDER } from "../../assets/icons/modules/ponto-de-venda.placeholder";
+import produtosIcon from "../../assets/icons/modules/produtos.webp";
+import { PRODUTOS_PLACEHOLDER } from "../../assets/icons/modules/produtos.placeholder";
+import realizarVendaIcon from "../../assets/icons/modules/realizar-venda.webp";
+import { REALIZAR_VENDA_PLACEHOLDER } from "../../assets/icons/modules/realizar-venda.placeholder";
 import {
   CashControlIcon,
   ClientsIcon,
@@ -21,6 +39,9 @@ export type HomeModule = {
   id: string;
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /** Se vier preenchido, o ModuleTile mostra esta imagem no lugar de `icon`. */
+  iconImage?: string;
+  iconImagePlaceholder?: string;
   badge?: "add";
   /** Rota do módulo — sem isto o ícone ainda não leva a lugar nenhum. */
   path?: string;
@@ -35,20 +56,86 @@ export const HOME_MODULES: HomeModule[] = [
     id: "clientes-fornecedores",
     label: "Clientes e Fornecedores",
     icon: ClientsIcon,
+    iconImage: clientesFornecedoresIcon,
+    iconImagePlaceholder: CLIENTES_FORNECEDORES_PLACEHOLDER,
     badge: "add",
     path: "/clientes-fornecedores",
   },
-  { id: "produtos", label: "Produtos", icon: ProductsIcon, path: "/produtos" },
-  { id: "realizar-venda", label: "Realizar uma venda", icon: SaleHandIcon, path: "/realizar-venda" },
+  {
+    id: "produtos",
+    label: "Produtos",
+    icon: ProductsIcon,
+    iconImage: produtosIcon,
+    iconImagePlaceholder: PRODUTOS_PLACEHOLDER,
+    path: "/produtos",
+  },
+  {
+    id: "realizar-venda",
+    label: "Realizar uma venda",
+    icon: SaleHandIcon,
+    iconImage: realizarVendaIcon,
+    iconImagePlaceholder: REALIZAR_VENDA_PLACEHOLDER,
+    path: "/realizar-venda",
+  },
   { id: "pedidos-venda", label: "Pedidos de venda", icon: SaleOrdersIcon, path: "/pedidos-venda" },
-  { id: "notas-emitidas", label: "Notas emitidas", icon: InvoicesIcon, path: "/notas-emitidas" },
-  { id: "financeiro", label: "Financeiro", icon: FinanceIcon, path: "/financeiro" },
-  { id: "ponto-de-venda", label: "Ponto de venda", icon: PosIcon, path: "/ponto-de-venda" },
-  { id: "tributacoes", label: "Tributações", icon: TaxIcon, path: "/tributacoes" },
-  { id: "compras", label: "Compras", icon: PurchasesIcon, path: "/compras" },
+  {
+    id: "notas-emitidas",
+    label: "Notas emitidas",
+    icon: InvoicesIcon,
+    iconImage: notasEmitidasIcon,
+    iconImagePlaceholder: NOTAS_EMITIDAS_PLACEHOLDER,
+    path: "/notas-emitidas",
+  },
+  {
+    id: "financeiro",
+    label: "Financeiro",
+    icon: FinanceIcon,
+    iconImage: financeiroIcon,
+    iconImagePlaceholder: FINANCEIRO_PLACEHOLDER,
+    path: "/financeiro",
+  },
+  {
+    id: "ponto-de-venda",
+    label: "Ponto de venda",
+    icon: PosIcon,
+    iconImage: pontoDeVendaIcon,
+    iconImagePlaceholder: PONTO_DE_VENDA_PLACEHOLDER,
+    path: "/ponto-de-venda",
+  },
+  {
+    // O ícone de teste (tributacao.jpg) veio sem fundo transparente — JPG não
+    // tem canal alpha — e mostraria um quadrado branco atrás no tile amarelo.
+    // Fica com o ícone vetorial até chegar uma versão com fundo transparente.
+    id: "tributacoes",
+    label: "Tributações",
+    icon: TaxIcon,
+    path: "/tributacoes",
+  },
+  {
+    id: "compras",
+    label: "Compras",
+    icon: PurchasesIcon,
+    iconImage: comprasIcon,
+    iconImagePlaceholder: COMPRAS_PLACEHOLDER,
+    path: "/compras",
+  },
   { id: "devolucao-venda", label: "Devolução de venda", icon: SaleReturnIcon, path: "/devolucao-venda" },
-  { id: "ajuste-estoque", label: "Ajuste de estoque", icon: StockAdjustIcon, path: "/ajuste-estoque" },
-  { id: "controle-caixa", label: "Controle de caixa", icon: CashControlIcon, path: "/controle-caixa" },
+  {
+    id: "ajuste-estoque",
+    label: "Ajuste de estoque",
+    icon: StockAdjustIcon,
+    iconImage: ajusteEstoqueIcon,
+    iconImagePlaceholder: AJUSTE_ESTOQUE_PLACEHOLDER,
+    path: "/ajuste-estoque",
+  },
+  {
+    id: "controle-caixa",
+    label: "Controle de caixa",
+    icon: CashControlIcon,
+    iconImage: controleCaixaIcon,
+    iconImagePlaceholder: CONTROLE_CAIXA_PLACEHOLDER,
+    path: "/controle-caixa",
+  },
   { id: "relatorios", label: "Relatórios", icon: ReportsIcon },
   { id: "usuarios-operadores", label: "Usuarios e Operadores", icon: UsersIcon, path: "/usuarios-operadores" },
   { id: "condicionais", label: "Condicionais", icon: RefreshIcon, path: "/condicionais" },

@@ -1,5 +1,6 @@
 import type { DraggableAttributes } from "@dnd-kit/core";
 import type { DraggableSyntheticListeners } from "@dnd-kit/core";
+import FadeImage from "../../../components/FadeImage";
 import type { HomeModule } from "../modules";
 import "./ModuleTile.css";
 
@@ -36,7 +37,16 @@ export default function ModuleTile({
       {...dragListeners}
     >
       <span className="module-tile__icon">
-        <Icon />
+        {module.iconImage ? (
+          <FadeImage
+            src={module.iconImage}
+            placeholder={module.iconImagePlaceholder}
+            alt=""
+            className="module-tile__icon-image"
+          />
+        ) : (
+          <Icon />
+        )}
         {module.badge === "add" && (
           <span className="module-tile__badge" aria-hidden="true">
             +
