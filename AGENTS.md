@@ -19,9 +19,9 @@
   - `/produtos` — produtos (motor genérico, isolado por filial — ver decisão de multiempresa abaixo);
   - `/permissoes` — administração de papéis e permissões (`can_manage_permissions`);
   - `/usuarios-operadores` — usuários reais, com "Resetar senha" (`can_manage_users`);
-  - `/realizar-venda` — vendas;
+  - `/realizar-venda` — vendas (real: grava em `sales`/`sale_items`/`sale_payments` e baixa estoque — ver decisão abaixo);
   - `/configuracoes` — configurações.
-- A navegação e a maioria das telas ainda são de front-end (arrays mockados). Não há integração real de vendas.
+- A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos e Realizar Venda, que já são reais.
 - Existe agora um projeto Supabase real (`Facilite-ERP`, id `ifmdedruuetbbqjbnrkd`, região sa-east-1), configurado em `.env.local` (não versionado). `src/lib/supabaseClient.ts` usa `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` de lá. Não crie, exponha ou invente credenciais.
 - **Autenticação é real** (Supabase Auth, email/senha) — ver decisão de RBAC abaixo. Rotas internas são protegidas por `src/components/ProtectedRoute.tsx`.
 
@@ -74,6 +74,21 @@ Pedido do usuário: Clientes e Fornecedores não tinha nenhuma forma real de ane
   - `RegistryFormModal` (`src/features/registry-engine/RegistryFormModal.tsx`) — novo prop opcional `mediaField`, renderizado dentro do modal de criação/edição.
 - **Fluxo de criação**: como o contato ainda não existe, o arquivo escolhido fica só em preview local (`URL.createObjectURL`) até o "Salvar" da ficha criar o registro; só então a foto é enviada e o `photo_url` é atualizado com o `id` real. Fluxo de edição/arrastar-para-a-tela: upload imediato, já que o `id` já existe.
 - **Débito técnico deliberado**: `src/lib/repositories/contactPhotos.ts` não normaliza/redimensiona a imagem (o Supabase Storage aceita qualquer imagem, sem limite de tamanho aplicado no cliente) — ok para uso interno, mas vale revisar se isso for para produção com usuários externos.
+
+### Decisão arquitetural: módulo Realizar Venda (13/08/2026, noite)
+
+Primeiro módulo transacional real do sistema (cabeçalho + itens + pagamentos), diferente de Clientes/Fornecedores e Produtos (que são CRUD simples sobre o motor genérico de metadados).
+
+- **Não usa o motor genérico** (`module_fields`/`module_tabs`): a tela (`src/features/sales/SalePage.tsx`) é feita à mão, como o Ponto de Venda, porque o formato (formulário de cabeçalho → carrinho de itens → split de pagamentos → totais) não é um CRUD de lista+ficha. Mesmo assim, precisa de uma linha em `modules` (`realizar-venda`) só para aparecer na grade de `/permissoes` — sem isso `has_permission('realizar-venda', ...)` nunca encontra nada e ninguém acessa a tela, nem o Administrador. **Depois de criar um módulo assim, é preciso ir em `/permissoes` e marcar manualmente `can_view`/`can_create` para os papéis que devem usá-lo** — isso não é automático.
+- **Tabelas**: `sales` (cabeçalho, `branch_id` — dado operacional, isolado por filial), `sale_items` e `sale_payments` (sem `branch_id` próprio, herdam a filial via `sale_id`; RLS de leitura usa `exists (select 1 from sales where ...)`).
+- **Gravação atômica via função RPC** (`create_sale`, `security definer`): a venda inteira (cabeçalho + itens + pagamentos + baixa de estoque em `products.stock`) é criada numa única chamada, porque o cliente não tem transação multi-tabela nativa e a baixa de estoque não pode ficar inconsistente com os itens vendidos. A função valida permissão (`has_permission`) e filial (`has_branch_access`) manualmente logo no início — só depois disso é que ela pode "confiar" em rodar com privilégio elevado (senão qualquer usuário autenticado decrementaria estoque de qualquer filial). Por isso não há policy de `insert` em `sale_items`/`sale_payments`: só a função grava, nunca o cliente direto.
+- **Split de pagamento**: uma venda pode ter N linhas em `sale_payments` (ex.: metade PIX, metade dinheiro) — decisão do usuário. A função recusa a venda se a soma dos pagamentos não bater com o total (itens + frete − desconto).
+- **Campos sem cadastro próprio**: Tipo de operação, Departamento e Centro de custos ficam como texto livre em `sales` — não existe (ainda) um módulo de cadastro para eles, e criar três módulos novos só para isso ficou fora do escopo desta rodada. Se um dia isso incomodar, é candidato a virar cadastro de verdade (com FK), não um problema a esconder.
+- **Endereço / Endereço de entrega**: texto livre, snapshot copiado do cadastro do cliente (`contacts.address`) no momento em que o cliente é selecionado — não é FK, de propósito: a venda não deve mudar retroativamente se o cadastro do cliente for editado depois.
+- **Componente novo reutilizável**: `src/components/form/LookupModal.tsx` — modal de busca genérico (usado por Cliente, Vendedor e Produto nesta tela); qualquer campo `lookup` de telas futuras (pedido, compra, devolução) pode reaproveitar.
+- **Cuidado ao tratar erro de RPC no front**: erros do supabase-js (`PostgrestError`, inclusive os de dentro da função `create_sale`) são objetos simples, não instâncias de `Error` — checar só `err instanceof Error` engole a mensagem real e mostra um erro genérico. `useSaleDraft.ts` tem um `extractErrorMessage` que também olha `err.message` diretamente; replicar esse padrão em qualquer tela nova que chame RPC.
+- **Fora de escopo por enquanto**: não há tela de listagem/consulta de vendas feitas (ver `/pedidos-venda`, ainda mock); não há edição/cancelamento de venda confirmada (`sales.status` só sai de `confirmed` manualmente por enquanto); não há rascunho (a venda é criada já confirmada, de uma vez).
+- **UX revisada (13/08/2026, mais tarde)**: a primeira versão em 2 etapas ("Continuar" só depois de preencher 9 campos de cabeçalho pra então liberar o carrinho) ficou pouco intuitiva — o usuário não enxergava como "vender" de fato. Virou tela única: buscar/adicionar produto é a ação em destaque desde o início (não fica atrás de nenhum gate), Cliente/Vendedor ficam visíveis mas só são cobrados na hora de confirmar, e Tipo de operação/Departamento/Centro de custos/Endereços foram para uma seção "Detalhes da operação" recolhida por padrão. Lição: campos opcionais não devem competir visualmente com a ação principal da tela, e a ação principal não deveria depender de um botão "Continuar" só para aparecer.
 
 ## Roteiro para criar um novo módulo
 
