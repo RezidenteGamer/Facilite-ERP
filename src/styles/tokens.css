@@ -127,9 +127,16 @@
      Usados em AppShell.css; qualquer tela nova que role por conta
      própria (fora do AppShell) deve reservar o mesmo espaço se tiver
      algum elemento fixo no rodapé — ver LoginPage.css para um caso já
-     tratado à parte (cards ancorados, sem lista para rolar). */
+     tratado à parte (cards ancorados, sem lista para rolar).
+
+     O valor "fit" foi medido com o WindowDock aberto (2+ janelas): o
+     topo do dock fica a 96px do rodapé da viewport (16px de offset +
+     ~80px de altura, já contando a folga do hover/toque) — é o maior
+     dos três elementos fixos do rodapé nessa variante, então é ele
+     quem define o mínimo. 108px dá uma margem de segurança de 12px
+     sobre essa medida. */
   --content-bottom-clearance: 140px;
-  --content-bottom-clearance-fit: 92px;
+  --content-bottom-clearance-fit: 108px;
 }
 
 /* =============================================================

@@ -330,10 +330,14 @@
 
 @media (max-width: 900px) {
   .app-header { padding: 14px 20px 0; }
-  /* 130px, não a --content-bottom-clearance de 140px: as abas também
-     encolhem um pouco nessa largura, então a folga pode ser um pouco
-     menor sem risco de sobrepor conteúdo. */
-  .app-content { padding: 26px 20px 130px; }
+  /* 190px, mais que a --content-bottom-clearance de 140px — ao
+     contrário do que parece, o WindowDock precisa de MAIS espaço aqui,
+     não menos: ele sobe (bottom:96px, ver WindowDock.css) pra não
+     disputar a faixa de baixo com as abas Voltar/Suporte, que nessa
+     largura ficam quase largura total. Medido na prática (768px, dock
+     aberto): o topo do dock fica a 176px do rodapé da viewport; 190px
+     dá uma margem de 14px sobre isso. */
+  .app-content { padding: 26px 20px 190px; }
 
   /* Tela de tablet: sem espaço para nome + ícone em cada item, então some
      o texto e sobra só o ícone (nome ainda acessível via title/leitor de
