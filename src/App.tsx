@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import ProtectedRoute from "./components/ProtectedRoute";
 import RouteFallback from "./components/RouteFallback";
 import { OpenWindowsProvider } from "./components/openWindows";
 import LoginPage from "./features/auth/LoginPage";
@@ -15,6 +16,7 @@ const HomePage = lazy(() => import("./features/home/HomePage"));
 const PosPage = lazy(() => import("./features/pos/PosPage"));
 const ProductsPage = lazy(() => import("./features/products/ProductsPage"));
 const StockAdjustPage = lazy(() => import("./features/products/StockAdjustPage"));
+const PermissionsPage = lazy(() => import("./features/permissions/PermissionsPage"));
 const PurchasesPage = lazy(() => import("./features/purchases/PurchasesPage"));
 const InvoicesPage = lazy(() => import("./features/sales/InvoicesPage"));
 const SaleOrdersPage = lazy(() => import("./features/sales/SaleOrdersPage"));
@@ -31,22 +33,26 @@ function App() {
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<LoginPage />} />
-            <Route path="/inicio" element={<HomePage />} />
-            <Route path="/clientes-fornecedores" element={<CustomersPage />} />
-            <Route path="/produtos" element={<ProductsPage />} />
-            <Route path="/realizar-venda" element={<SalePage />} />
-            <Route path="/pedidos-venda" element={<SaleOrdersPage />} />
-            <Route path="/notas-emitidas" element={<InvoicesPage />} />
-            <Route path="/financeiro" element={<FinancePage />} />
-            <Route path="/ponto-de-venda" element={<PosPage />} />
-            <Route path="/tributacoes" element={<TaxationsPage />} />
-            <Route path="/compras" element={<PurchasesPage />} />
-            <Route path="/devolucao-venda" element={<SaleReturnPage />} />
-            <Route path="/ajuste-estoque" element={<StockAdjustPage />} />
-            <Route path="/controle-caixa" element={<CashControlPage />} />
-            <Route path="/usuarios-operadores" element={<UsersPage />} />
-            <Route path="/condicionais" element={<ConditionalsPage />} />
-            <Route path="/configuracoes" element={<SettingsPage />} />
+            <Route path="/inicio" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+            <Route
+              path="/clientes-fornecedores"
+              element={<ProtectedRoute><CustomersPage /></ProtectedRoute>}
+            />
+            <Route path="/produtos" element={<ProtectedRoute><ProductsPage /></ProtectedRoute>} />
+            <Route path="/realizar-venda" element={<ProtectedRoute><SalePage /></ProtectedRoute>} />
+            <Route path="/pedidos-venda" element={<ProtectedRoute><SaleOrdersPage /></ProtectedRoute>} />
+            <Route path="/notas-emitidas" element={<ProtectedRoute><InvoicesPage /></ProtectedRoute>} />
+            <Route path="/financeiro" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
+            <Route path="/ponto-de-venda" element={<ProtectedRoute><PosPage /></ProtectedRoute>} />
+            <Route path="/tributacoes" element={<ProtectedRoute><TaxationsPage /></ProtectedRoute>} />
+            <Route path="/compras" element={<ProtectedRoute><PurchasesPage /></ProtectedRoute>} />
+            <Route path="/devolucao-venda" element={<ProtectedRoute><SaleReturnPage /></ProtectedRoute>} />
+            <Route path="/ajuste-estoque" element={<ProtectedRoute><StockAdjustPage /></ProtectedRoute>} />
+            <Route path="/controle-caixa" element={<ProtectedRoute><CashControlPage /></ProtectedRoute>} />
+            <Route path="/usuarios-operadores" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
+            <Route path="/permissoes" element={<ProtectedRoute><PermissionsPage /></ProtectedRoute>} />
+            <Route path="/condicionais" element={<ProtectedRoute><ConditionalsPage /></ProtectedRoute>} />
+            <Route path="/configuracoes" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

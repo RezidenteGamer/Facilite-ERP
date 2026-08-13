@@ -1,21 +1,23 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "./AuthContext";
 
 type FieldErrors = {
-  usuario?: boolean;
+  email?: boolean;
   senha?: boolean;
 };
 
 export default function LoginForm() {
   const navigate = useNavigate();
+  const { signIn } = useAuth();
 
-  const [usuario, setUsuario] = useState("");
+  const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const usuarioRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
   const senhaRef = useRef<HTMLInputElement>(null);
 
   function clearFieldError(field: keyof FieldErrors) {
@@ -23,13 +25,13 @@ export default function LoginForm() {
     setFeedback("");
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!usuario.trim()) {
-      setErrors({ usuario: true });
-      setFeedback("Informe o seu login para continuar.");
-      usuarioRef.current?.focus();
+    if (!email.trim()) {
+      setErrors({ email: true });
+      setFeedback("Informe o seu email para continuar.");
+      emailRef.current?.focus();
       return;
     }
 
@@ -44,36 +46,40 @@ export default function LoginForm() {
     setFeedback("");
     setLoading(true);
 
-    // Sem back-end por enquanto: qualquer login/senha preenchidos encaminham
-    // para a próxima tela. Ponto de integração futuro:
-    // `supabase.auth.signInWithPassword` (ver src/lib/supabaseClient.ts).
-    window.setTimeout(() => {
-      navigate("/inicio", { state: { usuario } });
-    }, 500);
+    const { error } = await signIn(email.trim(), senha);
+
+    setLoading(false);
+
+    if (error) {
+      setFeedback("Email ou senha incorretos.");
+      return;
+    }
+
+    navigate("/inicio");
   }
 
   return (
     <form className="login__form" onSubmit={handleSubmit} noValidate>
       <div className="field">
-        <label className="field__label" htmlFor="usuario">
-          Login
+        <label className="field__label" htmlFor="email">
+          Email
         </label>
         <input
-          ref={usuarioRef}
+          ref={emailRef}
           className="field__input"
-          id="usuario"
-          name="usuario"
-          type="text"
-          placeholder="Digite seu login aqui!"
+          id="email"
+          name="email"
+          type="email"
+          placeholder="Digite seu email aqui!"
           autoComplete="username"
           autoCapitalize="none"
           spellCheck={false}
-          value={usuario}
+          value={email}
           onChange={(event) => {
-            setUsuario(event.target.value);
-            clearFieldError("usuario");
+            setEmail(event.target.value);
+            clearFieldError("email");
           }}
-          aria-invalid={errors.usuario ? "true" : undefined}
+          aria-invalid={errors.email ? "true" : undefined}
           required
         />
       </div>

@@ -135,6 +135,19 @@
   opacity: 0.55;
 }
 
+.branches-modal__row--active {
+  background: var(--tile-yellow);
+}
+
+.branches-modal__empty {
+  margin: 0;
+  padding: 24px 4px;
+  color: var(--white);
+  opacity: 0.85;
+  font-size: 15px;
+  text-align: center;
+}
+
 .branches-modal__code {
   text-align: center;
   font-weight: 600;

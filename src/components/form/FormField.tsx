@@ -6,7 +6,7 @@ type FormFieldProps = {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "text" | "date";
+  type?: "text" | "date" | "email" | "password";
   /** Mostra a lupa de consulta à direita (campos que abrem uma busca). */
   lookup?: boolean;
   onLookup?: () => void;
