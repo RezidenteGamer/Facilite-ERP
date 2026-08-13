@@ -56,11 +56,20 @@
 }
 
 /* ---------- Cards ---------- */
+/* Estilo "glass" (acrylic): fundo semi-transparente + blur, deixando a foto
+   cinemática atrás transparecer em vez de um painel azul opaco. Blur/
+   saturação usam os mesmos tokens do resto do app; a cor em si é mais
+   transparente que --acrylic-accent (70%) porque aqui, diferente do
+   cabeçalho/dock/modais (que ficam sobre um canvas neutro), o card fica
+   sobre uma foto — com 70% de opacidade a cor quase engolia a imagem e o
+   "vidro" ficava indistinguível do painel azul sólido antigo. */
 .card {
-  background: var(--blue-panel);
-  border: 1px solid var(--blue-panel-edge);
+  background: rgba(15, 68, 189, .38);
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  border: 1px solid rgba(255, 255, 255, .28);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-8);
 }
 
 /* =============================================================
