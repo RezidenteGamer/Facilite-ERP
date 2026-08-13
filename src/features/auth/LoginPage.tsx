@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from "react";
+import backdropImage from "../../assets/img/tela-de-login-cinematica.webp";
+import { LOGIN_BACKDROP_PLACEHOLDER } from "../../assets/img/tela-de-login-cinematica.placeholder";
 import { ArrowRightIcon, PaperclipIcon } from "../../components/icons";
+import { useImagePreload } from "../../components/useImagePreload";
 import LoginForm from "./LoginForm";
 import "./LoginPage.css";
 
@@ -17,6 +20,7 @@ export default function LoginPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [cnpj, setCnpj] = useState("");
   const [ticketSent, setTicketSent] = useState(false);
+  const backdropLoaded = useImagePreload(backdropImage);
 
   function openChat() {
     setChatOpen(true);
@@ -47,7 +51,16 @@ export default function LoginPage() {
 
   return (
     <>
-      <div className="backdrop" aria-hidden="true" />
+      <div
+        className="backdrop"
+        aria-hidden="true"
+        style={{ backgroundImage: `url(${LOGIN_BACKDROP_PLACEHOLDER})` }}
+      >
+        <div
+          className={`backdrop__full${backdropLoaded ? " backdrop__full--loaded" : ""}`}
+          style={{ backgroundImage: `url(${backdropImage})` }}
+        />
+      </div>
 
       <main className="screen">
         <aside

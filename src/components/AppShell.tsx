@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -8,13 +10,17 @@ import {
   type SVGProps,
 } from "react";
 import BackTab from "./BackTab";
-import BranchesModal from "./BranchesModal";
 import SupportWidget from "./SupportWidget";
 import WindowDock from "./WindowDock";
 import { MoonIcon, SearchIcon, SunIcon } from "./icons";
 import { useSupportMenu } from "./useSupportMenu";
 import { useTheme } from "../theme/ThemeProvider";
 import "./AppShell.css";
+
+// Só é montado quando o usuário abre o popup de filiais — carregar sob
+// demanda evita colocar @radix-ui/react-dialog no bundle de toda tela que
+// usa AppShell (ou seja, quase todas).
+const BranchesModal = lazy(() => import("./BranchesModal"));
 
 export type HeaderNavItem = {
   id: string;
@@ -266,7 +272,11 @@ export default function AppShell({
         {children}
       </main>
 
-      {branchesOpen && <BranchesModal onClose={() => setBranchesOpen(false)} />}
+      {branchesOpen && (
+        <Suspense fallback={null}>
+          <BranchesModal onClose={() => setBranchesOpen(false)} />
+        </Suspense>
+      )}
 
       <BackTab onClick={onBack} />
       <WindowDock />

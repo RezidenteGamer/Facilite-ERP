@@ -6,12 +6,31 @@
 
 /* ---------- Fundo ---------- */
 /* Foto cinemática (entardecer, laranja -> azul): mantém as cores originais,
-   só escurece as bordas onde os cards se apoiam para garantir contraste. */
+   só escurece as bordas onde os cards se apoiam para garantir contraste.
+   O fundo do .backdrop em si é a miniatura borrada (inline, via style) —
+   aparece instantaneamente. A foto em tamanho real (.backdrop__full) some
+   ao entrar, com fade, assim que termina de carregar. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: url("../../assets/img/tela-de-login-cinematica.webp") center / cover no-repeat;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.backdrop__full {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.backdrop__full--loaded {
+  opacity: 1;
 }
 
 .backdrop::after {

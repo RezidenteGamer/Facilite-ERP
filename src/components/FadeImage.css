@@ -1,0 +1,15 @@
+.fade-image {
+  display: inline-flex;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.fade-image__img {
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.fade-image__img--loaded {
+  opacity: 1;
+}

@@ -1,12 +1,14 @@
-import { useState, type MouseEvent } from "react";
+import { lazy, Suspense, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../../components/AppShell";
-import ConfirmDialog from "../../../components/ConfirmDialog";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../../components/icons";
 import IconsLayoutMenu from "../components/IconsLayoutMenu";
 import ModuleGrid from "../components/ModuleGrid";
 import { useIconsArrangement } from "../useIconsArrangement";
 import "./OriginalLayout.css";
+
+// Só é montado ao confirmar saída — mesmo motivo do BranchesModal em AppShell.
+const ConfirmDialog = lazy(() => import("../../../components/ConfirmDialog"));
 
 const MENU_WIDTH = 200;
 const MENU_HEIGHT = 130;
@@ -64,13 +66,15 @@ export default function OriginalLayout() {
       )}
 
       {logoutConfirmOpen && (
-        <ConfirmDialog
-          title="Deseja realmente sair?"
-          confirmLabel="Sair"
-          cancelLabel="Cancelar"
-          onConfirm={() => navigate("/")}
-          onCancel={() => setLogoutConfirmOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <ConfirmDialog
+            title="Deseja realmente sair?"
+            confirmLabel="Sair"
+            cancelLabel="Cancelar"
+            onConfirm={() => navigate("/")}
+            onCancel={() => setLogoutConfirmOpen(false)}
+          />
+        </Suspense>
       )}
     </AppShell>
   );
