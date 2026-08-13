@@ -75,6 +75,23 @@ Pedido do usuário: Clientes e Fornecedores não tinha nenhuma forma real de ane
 - **Fluxo de criação**: como o contato ainda não existe, o arquivo escolhido fica só em preview local (`URL.createObjectURL`) até o "Salvar" da ficha criar o registro; só então a foto é enviada e o `photo_url` é atualizado com o `id` real. Fluxo de edição/arrastar-para-a-tela: upload imediato, já que o `id` já existe.
 - **Débito técnico deliberado**: `src/lib/repositories/contactPhotos.ts` não normaliza/redimensiona a imagem (o Supabase Storage aceita qualquer imagem, sem limite de tamanho aplicado no cliente) — ok para uso interno, mas vale revisar se isso for para produção com usuários externos.
 
+## Roteiro para criar um novo módulo
+
+Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer módulo novo (Vendas, Compras, Financeiro etc.) deve seguir o mesmo, para não divergir do motor genérico nem do RBAC.
+
+1. **Metadados primeiro**: inserir em `modules`/`module_fields` (e `module_tabs` se tiver abas) antes de qualquer código — `layout_variant`, `data_table`, quais campos aparecem em tabela/ficha/formulário. Campos numéricos usam `data_type: 'text'` mesmo assim (a engine não converte tipos ainda); a conversão pra número é manual no handler de submit da página, como em `ProductsPage.tsx`.
+2. **Tabela de dados dedicada e tipada** (não JSONB) — com FKs reais, `unique`, índices. Decidir **branch_id ou não**: dado operacional (estoque, preço, movimentação) é isolado por filial; dado cadastral compartilhado (como contatos) não é. Confirme com o usuário se não for óbvio.
+3. **RLS desde o início, já correta**:
+   - Policies de `select`/`insert`/`update`/`delete` **separadas** (nunca `for all`) — `for all` duplica a cobertura do `select` e dispara o aviso "multiple permissive policies" no advisor.
+   - `using (has_permission('modulo-id', 'view') and has_branch_access(branch_id))` — só inclua `has_branch_access` se o módulo tiver `branch_id`.
+   - Qualquer função SQL nova precisa de `revoke execute ... from anon` explícito — o Supabase regrante EXECUTE a `anon`/`authenticated`/`service_role` por padrão ao criar a função, e `revoke ... from public` sozinho não basta.
+4. **Repositório**: implementar `ModuleDataRepository<T>` (`src/lib/repositories/types.ts`), no padrão de `productsRepository.ts` (fábrica recebe `branchId` se o módulo for isolado por filial) ou `contactsRepository.ts` (sem filial).
+5. **Hook + página**: espelhar `useProductsData.ts`/`ProductsPage.tsx` — `useModuleDefinition(moduleId)`, `useAuth().hasPermission`, `RegistryFormModal` para criar/editar, `ConfirmDialog` para excluir. Registrar a janela com `openWindow({ id, label, path })` — **não precisa mais passar `icon` manualmente**: `openWindow` já busca a imagem certa em `HOME_MODULES` pelo `id`, então o dock some sincronizado com o ícone da tela inicial automaticamente (ver `src/components/openWindows.tsx`). Só garanta que o módulo tem uma entrada em `HOME_MODULES` (`src/features/home/modules.ts`) com `iconImage` — sem isso o dock cai pro ícone de traço genérico (`icon`), que é decorativo/reserva.
+6. **Se o módulo precisar de imagem** (produto, item etc.), reaproveite `PhotoDropzone` (`src/features/registry-engine/PhotoDropzone.tsx`) — já é genérico, só falta: criar bucket próprio no Storage (não reaproveite `contact-photos`), coluna `*_url` na tabela, policies de `storage.objects` no mesmo padrão de `has_permission`, e ligar via prop `media`/`mediaField`. Sem redimensionamento/limite de tamanho client-side ainda — replicar esse débito técnico é aceitável, mas documente se mudar.
+7. **Depois de aplicar as migrations**: rodar `get_advisors` (security e performance) e corrigir avisos novos na hora — não deixar acumular para o fim.
+8. **Gerar tipos**: `generate_typescript_types` e atualizar `src/types/supabase.ts` manualmente (o projeto não usa geração automática no build).
+9. **Testar de verdade no navegador** (não só `tsc`/lint): logar com o usuário de teste (ver memória `reference_test_account`), criar/editar/excluir um registro, e testar RLS tentando ler dado de outra filial/sem permissão pelo console — confirmar que o banco bloqueia, não só a UI.
+
 ## Pontos de atenção
 
 - A tela inicial usa o layout `original` como padrão em `src/features/home/HomePage.tsx`.
