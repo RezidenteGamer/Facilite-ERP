@@ -272,6 +272,39 @@
   transition: none;
 }
 
+/* ---------- Cabeçalho compacto em viewport baixo ----------
+   O encolhimento do cabeçalho só reage ao SCROLL (ver o JS acima) — em
+   viewport curto (zoom do navegador acima de 100%, notebook com pouca
+   altura, celular deitado) o cabeçalho continua no tamanho cheio
+   mesmo na posição de rolagem 0, e pode sozinho empurrar o conteúdo
+   para dentro da zona das abas flutuantes antes mesmo de existir
+   scroll pra "resolver" isso rolando até o fim. Como max-height é
+   sobre a VIEWPORT, não sobre a largura, cobre zoom e proporção baixa
+   em qualquer breakpoint de largura.
+   !important porque o JS do scroll escreve estas mesmas variáveis via
+   style inline a cada frame — sem isso, o inline sempre ganharia da
+   media query. */
+@media (max-height: 700px) {
+  .app-header {
+    --header-padding-top: 10px !important;
+    --brand-size: 26px !important;
+    --brand-padding-bottom: 0px !important;
+    --nav-padding-top: 4px !important;
+    --nav-gap: 18px !important;
+    --nav-font-size: 14px !important;
+    --nav-icon-size: 18px !important;
+    --nav-item-gap: 4px !important;
+    --search-label-height: 0px !important;
+    --search-label-opacity: 0 !important;
+    --search-gap: 2px !important;
+    --search-padding-y: 6px !important;
+    --branch-max-height: 32px !important;
+    --branch-margin-top: 6px !important;
+    --branch-padding-top: 4px !important;
+    --branch-padding-bottom: 6px !important;
+  }
+}
+
 /* ---------- Conteúdo ---------- */
 .app-content {
   flex: 1;
@@ -295,8 +328,23 @@
   color: var(--text-primary);
 }
 
-/* Tela travada na altura da janela: nada rola a página, só as áreas
-   internas. Colunas laterais ficam fixas e o cabeçalho não recolhe. */
+/* Tela travada na altura da janela em QUALQUER largura — inclusive
+   quando o RegistryLayout empilha as colunas (ver RegistryLayout.css,
+   breakpoint próprio em 1024px). Colunas laterais ficam fixas e o
+   cabeçalho não recolhe.
+
+   Isto já foi "página rola normalmente quando empilha" (com
+   .app-shell--fill virando altura automática abaixo de 1100px), mas
+   isso reabria exatamente o bug que --content-bottom-clearance tenta
+   fechar: rolagem de PÁGINA só garante a folga depois de rolar até o
+   fim — na posição inicial (scroll 0), se o conteúdo natural (cabeçalho
+   + ações/tabela/ficha empilhados) já for alto o bastante pra viewport
+   curta (zoom do navegador acima de 100%, notebook baixo, celular
+   deitado), as abas fixas cobrem conteúdo mesmo sem ninguém ter rolado
+   ainda. Prender a altura e rolar por DENTRO de .app-content--fit
+   (abaixo) resolve isso de vez: o container nunca renderiza além do
+   próprio limite, então a folga vale em qualquer posição de rolagem,
+   não só na última. */
 .app-shell--fill {
   height: 100dvh;
   overflow: hidden;
@@ -304,28 +352,19 @@
 
 .app-content--fit {
   min-height: 0;
-  overflow: hidden;
-  /* menos folga embaixo que o padrão: aqui não há rolagem para "passar por
-     baixo" das abas flutuantes, então só o necessário para não cobri-las */
+  /* "auto" no eixo vertical: sem conteúdo suficiente pra rolar (a
+     maioria das telas em resolução normal), não faz nada — quando o
+     conteúdo empilhado precisa de mais espaço que a viewport tem
+     (viewport curta e/ou empilhado), rola por dentro em vez de a
+     página inteira crescer. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* menos folga embaixo que o padrão: aqui não há rolagem de página para
+     "passar por baixo" das abas flutuantes, então só o necessário para
+     não cobri-las — e essa garantia agora vale em qualquer altura de
+     viewport, não só quando a tela é alta o bastante para nunca
+     precisar rolar. */
   padding-bottom: var(--content-bottom-clearance-fit);
-}
-
-/* ---------- Responsivo ---------- */
-/* Empilhado (colunas viram uma só), travar a altura cortaria conteúdo —
-   aqui a página volta a rolar normalmente. */
-@media (max-width: 1100px) {
-  .app-shell--fill {
-    height: auto;
-    min-height: 100dvh;
-    overflow: visible;
-  }
-
-  .app-content--fit {
-    overflow: visible;
-    /* Virou tela que rola de verdade — mesma folga do padrão, não mais
-       a variante "fit". */
-    padding-bottom: var(--content-bottom-clearance);
-  }
 }
 
 @media (max-width: 900px) {
