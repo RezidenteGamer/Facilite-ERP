@@ -1,30 +1,18 @@
-// Script único: converte os ícones "SVG" de teste em
-// "Recursos de Desenvolvimento/Ícones" (na prática, PNG embutido com máscara —
-// mesmo problema do ícone antigo do BackTab) em WebP leve + placeholder
-// borrado, prontos pra usar com FadeImage. Rode de novo se novos ícones
-// aparecerem na pasta. Precisa de `npm i -D sharp` (não fica como dependência
-// do projeto).
+// Script único: converte os ícones de
+// "Recursos de Desenvolvimento/Icones" (pasta fora do repo, ver .gitignore)
+// em WebP leve + placeholder borrado, prontos pra usar com FadeImage. Rode de
+// novo (atualizando o MAP abaixo) sempre que novos ícones aparecerem na
+// pasta. Precisa de `npm i -D sharp` (não fica como dependência do projeto).
 import sharp from "sharp";
 import { writeFileSync, mkdirSync } from "node:fs";
 
-const SRC_DIR = "Recursos de Desenvolvimento/Ícones";
+const SRC_DIR = "Recursos de Desenvolvimento/Icones";
 const OUT_DIR = "src/assets/icons/modules";
 
 // Nome do arquivo de origem -> id do módulo em src/features/home/modules.ts
 const MAP = {
-  "clientes-fornecedores.svg": "clientes-fornecedores",
-  "produtos.svg": "produtos",
-  "realizar-venda.svg": "realizar-venda",
-  "notas emitidas.svg": "notas-emitidas",
-  "financeiro.svg": "financeiro",
-  "frente-caixa.svg": "ponto-de-venda",
-  "compras.png": "compras",
-  "controle-caixa.png": "controle-caixa",
-  "ajuste-estoque.png": "ajuste-estoque",
-  "tributacao.png": "tributacoes",
-  "pedidos-venda.png": "pedidos-venda",
-  "usuarios e operadores.png": "usuarios-operadores",
-  "relatorios.png": "relatorios",
+  "condicionais.png": "condicionais",
+  "devolucao-de-venda.png": "devolucao-venda",
 };
 
 // Exibido em ~64px CSS dentro do círculo de 84px (ver ModuleTile.css) — 256px

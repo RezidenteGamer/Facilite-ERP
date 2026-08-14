@@ -5,8 +5,12 @@ import clientesFornecedoresIcon from "../../assets/icons/modules/clientes-fornec
 import { CLIENTES_FORNECEDORES_PLACEHOLDER } from "../../assets/icons/modules/clientes-fornecedores.placeholder";
 import comprasIcon from "../../assets/icons/modules/compras.webp";
 import { COMPRAS_PLACEHOLDER } from "../../assets/icons/modules/compras.placeholder";
+import condicionaisIcon from "../../assets/icons/modules/condicionais.webp";
+import { CONDICIONAIS_PLACEHOLDER } from "../../assets/icons/modules/condicionais.placeholder";
 import controleCaixaIcon from "../../assets/icons/modules/controle-caixa.webp";
 import { CONTROLE_CAIXA_PLACEHOLDER } from "../../assets/icons/modules/controle-caixa.placeholder";
+import devolucaoVendaIcon from "../../assets/icons/modules/devolucao-venda.webp";
+import { DEVOLUCAO_VENDA_PLACEHOLDER } from "../../assets/icons/modules/devolucao-venda.placeholder";
 import financeiroIcon from "../../assets/icons/modules/financeiro.webp";
 import { FINANCEIRO_PLACEHOLDER } from "../../assets/icons/modules/financeiro.placeholder";
 import notasEmitidasIcon from "../../assets/icons/modules/notas-emitidas.webp";
@@ -136,7 +140,14 @@ export const HOME_MODULES: HomeModule[] = [
     iconScale: 1.5625,
     path: "/compras",
   },
-  { id: "devolucao-venda", label: "Devolução de venda", icon: SaleReturnIcon, path: "/devolucao-venda" },
+  {
+    id: "devolucao-venda",
+    label: "Devolução de venda",
+    icon: SaleReturnIcon,
+    iconImage: devolucaoVendaIcon,
+    iconImagePlaceholder: DEVOLUCAO_VENDA_PLACEHOLDER,
+    path: "/devolucao-venda",
+  },
   {
     id: "ajuste-estoque",
     label: "Ajuste de estoque",
@@ -168,6 +179,12 @@ export const HOME_MODULES: HomeModule[] = [
     iconImagePlaceholder: USUARIOS_OPERADORES_PLACEHOLDER,
     path: "/usuarios-operadores",
   },
-  // Condicionais fica de fora por enquanto (a pedido).
-  { id: "condicionais", label: "Condicionais", icon: RefreshIcon, path: "/condicionais" },
+  {
+    id: "condicionais",
+    label: "Condicionais",
+    icon: RefreshIcon,
+    iconImage: condicionaisIcon,
+    iconImagePlaceholder: CONDICIONAIS_PLACEHOLDER,
+    path: "/condicionais",
+  },
 ];
