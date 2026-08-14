@@ -535,6 +535,61 @@ export type Database = {
           },
         ];
       };
+      stock_adjustments: {
+        Row: {
+          balance_after: number;
+          branch_id: string;
+          change: number;
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          product_id: string;
+          reason: string;
+        };
+        Insert: {
+          balance_after: number;
+          branch_id: string;
+          change: number;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          product_id: string;
+          reason: string;
+        };
+        Update: {
+          balance_after?: number;
+          branch_id?: string;
+          change?: number;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          product_id?: string;
+          reason?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stock_adjustments_branch_id_fkey";
+            columns: ["branch_id"];
+            isOneToOne: false;
+            referencedRelation: "branches";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stock_adjustments_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stock_adjustments_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       sales: {
         Row: {
           address: string | null;
@@ -686,6 +741,10 @@ export type Database = {
       can_manage_permissions: { Args: never; Returns: boolean };
       can_manage_users: { Args: never; Returns: boolean };
       can_manage_users_for: { Args: { p_user_id: string }; Returns: boolean };
+      adjust_stock: {
+        Args: { p_branch_id: string; p_product_id: string; p_change: number; p_reason: string };
+        Returns: Database["public"]["Tables"]["stock_adjustments"]["Row"];
+      };
       create_sale: {
         Args: { payload: Json };
         Returns: Database["public"]["Tables"]["sales"]["Row"];
