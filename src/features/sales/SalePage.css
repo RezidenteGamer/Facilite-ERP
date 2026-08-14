@@ -237,7 +237,9 @@
 }
 
 .sale__totals-row--warn {
-  color: var(--danger);
+  /* Fixo (não var(--danger)): o card é sempre azul-escuro nos dois temas, e o
+     vermelho do tema claro (pensado pra fundo branco) fica sem contraste aqui. */
+  color: #FF6259;
 }
 
 /* ---------- Detalhes da operação (recolhível, opcional) ---------- */
@@ -277,7 +279,9 @@
 /* ---------- Erros / confirmação ---------- */
 .sale__error {
   margin: 0;
-  color: var(--danger);
+  /* Fixo (não var(--danger)): o card é sempre azul-escuro nos dois temas, e o
+     vermelho do tema claro (pensado pra fundo branco) fica sem contraste aqui. */
+  color: #FF6259;
   font-size: 14px;
 }
 
