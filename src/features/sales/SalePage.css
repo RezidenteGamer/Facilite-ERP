@@ -1,17 +1,10 @@
-/* O painel fica centrado sobre o miolo claro; a aba "Frete" nasce atrás
-   dele e só a parte que sobra à direita fica visível. */
 .sale {
-  position: relative;
   width: min(1120px, 100%);
   margin: 0 auto;
 }
 
 .sale__panel {
-  position: relative;
-  z-index: 1;
-  /* Moldura mais escura que aparece como borda do painel — o mesmo efeito
-     de camada do desenho de referência. */
-  padding: 14px 46px 14px 14px;
+  padding: 14px;
   border-radius: 26px;
   background: var(--blue-panel-edge);
   box-shadow: var(--shadow-card);
@@ -20,16 +13,272 @@
 .sale__card {
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 22px;
   padding: 26px 32px 30px;
   border-radius: 20px;
   background: var(--blue-panel);
 }
 
-.sale__grid {
+/* ---------- Cliente / Vendedor ---------- */
+.sale__who {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px 44px;
+}
+
+/* ---------- Busca de produto: a ação principal da tela ---------- */
+.sale__product-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 54px;
+  padding: 0 20px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease);
+}
+
+.sale__product-search:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+.sale__product-search svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.sale__product-search span {
+  opacity: 0.85;
+}
+
+/* ---------- Carrinho, pagamentos e totais ---------- */
+.sale__cart-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sale__cart-empty {
+  margin: 4px 0;
+  font-size: 14px;
+  color: var(--white);
+  opacity: 0.7;
+}
+
+.sale__cart-line {
+  display: grid;
+  grid-template-columns: 1fr 70px 90px 90px 100px 32px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sale__cart-line-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sale__cart-line-name {
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sale__cart-line-code {
+  color: var(--white);
+  opacity: 0.65;
+  font-size: 12px;
+}
+
+.sale__cart-line-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.sale__cart-line-input--narrow {
+  width: 64px;
+}
+
+.sale__cart-line-total {
+  color: var(--white);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.sale__cart-line-remove {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--white);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sale__cart-line-remove:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.sale__payments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sale__payments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--white);
+}
+
+.sale__payments-add {
+  border: 0;
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.sale__payments-add:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.sale__payment-line {
+  display: grid;
+  grid-template-columns: 160px 120px auto 32px;
+  align-items: center;
+  gap: 10px;
+}
+
+.sale__payment-select {
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.sale__totals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 340px;
+  margin-left: auto;
+}
+
+.sale__totals-input-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--white);
+  font-size: 14px;
+}
+
+.sale__totals-input-row input {
+  width: 130px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: right;
+}
+
+.sale__totals-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--white);
+  font-size: 14px;
+}
+
+.sale__totals-row--total {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sale__totals-row--ok {
+  color: #7CE38B;
+}
+
+.sale__totals-row--warn {
+  color: var(--danger);
+}
+
+/* ---------- Detalhes da operação (recolhível, opcional) ---------- */
+.sale__details-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--white);
+  opacity: 0.8;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sale__details-toggle:hover {
+  opacity: 1;
+}
+
+.sale__details-chevron {
+  transition: transform .15s var(--ease);
+}
+
+.sale__details-chevron--open {
+  transform: rotate(180deg);
+}
+
+.sale__details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 44px;
+}
+
+/* ---------- Erros / confirmação ---------- */
+.sale__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 14px;
 }
 
 .sale__footer {
@@ -56,57 +305,93 @@
   transform: translateY(-1px);
 }
 
-/* ---------- Aba lateral "Frete" ---------- */
-.sale__freight {
-  position: absolute;
-  z-index: 0;
-  top: 48px;
-  left: 100%;
-  /* recuada para a esquerda: parte dela some atrás do painel */
-  margin-left: -28px;
-  width: 104px;
-  height: 262px;
-  padding: 0 0 0 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 0 20px 20px 0;
-  background: var(--tile-yellow);
-  color: var(--ink);
-  cursor: pointer;
-  transition: background-color .15s var(--ease);
+.sale__continue:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
-.sale__freight:hover {
-  background: var(--tile-yellow-hover);
-}
-
-.sale__freight span {
+.sale__back {
+  height: 62px;
+  padding: 0 32px;
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--white);
   font-family: var(--font-ui);
-  font-size: 19px;
-  /* texto na vertical, lendo de cima para baixo */
-  writing-mode: vertical-rl;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease);
+}
+
+.sale__back:hover {
+  border-color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------- Confirmação ---------- */
+.sale__card--success {
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.sale__success-title {
+  margin: 0;
+  color: var(--white);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.sale__success-total {
+  margin: 0;
+  color: var(--white);
+  font-size: 18px;
+  opacity: 0.85;
+}
+
+.sale__success-actions {
+  display: flex;
+  gap: 14px;
 }
 
 /* ---------- Responsivo ---------- */
 @media (max-width: 900px) {
   .sale__panel { padding: 10px 12px; }
-  .sale__card { padding: 20px 18px 24px; gap: 20px; }
-  .sale__grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .sale__card { padding: 20px 18px 24px; gap: 18px; }
+  .sale__who { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .sale__details-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .sale__continue { min-width: 0; width: 100%; height: 56px; font-size: 19px; }
+  .sale__product-search { height: 50px; font-size: 15px; }
 
-  /* Sem espaço lateral para a aba: ela vira um botão acima do painel. */
-  .sale__freight {
-    position: static;
-    width: 100%;
-    height: 46px;
-    margin: 0 0 12px;
-    padding: 0;
-    border-radius: var(--radius-pill);
+  .sale__cart-line {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "info info"
+      "qty price"
+      "discount total"
+      "remove remove";
+  }
+  .sale__cart-line-info { grid-area: info; }
+  .sale__cart-line-remove { grid-area: remove; justify-self: end; }
+
+  .sale__payment-line {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 8px;
   }
 
-  .sale__freight span {
-    writing-mode: horizontal-tb;
+  .sale__totals {
+    max-width: none;
+    margin-left: 0;
+  }
+
+  .sale__back {
+    width: 100%;
+    height: 56px;
+  }
+
+  .sale__success-actions {
+    flex-direction: column;
+    width: 100%;
   }
 }

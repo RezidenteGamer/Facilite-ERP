@@ -389,6 +389,190 @@ export type Database = {
         };
         Relationships: [];
       };
+      sale_items: {
+        Row: {
+          created_at: string;
+          discount_amount: number;
+          id: string;
+          product_id: string;
+          quantity: number;
+          sale_id: string;
+          total_amount: number;
+          unit_price: number;
+        };
+        Insert: {
+          created_at?: string;
+          discount_amount?: number;
+          id?: string;
+          product_id: string;
+          quantity: number;
+          sale_id: string;
+          total_amount: number;
+          unit_price: number;
+        };
+        Update: {
+          created_at?: string;
+          discount_amount?: number;
+          id?: string;
+          product_id?: string;
+          quantity?: number;
+          sale_id?: string;
+          total_amount?: number;
+          unit_price?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "sale_items_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sale_items_sale_id_fkey";
+            columns: ["sale_id"];
+            isOneToOne: false;
+            referencedRelation: "sales";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      sale_payments: {
+        Row: {
+          amount: number;
+          created_at: string;
+          id: string;
+          installments: number;
+          method: Database["public"]["Enums"]["sale_payment_method"];
+          sale_id: string;
+        };
+        Insert: {
+          amount: number;
+          created_at?: string;
+          id?: string;
+          installments?: number;
+          method: Database["public"]["Enums"]["sale_payment_method"];
+          sale_id: string;
+        };
+        Update: {
+          amount?: number;
+          created_at?: string;
+          id?: string;
+          installments?: number;
+          method?: Database["public"]["Enums"]["sale_payment_method"];
+          sale_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "sale_payments_sale_id_fkey";
+            columns: ["sale_id"];
+            isOneToOne: false;
+            referencedRelation: "sales";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      sales: {
+        Row: {
+          address: string | null;
+          branch_id: string;
+          code: string;
+          confirmed_at: string | null;
+          contact_id: string;
+          cost_center: string | null;
+          created_at: string;
+          created_by: string;
+          delivery_address: string | null;
+          department: string | null;
+          discount_amount: number;
+          exit_date: string | null;
+          freight_amount: number;
+          id: string;
+          issue_date: string;
+          operation_type: string | null;
+          seller_id: string;
+          status: Database["public"]["Enums"]["sale_status"];
+          subtotal_amount: number;
+          total_amount: number;
+          updated_at: string;
+        };
+        Insert: {
+          address?: string | null;
+          branch_id: string;
+          code: string;
+          confirmed_at?: string | null;
+          contact_id: string;
+          cost_center?: string | null;
+          created_at?: string;
+          created_by: string;
+          delivery_address?: string | null;
+          department?: string | null;
+          discount_amount?: number;
+          exit_date?: string | null;
+          freight_amount?: number;
+          id?: string;
+          issue_date?: string;
+          operation_type?: string | null;
+          seller_id: string;
+          status?: Database["public"]["Enums"]["sale_status"];
+          subtotal_amount?: number;
+          total_amount?: number;
+          updated_at?: string;
+        };
+        Update: {
+          address?: string | null;
+          branch_id?: string;
+          code?: string;
+          confirmed_at?: string | null;
+          contact_id?: string;
+          cost_center?: string | null;
+          created_at?: string;
+          created_by?: string;
+          delivery_address?: string | null;
+          department?: string | null;
+          discount_amount?: number;
+          exit_date?: string | null;
+          freight_amount?: number;
+          id?: string;
+          issue_date?: string;
+          operation_type?: string | null;
+          seller_id?: string;
+          status?: Database["public"]["Enums"]["sale_status"];
+          subtotal_amount?: number;
+          total_amount?: number;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "sales_branch_id_fkey";
+            columns: ["branch_id"];
+            isOneToOne: false;
+            referencedRelation: "branches";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_contact_id_fkey";
+            columns: ["contact_id"];
+            isOneToOne: false;
+            referencedRelation: "contacts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "sales_seller_id_fkey";
+            columns: ["seller_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       user_branches: {
         Row: {
           branch_id: string;
@@ -421,6 +605,10 @@ export type Database = {
       can_manage_permissions: { Args: never; Returns: boolean };
       can_manage_users: { Args: never; Returns: boolean };
       can_manage_users_for: { Args: { p_user_id: string }; Returns: boolean };
+      create_sale: {
+        Args: { payload: Json };
+        Returns: Database["public"]["Tables"]["sales"]["Row"];
+      };
       has_branch_access: { Args: { p_branch_id: string }; Returns: boolean };
       has_permission: {
         Args: { p_action: string; p_module_id: string };
@@ -429,6 +617,8 @@ export type Database = {
     };
     Enums: {
       contact_kind: "clientes" | "fornecedores";
+      sale_payment_method: "dinheiro" | "debito" | "credito" | "pix" | "boleto" | "outro";
+      sale_status: "confirmed" | "cancelled";
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -557,6 +747,8 @@ export const Constants = {
   public: {
     Enums: {
       contact_kind: ["clientes", "fornecedores"],
+      sale_payment_method: ["dinheiro", "debito", "credito", "pix", "boleto", "outro"],
+      sale_status: ["confirmed", "cancelled"],
     },
   },
 } as const;
