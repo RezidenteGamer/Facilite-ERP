@@ -46,6 +46,10 @@
   outline: none;
 }
 
+.product-picker__search input::placeholder {
+  color: rgba(255, 255, 255, 0.75);
+}
+
 .product-picker__list {
   display: flex;
   flex-direction: column;
