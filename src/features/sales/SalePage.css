@@ -50,6 +50,8 @@
 }
 
 .sale__product-search svg {
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   opacity: 0.85;
 }
