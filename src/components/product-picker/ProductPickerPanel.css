@@ -1,0 +1,145 @@
+.product-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.product-picker__title {
+  margin: 0;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.product-picker__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.product-picker__search svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.8;
+  color: var(--white);
+}
+
+.product-picker__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.product-picker__search input:focus {
+  outline: none;
+}
+
+.product-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.product-picker__empty {
+  margin: 8px 0;
+  color: var(--white);
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+.product-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  cursor: grab;
+  touch-action: none;
+  transition: background-color .15s var(--ease);
+}
+
+.product-picker__row:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.product-picker__row:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.product-picker__row--dragging {
+  opacity: 0.4;
+}
+
+.product-picker__row-code {
+  flex-shrink: 0;
+  width: 40px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.product-picker__row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.product-picker__row-edit {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--white);
+  cursor: pointer;
+}
+
+.product-picker__row-edit:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.product-picker__row-edit svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Card que segue o cursor/dedo enquanto o produto é arrastado (DragOverlay). */
+.product-picker__drag-overlay {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  background: var(--amber);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: var(--shadow-card);
+  cursor: grabbing;
+}

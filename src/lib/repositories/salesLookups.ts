@@ -1,6 +1,5 @@
 import { supabase } from "../supabaseClient";
 import type { Contact } from "../../features/customers/contacts";
-import type { Product } from "../../features/products/products";
 
 function assertSupabase() {
   if (!supabase) {
@@ -55,37 +54,4 @@ export async function fetchSaleSellers(query: string): Promise<SaleSeller[]> {
   const { data, error } = await request.limit(20);
   if (error) throw error;
   return (data ?? []).map((row) => ({ id: row.id, name: row.name, operatorCode: row.operator_code }));
-}
-
-/** Busca produtos ativos da filial por descrição ou código — usado no lookup de Produto. */
-export async function fetchSaleProducts(query: string, branchId: string): Promise<Product[]> {
-  const client = assertSupabase();
-  let request = client
-    .from("products")
-    .select("*")
-    .eq("branch_id", branchId)
-    .eq("active", true)
-    .order("description");
-  const term = query.trim();
-  if (term) {
-    request = request.or(`description.ilike.%${term}%,code.ilike.%${term}%`);
-  }
-  const { data, error } = await request.limit(20);
-  if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    code: row.code,
-    description: row.description,
-    stock: row.stock,
-    salePrice: row.sale_price,
-    active: row.active,
-    taxation: row.taxation ?? undefined,
-    type: row.type ?? undefined,
-    costPrice: row.cost_price ?? undefined,
-    wholesalePrice: row.wholesale_price ?? undefined,
-    ncm: row.ncm ?? undefined,
-    location: row.location ?? undefined,
-    subLocation: row.sub_location ?? undefined,
-    createdAt: row.created_at ?? undefined,
-  }));
 }

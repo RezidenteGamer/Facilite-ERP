@@ -10,23 +10,12 @@ import { buildDetailFields, buildFormFields, buildTableColumns } from "../regist
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { ProductsIcon } from "../home/icons";
-import { formatPrice, type Product } from "./products";
+import { buildProductInput, formatPrice, type Product } from "./products";
 import { useProductsData } from "./useProductsData";
 
 const MODULE_ID = "produtos";
 
 type ModalState = "none" | "new" | "edit" | "clone";
-
-function toNumber(value: string | undefined): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toOptionalNumber(value: string | undefined): number | undefined {
-  if (!value || !value.trim()) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 /** Módulo "Produtos" — segundo módulo sobre o motor genérico de metadados, isolado por filial. */
 export default function ProductsPage() {
@@ -99,22 +88,6 @@ export default function ProductsPage() {
   async function toggleActive() {
     if (!selected) return;
     await updateProduct(selected.id, { active: !selected.active });
-  }
-
-  function buildProductInput(values: Record<string, string>) {
-    return {
-      description: values.description ?? "",
-      stock: toNumber(values.stock),
-      salePrice: toNumber(values.salePrice),
-      active: true,
-      taxation: values.taxation || undefined,
-      type: values.type || undefined,
-      costPrice: toOptionalNumber(values.costPrice),
-      wholesalePrice: toOptionalNumber(values.wholesalePrice),
-      ncm: values.ncm || undefined,
-      location: values.location || undefined,
-      subLocation: values.subLocation || undefined,
-    };
   }
 
   async function handleCreateSubmit(values: Record<string, string>) {

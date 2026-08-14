@@ -1,25 +1,61 @@
-import { useEffect, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  pointerWithin,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import FormField from "../../components/form/FormField";
 import LookupModal from "../../components/form/LookupModal";
-import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon, SearchIcon } from "../../components/icons";
+import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
+import ProductPickerPanel, { PRODUCT_PICKER_DRAG_PREFIX } from "../../components/product-picker/ProductPickerPanel";
 import { useAuth } from "../auth/AuthContext";
 import type { Contact } from "../customers/contacts";
-import { fetchSaleContacts, fetchSaleProducts, fetchSaleSellers, type SaleSeller } from "../../lib/repositories/salesLookups";
+import { fetchSaleContacts, fetchSaleSellers, type SaleSeller } from "../../lib/repositories/salesLookups";
 import type { Product } from "../products/products";
 import { SaleHandIcon } from "../home/icons";
 import { formatMoney, SALE_PAYMENT_METHOD_LABEL, type SalePaymentMethod } from "./sales";
 import { useSaleDraft } from "./useSaleDraft";
 import "./SalePage.css";
 
-type LookupKind = "cliente" | "vendedor" | "produto" | null;
+type LookupKind = "cliente" | "vendedor" | null;
 
+const CART_DROPZONE_ID = "sale-cart-dropzone";
+// Fora do componente: um objeto literal novo a cada render faria o `useSensor`
+// devolver uma sensor list nova a cada render (ele depende da identidade do
+// objeto `options`), e o `DndContext` reinicia os sensores sempre que essa
+// lista muda — inclusive no meio de um drag, quando `handleDragStart` já
+// causa um re-render por si só (`setDraggingProduct`). Isso cancelava o
+// drag assim que ele começava.
+const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 6 } };
 const PAYMENT_METHODS: SalePaymentMethod[] = ["dinheiro", "debito", "credito", "pix", "boleto", "outro"];
 
-/** Módulo "Realizar uma venda": tela única — buscar produto é a ação principal, dados extras ficam recolhidos. */
+/**
+ * `useDroppable` só enxerga o `DndContext` quando chamado por um componente
+ * renderizado DENTRO dele — chamar no mesmo componente que declara o
+ * `<DndContext>` não funciona (o hook roda "antes" do provider existir do
+ * ponto de vista da árvore de componentes). Por isso o card da venda vira
+ * este componente filho.
+ */
+function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: CART_DROPZONE_ID });
+  return (
+    <div className="sale__card" ref={setNodeRef}>
+      {children(isOver)}
+    </div>
+  );
+}
+
+/** Módulo "Realizar uma venda": produtos à esquerda (clique ou arraste), venda à direita. */
 export default function SalePage() {
   const navigate = useNavigate();
   const { openWindow } = useOpenWindows();
@@ -28,8 +64,24 @@ export default function SalePage() {
   const [lookup, setLookup] = useState<LookupKind>(null);
   const [confirming, setConfirming] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
 
   const canCreate = hasPermission("realizar-venda", "create");
+
+  function handleDragStart(event: DragStartEvent) {
+    const product = event.active.data.current?.product as Product | undefined;
+    setDraggingProduct(product ?? null);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setDraggingProduct(null);
+    const isProductDrag = String(event.active.id).startsWith(PRODUCT_PICKER_DRAG_PREFIX);
+    const product = event.active.data.current?.product as Product | undefined;
+    if (isProductDrag && product && event.over?.id === CART_DROPZONE_ID) {
+      draft.addProduct(product);
+    }
+  }
 
   useEffect(() => {
     openWindow({
@@ -72,34 +124,43 @@ export default function SalePage() {
 
   return (
     <AppShell navItems={navItems} secondaryText="Realizar venda">
-      <div className="sale">
-        <div className="sale__panel">
-          <div className="sale__card">
-            <div className="sale__who">
-              <FormField
-                id="venda-cliente"
-                label="Cliente"
-                value={draft.header.clienteNome}
-                onChange={(v) => draft.setField("clienteNome", v)}
-                lookup
-                onLookup={() => setLookup("cliente")}
-              />
-              <FormField
-                id="venda-vendedor"
-                label="Vendedor"
-                value={draft.header.vendedorNome}
-                onChange={(v) => draft.setField("vendedorNome", v)}
-                lookup
-                onLookup={() => setLookup("vendedor")}
-              />
-            </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="sale sale--workspace">
+          <div className="sale__products-panel">
+            <ProductPickerPanel branchId={currentBranchId} onAddProduct={(p) => draft.addProduct(p)} />
+          </div>
 
-            <button className="sale__product-search" type="button" onClick={() => setLookup("produto")}>
-              <SearchIcon />
-              <span>Buscar produto por nome ou código para adicionar...</span>
-            </button>
+          <div className="sale__panel">
+            <CartDropzone>
+              {(isCartOver) => (
+                <>
+              <p className="sale__cart-title">Venda</p>
 
-            <div className="sale__cart-lines">
+              <div className="sale__who">
+                <FormField
+                  id="venda-cliente"
+                  label="Cliente"
+                  value={draft.header.clienteNome}
+                  onChange={(v) => draft.setField("clienteNome", v)}
+                  lookup
+                  onLookup={() => setLookup("cliente")}
+                />
+                <FormField
+                  id="venda-vendedor"
+                  label="Vendedor"
+                  value={draft.header.vendedorNome}
+                  onChange={(v) => draft.setField("vendedorNome", v)}
+                  lookup
+                  onLookup={() => setLookup("vendedor")}
+                />
+              </div>
+
+            <div className={`sale__cart-lines${isCartOver ? " sale__cart-lines--drop-active" : ""}`}>
               {draft.cart.length === 0 ? (
                 <p className="sale__cart-empty">Nenhum item adicionado ainda — comece buscando um produto acima.</p>
               ) : (
@@ -321,9 +382,18 @@ export default function SalePage() {
                 {draft.submitting ? "Confirmando..." : `Confirmar venda — ${formatMoney(draft.total)}`}
               </button>
             </div>
+                </>
+              )}
+            </CartDropzone>
           </div>
         </div>
-      </div>
+
+        <DragOverlay>
+          {draggingProduct ? (
+            <div className="product-picker__drag-overlay">{draggingProduct.description}</div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       {lookup === "cliente" && (
         <LookupModal<Contact>
@@ -350,21 +420,6 @@ export default function SalePage() {
           renderItem={(s) => ({ primary: s.name, secondary: s.operatorCode })}
           onSelect={(s) => {
             draft.selectSeller(s);
-            setLookup(null);
-          }}
-        />
-      )}
-
-      {lookup === "produto" && currentBranchId && (
-        <LookupModal<Product>
-          title="Selecionar produto"
-          placeholder="Buscar por descrição ou código..."
-          onClose={() => setLookup(null)}
-          fetchItems={(query) => fetchSaleProducts(query, currentBranchId)}
-          getKey={(p) => p.id}
-          renderItem={(p) => ({ primary: p.description, secondary: `${p.code} · Estoque: ${p.stock}` })}
-          onSelect={(p) => {
-            draft.addProduct(p);
             setLookup(null);
           }}
         />

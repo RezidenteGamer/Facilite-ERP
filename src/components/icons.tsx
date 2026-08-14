@@ -69,6 +69,15 @@ export function SearchIcon(props: IconProps) {
   );
 }
 
+export function PencilIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M14.5 4.5 19.5 9.5 8 21H3v-5Z" />
+      <line x1="12.5" y1="6.5" x2="17.5" y2="11.5" />
+    </svg>
+  );
+}
+
 export function PaperclipIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
