@@ -1,0 +1,56 @@
+.sale-wizard {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+/* A etapa de Produtos precisa da coluna extra do painel de produtos —
+   mesma largura que o layout de duas colunas já usava antes do wizard. */
+.sale-wizard--wide {
+  width: min(1400px, 100%);
+}
+
+.sale-wizard__step {
+  margin-bottom: 18px;
+}
+
+.sale-wizard__nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* Mesmo motivo do z-index em .sale__confirm-actions (SalePage.css): as
+     abas fixas do rodapé (Suporte/WindowDock) podem cair em cima da
+     navegação em janelas mais baixas — 31 garante que o clique sempre
+     vence aqui. */
+  position: relative;
+  z-index: 31;
+}
+
+.sale-wizard__nav-next {
+  margin-left: auto;
+}
+
+/* `.sale__back` nasceu pra ficar sobre o card azul (branco sobre azul);
+   aqui na navegação do wizard ele fica no canvas neutro da página, onde
+   texto/borda brancos quase somem no tema claro. Sobrescreve só a cor,
+   com tokens que já se adaptam a claro/escuro. */
+.sale-wizard__nav .sale__back {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.sale-wizard__nav .sale__back:hover {
+  border-color: var(--text-secondary);
+  background: var(--accent-soft);
+}
+
+@media (max-width: 900px) {
+  .sale-wizard__nav {
+    flex-wrap: wrap;
+  }
+
+  .sale-wizard__nav .sale__back,
+  .sale-wizard__nav-next {
+    flex: 1;
+    min-width: 140px;
+  }
+}

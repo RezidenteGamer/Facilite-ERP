@@ -5,6 +5,15 @@
   min-width: 0;
 }
 
+.form-field__hint {
+  margin: -2px 0 0;
+  padding-left: 6px;
+  color: var(--white);
+  opacity: 0.65;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .form-field__label {
   padding-left: 6px;
   font-size: var(--font-size-lg);

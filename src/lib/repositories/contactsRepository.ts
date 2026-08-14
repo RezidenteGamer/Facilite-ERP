@@ -29,6 +29,9 @@ function toContact(row: ContactRow): Contact {
     whatsapp: row.whatsapp ?? undefined,
     createdAt: row.created_at ?? undefined,
     photoUrl: row.photo_url ?? undefined,
+    inscricaoEstadual: row.inscricao_estadual ?? undefined,
+    indicadorIe: row.indicador_ie ?? undefined,
+    codigoIbgeMunicipio: row.codigo_ibge_municipio ?? undefined,
   };
 }
 
@@ -45,6 +48,11 @@ function toUpdateRow(patch: Partial<Contact>): TablesUpdate<"contacts"> {
     ...(patch.email !== undefined && { email: patch.email || null }),
     ...(patch.whatsapp !== undefined && { whatsapp: patch.whatsapp || null }),
     ...(patch.photoUrl !== undefined && { photo_url: patch.photoUrl || null }),
+    ...(patch.inscricaoEstadual !== undefined && { inscricao_estadual: patch.inscricaoEstadual || null }),
+    ...(patch.indicadorIe !== undefined && { indicador_ie: patch.indicadorIe || null }),
+    ...(patch.codigoIbgeMunicipio !== undefined && {
+      codigo_ibge_municipio: patch.codigoIbgeMunicipio || null,
+    }),
   };
 }
 
@@ -97,6 +105,9 @@ export function createContactsRepository(kind: ContactKind): ModuleDataRepositor
         phone: input.phone || null,
         email: input.email || null,
         whatsapp: input.whatsapp || null,
+        inscricao_estadual: input.inscricaoEstadual || null,
+        indicador_ie: input.indicadorIe || null,
+        codigo_ibge_municipio: input.codigoIbgeMunicipio || null,
       };
       const { data, error } = await client.from("contacts").insert(row).select().single();
       if (error) throw error;

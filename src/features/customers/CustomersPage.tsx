@@ -134,6 +134,9 @@ export default function CustomersPage() {
       phone: values.phone || undefined,
       email: values.email || undefined,
       whatsapp: values.whatsapp || undefined,
+      inscricaoEstadual: values.inscricaoEstadual || undefined,
+      indicadorIe: values.indicadorIe || undefined,
+      codigoIbgeMunicipio: values.codigoIbgeMunicipio || undefined,
     });
 
     if (pendingPhotoFile) {
@@ -160,6 +163,9 @@ export default function CustomersPage() {
       phone: values.phone || undefined,
       email: values.email || undefined,
       whatsapp: values.whatsapp || undefined,
+      inscricaoEstadual: values.inscricaoEstadual || undefined,
+      indicadorIe: values.indicadorIe || undefined,
+      codigoIbgeMunicipio: values.codigoIbgeMunicipio || undefined,
     });
     setModal("none");
   }
@@ -308,6 +314,9 @@ export default function CustomersPage() {
             phone: selected.phone ?? "",
             email: selected.email ?? "",
             whatsapp: selected.whatsapp ?? "",
+            inscricaoEstadual: selected.inscricaoEstadual ?? "",
+            indicadorIe: selected.indicadorIe ?? "",
+            codigoIbgeMunicipio: selected.codigoIbgeMunicipio ?? "",
           }}
           onSubmit={handleEditSubmit}
           onCancel={() => setModal("none")}

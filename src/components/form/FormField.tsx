@@ -11,6 +11,8 @@ type FormFieldProps = {
   lookup?: boolean;
   onLookup?: () => void;
   disabled?: boolean;
+  /** Texto curto abaixo do campo — só para explicar algo não óbvio pelo rótulo. */
+  hint?: string;
 };
 
 /**
@@ -27,6 +29,7 @@ export default function FormField({
   lookup = false,
   onLookup,
   disabled = false,
+  hint,
 }: FormFieldProps) {
   return (
     <div className="form-field">
@@ -59,6 +62,8 @@ export default function FormField({
           </button>
         )}
       </div>
+
+      {hint && <p className="form-field__hint">{hint}</p>}
     </div>
   );
 }

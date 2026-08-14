@@ -12,6 +12,17 @@ export type Product = {
   ncm?: string;
   location?: string;
   subLocation?: string;
+  cest?: string;
+  origemMercadoria?: string;
+  unidadeComercial?: string;
+  unidadeTributavel?: string;
+  cstIcms?: string;
+  csosn?: string;
+  cstIpi?: string;
+  cstPis?: string;
+  cstCofins?: string;
+  cstIbsCbs?: string;
+  cclasstrib?: string;
   createdAt?: string;
 };
 
@@ -46,5 +57,16 @@ export function buildProductInput(values: Record<string, string>): Omit<Product,
     ncm: values.ncm || undefined,
     location: values.location || undefined,
     subLocation: values.subLocation || undefined,
+    cest: values.cest || undefined,
+    origemMercadoria: values.origemMercadoria || undefined,
+    unidadeComercial: values.unidadeComercial || undefined,
+    unidadeTributavel: values.unidadeTributavel || undefined,
+    cstIcms: values.cstIcms || undefined,
+    csosn: values.csosn || undefined,
+    cstIpi: values.cstIpi || undefined,
+    cstPis: values.cstPis || undefined,
+    cstCofins: values.cstCofins || undefined,
+    cstIbsCbs: values.cstIbsCbs || undefined,
+    cclasstrib: values.cclasstrib || undefined,
   };
 }

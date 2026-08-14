@@ -127,3 +127,23 @@ export function MoonIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Confirma visualmente um estado "ok" sem depender só de cor (ex.: pagamento batendo com o total). */
+export function CheckIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props} strokeWidth={2.2}>
+      <path d="M4.5 12.5 9.5 17.5 19.5 6.5" />
+    </svg>
+  );
+}
+
+/** Sinaliza um estado "atenção" sem depender só de cor (ex.: pagamento não bate com o total). */
+export function AlertIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props} strokeWidth={2.2}>
+      <path d="M12 3.5 22 20.5H2Z" strokeLinejoin="round" />
+      <line x1="12" y1="9" x2="12" y2="13.5" />
+      <line x1="12" y1="16.8" x2="12" y2="16.81" />
+    </svg>
+  );
+}

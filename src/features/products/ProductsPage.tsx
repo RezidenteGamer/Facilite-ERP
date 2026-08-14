@@ -217,6 +217,17 @@ export default function ProductsPage() {
             ncm: selected.ncm ?? "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
+            cest: selected.cest ?? "",
+            origemMercadoria: selected.origemMercadoria ?? "",
+            unidadeComercial: selected.unidadeComercial ?? "",
+            unidadeTributavel: selected.unidadeTributavel ?? "",
+            cstIcms: selected.cstIcms ?? "",
+            csosn: selected.csosn ?? "",
+            cstIpi: selected.cstIpi ?? "",
+            cstPis: selected.cstPis ?? "",
+            cstCofins: selected.cstCofins ?? "",
+            cstIbsCbs: selected.cstIbsCbs ?? "",
+            cclasstrib: selected.cclasstrib ?? "",
           }}
           onSubmit={handleEditSubmit}
           onCancel={() => setModal("none")}
@@ -238,6 +249,17 @@ export default function ProductsPage() {
             ncm: selected.ncm ?? "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
+            cest: selected.cest ?? "",
+            origemMercadoria: selected.origemMercadoria ?? "",
+            unidadeComercial: selected.unidadeComercial ?? "",
+            unidadeTributavel: selected.unidadeTributavel ?? "",
+            cstIcms: selected.cstIcms ?? "",
+            csosn: selected.csosn ?? "",
+            cstIpi: selected.cstIpi ?? "",
+            cstPis: selected.cstPis ?? "",
+            cstCofins: selected.cstCofins ?? "",
+            cstIbsCbs: selected.cstIbsCbs ?? "",
+            cclasstrib: selected.cclasstrib ?? "",
           }}
           submitLabel="Clonar"
           onSubmit={handleCreateSubmit}

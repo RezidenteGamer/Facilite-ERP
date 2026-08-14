@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createSale, type CreateSaleInput } from "../../lib/repositories/salesRepository";
-import type { SalePaymentMethod, Sale } from "./sales";
+import { formatMoney, type SalePaymentMethod, type Sale } from "./sales";
 import type { SaleSeller } from "../../lib/repositories/salesLookups";
 
 export type SaleHeaderForm = {
@@ -19,19 +19,29 @@ export type SaleHeaderForm = {
   dataSaida: string;
 };
 
-const HEADER_INICIAL: SaleHeaderForm = {
-  clienteId: "",
-  clienteNome: "",
-  vendedorId: "",
-  vendedorNome: "",
-  endereco: "",
-  enderecoEntrega: "",
-  tipoOperacao: "",
-  departamento: "",
-  centroCustos: "",
-  dataEmissao: new Date().toISOString().slice(0, 10),
-  dataSaida: "",
-};
+/**
+ * O vendedor nasce preenchido com quem está logado — na prática é quase
+ * sempre a mesma pessoa operando o caixa, então obrigar a escolher toda
+ * venda era um clique inútil repetido dezenas de vezes por dia. Continua
+ * trocável pela lupa (ex.: outro operador processando a venda), e o campo
+ * segue existindo no banco como obrigatório — só deixou de exigir escolha
+ * manual.
+ */
+function buildHeaderInicial(defaultSeller?: SaleSeller | null): SaleHeaderForm {
+  return {
+    clienteId: "",
+    clienteNome: "",
+    vendedorId: defaultSeller?.id ?? "",
+    vendedorNome: defaultSeller?.name ?? "",
+    endereco: "",
+    enderecoEntrega: "",
+    tipoOperacao: "",
+    departamento: "",
+    centroCustos: "",
+    dataEmissao: new Date().toISOString().slice(0, 10),
+    dataSaida: "",
+  };
+}
 
 export type CartLine = {
   lineId: string;
@@ -52,18 +62,72 @@ function lineTotal(line: CartLine) {
   return Math.max(0, line.quantity * line.unitPrice - line.discountAmount);
 }
 
-/** Erros do supabase-js (ex.: PostgrestError da RPC) são objetos simples, não `Error`. */
-function extractErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (err && typeof err === "object" && "message" in err && typeof err.message === "string") {
-    return err.message;
+/** Última linha removida (item do carrinho ou pagamento) — permite "Desfazer" por alguns segundos. */
+type RemovedEntry =
+  | { kind: "cart"; line: CartLine; index: number }
+  | { kind: "payment"; line: PaymentLine; index: number };
+
+const UNDO_TIMEOUT_MS = 6000;
+
+const STOCK_ERROR = /^Estoque insuficiente para o produto ([0-9a-f-]{36})\.$/i;
+const PAYMENTS_MISMATCH_ERROR = /^A soma dos pagamentos \(([\d.,-]+)\) não bate com o total da venda \(([\d.,-]+)\)\.$/;
+
+/**
+ * A RPC `create_sale` já levanta mensagens em português para as regras de
+ * negócio que ela mesma valida (permissão, filial, item/pagamento
+ * obrigatório, produto, estoque, pagamentos batendo com o total) — não
+ * precisamos reescrevê-las. Só tratamos dois casos: (1) o erro de estoque
+ * cita o produto pelo id (a função só tem o id em mãos, não o nome) — aqui
+ * no cliente já temos o carrinho, então trocamos pelo nome; (2) qualquer
+ * erro que a RPC não previu (queda de conexão, etc.) cai num texto genérico
+ * em vez de mostrar o objeto de erro cru pro operador.
+ */
+function extractErrorMessage(err: unknown, cart: CartLine[]): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === "object" && "message" in err && typeof err.message === "string"
+        ? err.message
+        : null;
+
+  if (!raw) return "Não foi possível confirmar a venda. Tente novamente — se o problema continuar, acione o suporte.";
+
+  const stockMatch = raw.match(STOCK_ERROR);
+  if (stockMatch) {
+    const product = cart.find((line) => line.product.id === stockMatch[1])?.product;
+    return product
+      ? `Estoque insuficiente para "${product.description}" — reduza a quantidade ou remova o item.`
+      : "Estoque insuficiente para um dos produtos da venda.";
   }
-  return "Erro ao confirmar a venda.";
+
+  const mismatchMatch = raw.match(PAYMENTS_MISMATCH_ERROR);
+  if (mismatchMatch) {
+    const paid = Number(mismatchMatch[1].replace(",", "."));
+    const total = Number(mismatchMatch[2].replace(",", "."));
+    return `A soma dos pagamentos (${formatMoney(paid)}) não bate com o total da venda (${formatMoney(total)}).`;
+  }
+
+  // Mensagens conhecidas da RPC (permissão, filial, item/pagamento obrigatório,
+  // produto não encontrado/fora da filial) já vêm prontas em português — passa direto.
+  const KNOWN_MESSAGES = [
+    "Sem permissão para criar vendas.",
+    "Sem acesso a esta filial.",
+    "A venda precisa de ao menos um item.",
+    "A venda precisa de ao menos uma forma de pagamento.",
+    "Produto não encontrado.",
+    "Produto não pertence à filial da venda.",
+  ];
+  if (KNOWN_MESSAGES.includes(raw)) return raw;
+
+  return "Não foi possível confirmar a venda. Tente novamente — se o problema continuar, acione o suporte.";
 }
 
-/** Estado do rascunho de uma venda em andamento: cabeçalho + carrinho + pagamentos. */
-export function useSaleDraft(branchId: string | null) {
-  const [header, setHeader] = useState<SaleHeaderForm>(HEADER_INICIAL);
+/**
+ * Estado do rascunho de uma venda em andamento: cabeçalho + carrinho + pagamentos.
+ * `defaultSeller` (o operador logado) pré-preenche o Vendedor — ver `buildHeaderInicial`.
+ */
+export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller | null) {
+  const [header, setHeader] = useState<SaleHeaderForm>(() => buildHeaderInicial(defaultSeller));
   const [cart, setCart] = useState<CartLine[]>([]);
   const [payments, setPayments] = useState<PaymentLine[]>([]);
   const [freight, setFreight] = useState("");
@@ -71,6 +135,25 @@ export function useSaleDraft(branchId: string | null) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<Sale | null>(null);
+  const [lastRemoved, setLastRemoved] = useState<RemovedEntry | null>(null);
+
+  // Some sozinho depois de alguns segundos — "Desfazer" não deveria ficar
+  // preso na tela pro resto da venda. Cada remoção nova reinicia a contagem.
+  useEffect(() => {
+    if (!lastRemoved) return;
+    const timer = window.setTimeout(() => setLastRemoved(null), UNDO_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [lastRemoved]);
+
+  // `profile` (fonte do `defaultSeller`) carrega de forma assíncrona — se a
+  // venda já estava aberta e ninguém mexeu no campo ainda, preenche assim
+  // que ele chegar. Não faz nada se o usuário já escolheu outro vendedor.
+  useEffect(() => {
+    if (!defaultSeller) return;
+    setHeader((current) =>
+      current.vendedorId ? current : { ...current, vendedorId: defaultSeller.id, vendedorNome: defaultSeller.name },
+    );
+  }, [defaultSeller]);
 
   function setField<K extends keyof SaleHeaderForm>(field: K, value: SaleHeaderForm[K]) {
     setHeader((current) => ({ ...current, [field]: value }));
@@ -118,6 +201,9 @@ export function useSaleDraft(branchId: string | null) {
   }
 
   function removeLine(lineId: string) {
+    const index = cart.findIndex((line) => line.lineId === lineId);
+    if (index === -1) return;
+    setLastRemoved({ kind: "cart", line: cart[index], index });
     setCart((current) => current.filter((line) => line.lineId !== lineId));
   }
 
@@ -133,7 +219,30 @@ export function useSaleDraft(branchId: string | null) {
   }
 
   function removePayment(lineId: string) {
+    const index = payments.findIndex((line) => line.lineId === lineId);
+    if (index === -1) return;
+    setLastRemoved({ kind: "payment", line: payments[index], index });
     setPayments((current) => current.filter((line) => line.lineId !== lineId));
+  }
+
+  function undoRemove() {
+    if (!lastRemoved) return;
+    if (lastRemoved.kind === "cart") {
+      const { line, index } = lastRemoved;
+      setCart((current) => {
+        const next = [...current];
+        next.splice(Math.min(index, next.length), 0, line);
+        return next;
+      });
+    } else {
+      const { line, index } = lastRemoved;
+      setPayments((current) => {
+        const next = [...current];
+        next.splice(Math.min(index, next.length), 0, line);
+        return next;
+      });
+    }
+    setLastRemoved(null);
   }
 
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + lineTotal(line), 0), [cart]);
@@ -179,20 +288,21 @@ export function useSaleDraft(branchId: string | null) {
       const sale = await createSale(input);
       setConfirmedSale(sale);
     } catch (err) {
-      setSubmitError(extractErrorMessage(err));
+      setSubmitError(extractErrorMessage(err, cart));
     } finally {
       setSubmitting(false);
     }
   }
 
   function reset() {
-    setHeader(HEADER_INICIAL);
+    setHeader(buildHeaderInicial(defaultSeller));
     setCart([]);
     setPayments([]);
     setFreight("");
     setDiscount("");
     setSubmitError(null);
     setConfirmedSale(null);
+    setLastRemoved(null);
   }
 
   return {
@@ -210,6 +320,8 @@ export function useSaleDraft(branchId: string | null) {
     addPayment,
     updatePayment,
     removePayment,
+    lastRemoved,
+    undoRemove,
     freight,
     setFreight,
     discount,

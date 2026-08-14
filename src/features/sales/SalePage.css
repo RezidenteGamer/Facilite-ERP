@@ -3,9 +3,8 @@
   margin: 0 auto;
 }
 
-/* ---------- Layout: produtos à esquerda, venda à direita ---------- */
-.sale--workspace {
-  width: min(1400px, 100%);
+/* ---------- Layout da etapa Produtos: produtos à esquerda, carrinho à direita ---------- */
+.sale__step-body--produtos {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
   align-items: start;
@@ -82,6 +81,19 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Rótulos das colunas — sem isto cada campo só se identifica pela posição
+   na grade (achado de UX: usuário novo não sabe qual caixa é qual). */
+.sale__cart-line--head {
+  padding: 0 12px;
+  background: transparent;
+  color: var(--white);
+  opacity: 0.6;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
 .sale__cart-line-info {
   display: flex;
   flex-direction: column;
@@ -127,6 +139,7 @@
 }
 
 .sale__cart-line-remove {
+  position: relative;
   width: 28px;
   height: 28px;
   border: 0;
@@ -136,6 +149,15 @@
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+}
+
+/* Área de toque real de 44px (recomendação de acessibilidade) sem aumentar
+   o círculo visual de 28px — o botão fica visualmente do mesmo tamanho, só
+   o alvo clicável/tocável cresce ao redor dele. */
+.sale__cart-line-remove::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 
 .sale__cart-line-remove:hover {
@@ -155,20 +177,60 @@
   color: var(--white);
 }
 
+/* Pílula tracejada (não texto simples) — pagamento é obrigatório pra
+   confirmar a venda, então o botão que resolve isso precisa competir em
+   peso visual com o resto da tela, não se esconder como um link discreto. */
 .sale__payments-add {
-  border: 0;
-  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.45);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--white);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
-  opacity: 0.85;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease);
 }
 
 .sale__payments-add:hover {
-  opacity: 1;
-  text-decoration: underline;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+.sale__payments-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 1.5px rgba(255, 100, 89, 0.4) inset;
+}
+
+.sale__payments-empty p {
+  margin: 0;
+  color: var(--white);
+  font-size: 14px;
+}
+
+.sale__payments-add--big {
+  height: 40px;
+  padding: 0 18px;
+  border-color: var(--amber);
+  background: rgba(255, 164, 20, 0.14);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.sale__payments-add--big:hover {
+  background: rgba(255, 164, 20, 0.24);
+  border-color: var(--amber);
 }
 
 .sale__payment-line {
@@ -176,6 +238,16 @@
   grid-template-columns: 160px 120px auto 32px;
   align-items: center;
   gap: 10px;
+}
+
+.sale__payment-line--head {
+  padding: 0 2px;
+  color: var(--white);
+  opacity: 0.6;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
 }
 
 .sale__payment-select {
@@ -187,6 +259,42 @@
   color: var(--white);
   font-family: var(--font-ui);
   font-size: 13px;
+}
+
+/* O menu nativo do <select>, quando aberto, não herda o fundo azul
+   translúcido do card — abre com fundo claro do próprio navegador. Sem
+   isto, o texto branco do controle fechado fica branco-sobre-branco
+   dentro do menu aberto. */
+.sale__payment-select option {
+  color: var(--ink);
+  background: var(--white);
+}
+
+.sale__undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  font-size: 13px;
+}
+
+.sale__undo-btn {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--amber);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sale__undo-btn:hover {
+  text-decoration: underline;
 }
 
 .sale__totals {
@@ -242,34 +350,21 @@
   color: #FF6259;
 }
 
-/* ---------- Detalhes da operação (recolhível, opcional) ---------- */
-.sale__details-toggle {
-  display: flex;
+.sale__totals-payments-label {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  align-self: flex-start;
-  border: 0;
-  background: transparent;
-  color: var(--white);
-  opacity: 0.8;
-  font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
+  gap: 5px;
 }
 
-.sale__details-toggle:hover {
-  opacity: 1;
+/* Ícone ao lado da cor em "Pagamentos" — bate/não bate com o total não pode
+   depender só da cor (não passa por daltonismo, e é fácil não notar). */
+.sale__totals-status-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
-.sale__details-chevron {
-  transition: transform .15s var(--ease);
-}
-
-.sale__details-chevron--open {
-  transform: rotate(180deg);
-}
-
+/* ---------- Detalhes da operação (etapa própria, sempre expandida) ---------- */
 .sale__details-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -283,11 +378,6 @@
      vermelho do tema claro (pensado pra fundo branco) fica sem contraste aqui. */
   color: #FF6259;
   font-size: 14px;
-}
-
-.sale__footer {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .sale__continue {
@@ -333,6 +423,69 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Variante para "Gerar Nota Fiscal" — mesma pílula de "Salvar Venda", mas
+   sem competir com ela: contorno em vez de preenchida, já que as duas
+   fazem a mesma gravação real por baixo (ver ConfirmacaoStep), não é uma
+   ação "maior" que a outra. */
+.sale__continue--secondary {
+  min-width: 0;
+  background: transparent;
+  border: 1.5px solid var(--amber);
+  color: var(--amber);
+}
+
+.sale__continue--secondary:hover {
+  background: rgba(255, 164, 20, 0.12);
+  transform: translateY(-1px);
+}
+
+/* ---------- Etapa de confirmação ---------- */
+.sale__confirm-warning {
+  margin: 0;
+  color: var(--white);
+  opacity: 0.85;
+  font-size: 14px;
+}
+
+.sale__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  /* Em janelas mais baixas (~800px de altura) o card cabe quase inteiro na
+     viewport sem precisar rolar — e a aba "Suporte" (position:fixed,
+     z-index:5) e o WindowDock (position:fixed, z-index:30) acabam caindo
+     bem em cima dos botões de confirmar, roubando o clique. 31 fica acima
+     dos dois só o suficiente pra sempre vencer o clique aqui, mas ainda
+     abaixo do popup do Suporte quando ele está aberto (z-index:60) — ver
+     WindowDock.css para a escala completa. */
+  position: relative;
+  z-index: 31;
+}
+
+/* ---------- Revisão ---------- */
+.sale__review-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.sale__review-section:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.sale__review-section h3 {
+  margin: 0 0 4px;
+  color: var(--white);
+  opacity: 0.7;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
 /* ---------- Confirmação ---------- */
 .sale__card--success {
   align-items: center;
@@ -361,7 +514,7 @@
 
 /* ---------- Responsivo ---------- */
 @media (max-width: 900px) {
-  .sale--workspace { grid-template-columns: minmax(0, 1fr); }
+  .sale__step-body--produtos { grid-template-columns: minmax(0, 1fr); }
   .sale__products-panel { padding: 16px; }
   .sale__panel { padding: 10px 12px; }
   .sale__card { padding: 20px 18px 24px; gap: 18px; }
@@ -379,6 +532,10 @@
   }
   .sale__cart-line-info { grid-area: info; }
   .sale__cart-line-remove { grid-area: remove; justify-self: end; }
+  /* A grade empilha em áreas nomeadas aqui embaixo — o cabeçalho de colunas
+     (pensado pra uma linha só) não tem como acompanhar, então some; o
+     aria-label de cada campo continua garantindo o nome pro leitor de tela. */
+  .sale__cart-line--head, .sale__payment-line--head { display: none; }
 
   .sale__payment-line {
     grid-template-columns: 1fr 1fr;

@@ -7,6 +7,37 @@
 - Preserve o visual e a identidade existentes, a menos que a solicitação peça uma reformulação.
 - Atualize este arquivo quando houver uma decisão relevante, uma mudança de arquitetura ou uma nova etapa importante do projeto.
 
+## Como abrir o sistema e testar no navegador
+
+Sempre que for necessário ver o sistema rodando (mudança visual, verificação de fluxo, teste de módulo novo):
+
+1. **Suba o servidor de dev** usando a configuração já existente em `.claude/launch.json` (nome `facilite-login`) — não rode `npm run dev` direto por Bash; use a ferramenta de preview do Claude Code apontando para esse nome, que já resolve a porta automaticamente (pode não ser 5173/5174 se outra sessão já estiver ocupando a porta padrão).
+2. **Faça login com a conta de testes**, que já existe no Supabase:
+   - Email: `claude.testes@facilite.com`
+   - Senha: `claude2026`
+3. Depois do login, navegue para a rota que precisa testar.
+
+**Por quê**: a autenticação é real (Supabase Auth) — não existe mais bypass. Toda rota interna (`/produtos`, `/clientes-fornecedores`, `/realizar-venda`, etc.) redireciona para `/` se não houver sessão. Sem logar primeiro com essa conta, nenhuma verificação no navegador funciona.
+
+## Fase do projeto: desenvolvimento (14 de agosto de 2026)
+
+**O sistema ainda não tem uso em produção nem cliente real.** Decisão explícita do usuário: enquanto isso for verdade, **refatorar o banco inteiro é aceitável e não precisa ser negociado**.
+
+O que isso permite, sem pedir permissão a cada vez:
+
+- Migrations destrutivas — `drop`/`recreate` de tabela, renomear colunas, mudar tipo, trocar chave primária.
+- Redesenhar schema sem compatibilidade retroativa e sem script de migração de dados.
+- Corrigir modelagem errada de raiz em vez de acumular camada por cima. Exemplo pendente: o motor genérico hoje guarda campo numérico como `data_type: 'text'` e converte no submit da página (ver "Roteiro para criar um novo módulo", item 1) — isso é candidato a correção real, não a contorno.
+- Revisitar decisões de schema já tomadas (ex.: `contacts` sem `branch_id`) se um módulo novo mostrar que estavam erradas.
+
+O que **não** muda por causa disso:
+
+- **A ordem de implementação entre módulos continua valendo.** Liberdade de refatorar reduz o custo de errar o *schema*, não o custo de errar a *sequência* — construir Financeiro antes de Compras e ter que refazer os dois continua sendo retrabalho de código, que nenhuma migration desfaz.
+- RLS continua tendo que nascer correta (é imposição de segurança, não formato de dado).
+- Os dados de teste e a conta de testes continuam sendo necessários para verificar de verdade no navegador.
+
+**Quando isso deixa de valer**: no primeiro cliente real ou uso em produção. A partir daí, migration destrutiva volta a exigir conversa e plano de migração. Atualize esta seção quando isso acontecer.
+
 ## Estado atual (13 de agosto de 2026, tarde)
 
 - Este é o front-end do Facilite ERP / SimpleSoft, feito em React + TypeScript + Vite.
@@ -92,6 +123,17 @@ Primeiro módulo transacional real do sistema (cabeçalho + itens + pagamentos),
 - **Seleção de produto por arrastar (13/08/2026, noite)**: pedido do usuário para deixar a tela "como realizar uma venda de verdade" — produtos numa lista à esquerda (clicável e arrastável), soltando sobre o card da venda à direita; lápis ao lado de cada produto (só com permissão de editar Produtos) abre o mesmo modal de edição do módulo Produtos, sem duplicar formulário. Virou componente reutilizável: `src/components/product-picker/ProductPickerPanel.tsx` (lista + busca + clique-para-adicionar + lápis) — quem usa entra num `DndContext` e lê `event.active.data.current.product` no `onDragEnd` para tratar o drop (o painel não sabe nada sobre "onde" o produto vai cair, só disponibiliza o item pra arrastar, via `PRODUCT_PICKER_DRAG_PREFIX` no id do draggable).
   - **Pegadinha real do dnd-kit que custou tempo depurando**: `useDroppable`/`useDraggable` só enxergam o `DndContext` mais próximo **na árvore de componentes acima deles** — chamar `useDroppable` no mesmo componente que declara `<DndContext>...</DndContext>` não funciona (nesse ponto do render o Provider ainda não existe do ponto de vista de hooks daquele componente). A área de soltar da venda precisou virar um componente filho à parte (`CartDropzone` dentro de `SalePage.tsx`) só para poder chamar `useDroppable` de dentro do `DndContext`.
   - **Segunda pegadinha**: os `sensors` passados pro `DndContext` (`useSensors(useSensor(...))`) precisam ter identidade estável entre renders — um objeto de opções literal (`{ activationConstraint: { distance: 6 } }`) criado inline no corpo do componente é recriado a cada render, e o próprio `handleDragStart` já causa um re-render (`setState` pra mostrar o `DragOverlay`) **no meio do drag**, o que reinicia os sensores e cancela o drag em andamento. Solução: o objeto de opções do sensor mora fora do componente, em uma constante do módulo.
+
+### Decisão arquitetural: campos fiscais para Tributações/NF-e/NFC-e — etapa 0 (14/08/2026)
+
+Primeira etapa de um plano maior para viabilizar emissão fiscal (NF-e/NFC-e) e o módulo Tributações. Esta etapa só prepara dado — nenhuma lógica de cálculo de imposto, seleção de CFOP ou emissão foi implementada.
+
+- **Produtos** (`products`) ganhou tratamento completo (schema + UI, via `module_fields`): `cest`, `origem_mercadoria`, `unidade_comercial`, `unidade_tributavel`, `cst_ipi`, `cst_pis`, `cst_cofins`, `cst_ibs_cbs` (Reforma Tributária, NT 2025.002-RTC), `cclasstrib`. `ncm` já existia. Para ICMS, **os dois campos convivem**: `cst_icms` e `csosn`, ambos opcionais — decisão do usuário, porque Produtos já é isolado por filial (`branch_id`) e o regime tributário é decidido por filial (`branches.regime_tributario`, ver abaixo), não por produto; um mesmo cadastro de produto pode em tese ser usado por filiais em regimes diferentes, então guardar só um dos dois exigiria migração futura.
+- **Clientes e Fornecedores** (`contacts`) ganhou `inscricao_estadual`, `indicador_ie`, `codigo_ibge_municipio` (schema + UI). `document` (CPF/CNPJ) já existia — **não foi adicionada validação de formato**: o motor genérico não tem tipo de dado com validação de formato hoje (`data_type` só distingue `text`/`date`/`phone`/`email` para o `<input>`, sem regex/máscara), e nenhum módulo existente valida CPF/CNPJ. Estender o motor para isso é maior que o escopo desta etapa — documentado aqui como pendência, não escondido.
+- **Filiais** (`branches`) ganhou **só schema, sem UI** (decisão já registrada: administração de filial é só SQL por enquanto): `inscricao_estadual`, `regime_tributario` (texto livre guardando o código CRT: 1 = Simples Nacional, 2 = Simples com excesso de sublimite, 3 = Regime Normal — sem enum/constraint por ora), `cnae`, `address`, `codigo_ibge_municipio`, `certificado_digital_ref` (placeholder de referência ao certificado digital — sem upload nem lógica de certificado, isso é de uma etapa de ativação fiscal futura). `cnpj` já existia.
+- **Realizar Venda** (`sales`/`sale_items`) ganhou **só schema, sem UI**: `sale_items.cfop` (por item) e, em `sales`, totais quebrados por imposto — `icms_total`, `ipi_total`, `pis_total`, `cofins_total`, `ibs_total`, `cbs_total` — todos `numeric` nuláveis. **Nada disso aparece na tela `SalePage.tsx` ainda** (não usa o motor genérico, é tela feita à mão — ver decisão de Realizar Venda) nem é preenchido pela função `create_sale`. Isso é trabalho pendente para quando o módulo Tributações/CFOP for implementado.
+- Todos os campos novos são `text` (mesmo os que são código/enum, como origem da mercadoria 0-8 ou os CSTs) — mesma convenção já documentada no roteiro item 1: a engine trata tudo como texto, sem conversão de tipo.
+- Nenhuma policy de RLS nova foi necessária — as quatro tabelas já tinham policies de `select`/`insert`/`update`/`delete` cobrindo a tabela inteira; colunas novas nuláveis não mudam a superfície de acesso.
 
 ## Roteiro para criar um novo módulo
 

@@ -50,6 +50,13 @@
   color: rgba(255, 255, 255, 0.75);
 }
 
+.product-picker__hint {
+  margin: -4px 0 0;
+  color: var(--white);
+  opacity: 0.6;
+  font-size: 12px;
+}
+
 .product-picker__list {
   display: flex;
   flex-direction: column;

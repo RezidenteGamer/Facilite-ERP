@@ -14,5 +14,8 @@ export type Contact = {
   whatsapp?: string;
   createdAt?: string;
   photoUrl?: string;
+  inscricaoEstadual?: string;
+  indicadorIe?: string;
+  codigoIbgeMunicipio?: string;
 };
 

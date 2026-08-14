@@ -1,0 +1,123 @@
+/* Fica no canvas neutro (fora do card azul), então usa os tokens de texto/
+   superfície neutros — não os --white fixos usados dentro do card. */
+.wizard-progress {
+  position: relative;
+  width: min(1400px, 100%);
+  margin: 0 auto 22px;
+  padding: 4px 8px 0;
+}
+
+.wizard-progress__track {
+  position: absolute;
+  top: 19px;
+  left: calc(8px + 19px);
+  right: calc(8px + 19px);
+  height: 2px;
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+
+.wizard-progress__track-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width .25s var(--ease);
+}
+
+.wizard-progress__list {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wizard-progress__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.wizard-progress__marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: default;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+}
+
+.wizard-progress__marker svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.4;
+}
+
+button.wizard-progress__marker {
+  cursor: pointer;
+}
+
+button.wizard-progress__marker:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.wizard-progress__item--current .wizard-progress__marker {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--white, #fff);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.wizard-progress__item--done .wizard-progress__marker {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--white, #fff);
+}
+
+.wizard-progress__label {
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.wizard-progress__item--current .wizard-progress__label {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.wizard-progress__item--done .wizard-progress__label {
+  color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+  .wizard-progress__label {
+    display: none;
+  }
+
+  .wizard-progress__item--current .wizard-progress__label {
+    display: block;
+    position: absolute;
+    top: 100%;
+    margin-top: 2px;
+    white-space: nowrap;
+  }
+
+  .wizard-progress__item {
+    position: relative;
+  }
+}

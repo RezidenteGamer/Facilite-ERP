@@ -15,27 +15,45 @@ export type Database = {
       branches: {
         Row: {
           active: boolean;
+          address: string | null;
+          certificado_digital_ref: string | null;
+          cnae: string | null;
           cnpj: string | null;
           code: string;
+          codigo_ibge_municipio: string | null;
           created_at: string;
           id: string;
+          inscricao_estadual: string | null;
           name: string;
+          regime_tributario: string | null;
         };
         Insert: {
           active?: boolean;
+          address?: string | null;
+          certificado_digital_ref?: string | null;
+          cnae?: string | null;
           cnpj?: string | null;
           code: string;
+          codigo_ibge_municipio?: string | null;
           created_at?: string;
           id?: string;
+          inscricao_estadual?: string | null;
           name: string;
+          regime_tributario?: string | null;
         };
         Update: {
           active?: boolean;
+          address?: string | null;
+          certificado_digital_ref?: string | null;
+          cnae?: string | null;
           cnpj?: string | null;
           code?: string;
+          codigo_ibge_municipio?: string | null;
           created_at?: string;
           id?: string;
+          inscricao_estadual?: string | null;
           name?: string;
+          regime_tributario?: string | null;
         };
         Relationships: [];
       };
@@ -45,10 +63,13 @@ export type Database = {
           address: string | null;
           birth_date: string | null;
           code: string;
+          codigo_ibge_municipio: string | null;
           created_at: string;
           document: string;
           email: string | null;
           id: string;
+          indicador_ie: string | null;
+          inscricao_estadual: string | null;
           kind: Database["public"]["Enums"]["contact_kind"];
           name: string;
           phone: string | null;
@@ -62,10 +83,13 @@ export type Database = {
           address?: string | null;
           birth_date?: string | null;
           code: string;
+          codigo_ibge_municipio?: string | null;
           created_at?: string;
           document: string;
           email?: string | null;
           id?: string;
+          indicador_ie?: string | null;
+          inscricao_estadual?: string | null;
           kind: Database["public"]["Enums"]["contact_kind"];
           name: string;
           phone?: string | null;
@@ -79,10 +103,13 @@ export type Database = {
           address?: string | null;
           birth_date?: string | null;
           code?: string;
+          codigo_ibge_municipio?: string | null;
           created_at?: string;
           document?: string;
           email?: string | null;
           id?: string;
+          indicador_ie?: string | null;
+          inscricao_estadual?: string | null;
           kind?: Database["public"]["Enums"]["contact_kind"];
           name?: string;
           phone?: string | null;
@@ -209,54 +236,87 @@ export type Database = {
         Row: {
           active: boolean;
           branch_id: string;
+          cclasstrib: string | null;
+          cest: string | null;
           code: string;
           cost_price: number | null;
           created_at: string;
+          csosn: string | null;
+          cst_cofins: string | null;
+          cst_ibs_cbs: string | null;
+          cst_icms: string | null;
+          cst_ipi: string | null;
+          cst_pis: string | null;
           description: string;
           id: string;
           location: string | null;
           ncm: string | null;
+          origem_mercadoria: string | null;
           sale_price: number;
           stock: number;
           sub_location: string | null;
           taxation: string | null;
           type: string | null;
+          unidade_comercial: string | null;
+          unidade_tributavel: string | null;
           updated_at: string;
           wholesale_price: number | null;
         };
         Insert: {
           active?: boolean;
           branch_id: string;
+          cclasstrib?: string | null;
+          cest?: string | null;
           code: string;
           cost_price?: number | null;
           created_at?: string;
+          csosn?: string | null;
+          cst_cofins?: string | null;
+          cst_ibs_cbs?: string | null;
+          cst_icms?: string | null;
+          cst_ipi?: string | null;
+          cst_pis?: string | null;
           description: string;
           id?: string;
           location?: string | null;
           ncm?: string | null;
+          origem_mercadoria?: string | null;
           sale_price?: number;
           stock?: number;
           sub_location?: string | null;
           taxation?: string | null;
           type?: string | null;
+          unidade_comercial?: string | null;
+          unidade_tributavel?: string | null;
           updated_at?: string;
           wholesale_price?: number | null;
         };
         Update: {
           active?: boolean;
           branch_id?: string;
+          cclasstrib?: string | null;
+          cest?: string | null;
           code?: string;
           cost_price?: number | null;
           created_at?: string;
+          csosn?: string | null;
+          cst_cofins?: string | null;
+          cst_ibs_cbs?: string | null;
+          cst_icms?: string | null;
+          cst_ipi?: string | null;
+          cst_pis?: string | null;
           description?: string;
           id?: string;
           location?: string | null;
           ncm?: string | null;
+          origem_mercadoria?: string | null;
           sale_price?: number;
           stock?: number;
           sub_location?: string | null;
           taxation?: string | null;
           type?: string | null;
+          unidade_comercial?: string | null;
+          unidade_tributavel?: string | null;
           updated_at?: string;
           wholesale_price?: number | null;
         };
@@ -391,6 +451,7 @@ export type Database = {
       };
       sale_items: {
         Row: {
+          cfop: string | null;
           created_at: string;
           discount_amount: number;
           id: string;
@@ -401,6 +462,7 @@ export type Database = {
           unit_price: number;
         };
         Insert: {
+          cfop?: string | null;
           created_at?: string;
           discount_amount?: number;
           id?: string;
@@ -411,6 +473,7 @@ export type Database = {
           unit_price: number;
         };
         Update: {
+          cfop?: string | null;
           created_at?: string;
           discount_amount?: number;
           id?: string;
@@ -476,7 +539,9 @@ export type Database = {
         Row: {
           address: string | null;
           branch_id: string;
+          cbs_total: number | null;
           code: string;
+          cofins_total: number | null;
           confirmed_at: string | null;
           contact_id: string;
           cost_center: string | null;
@@ -487,9 +552,13 @@ export type Database = {
           discount_amount: number;
           exit_date: string | null;
           freight_amount: number;
+          ibs_total: number | null;
+          icms_total: number | null;
           id: string;
+          ipi_total: number | null;
           issue_date: string;
           operation_type: string | null;
+          pis_total: number | null;
           seller_id: string;
           status: Database["public"]["Enums"]["sale_status"];
           subtotal_amount: number;
@@ -499,7 +568,9 @@ export type Database = {
         Insert: {
           address?: string | null;
           branch_id: string;
+          cbs_total?: number | null;
           code: string;
+          cofins_total?: number | null;
           confirmed_at?: string | null;
           contact_id: string;
           cost_center?: string | null;
@@ -510,9 +581,13 @@ export type Database = {
           discount_amount?: number;
           exit_date?: string | null;
           freight_amount?: number;
+          ibs_total?: number | null;
+          icms_total?: number | null;
           id?: string;
+          ipi_total?: number | null;
           issue_date?: string;
           operation_type?: string | null;
+          pis_total?: number | null;
           seller_id: string;
           status?: Database["public"]["Enums"]["sale_status"];
           subtotal_amount?: number;
@@ -522,7 +597,9 @@ export type Database = {
         Update: {
           address?: string | null;
           branch_id?: string;
+          cbs_total?: number | null;
           code?: string;
+          cofins_total?: number | null;
           confirmed_at?: string | null;
           contact_id?: string;
           cost_center?: string | null;
@@ -533,9 +610,13 @@ export type Database = {
           discount_amount?: number;
           exit_date?: string | null;
           freight_amount?: number;
+          ibs_total?: number | null;
+          icms_total?: number | null;
           id?: string;
+          ipi_total?: number | null;
           issue_date?: string;
           operation_type?: string | null;
+          pis_total?: number | null;
           seller_id?: string;
           status?: Database["public"]["Enums"]["sale_status"];
           subtotal_amount?: number;

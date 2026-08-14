@@ -108,11 +108,15 @@ export default function ProductPickerPanel({ branchId, onAddProduct }: ProductPi
         <SearchIcon />
         <input
           type="search"
-          placeholder="Nome, código, GTIN, etc"
+          placeholder="Nome, código ou código de barras"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
       </div>
+
+      {visibleProducts.length > 0 && (
+        <p className="product-picker__hint">Clique ou arraste um produto para adicionar à venda.</p>
+      )}
 
       <div className="product-picker__list">
         {visibleProducts.length === 0 ? (
