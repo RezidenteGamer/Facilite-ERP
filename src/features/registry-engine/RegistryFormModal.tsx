@@ -1,6 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
 import FormField from "../../components/form/FormField";
+import LookupModal from "../../components/form/LookupModal";
 import PhotoDropzone from "./PhotoDropzone";
 import type { ModuleFieldDefinition } from "./types";
 import "./RegistryFormModal.css";
@@ -13,12 +14,42 @@ type RegistryFormModalMediaField = {
   onFileSelected: (file: File) => void;
 };
 
-type RegistryFormModalProps = {
+/**
+ * Ponte para um campo de consulta a outro cadastro (ex.: o contato de um
+ * lançamento do Financeiro) dentro do formulário genérico.
+ *
+ * Mesmo papel de `mediaField`: `module_fields` não tem um `dataType` de
+ * consulta, e criar um seria generalizar o motor inteiro por causa de um
+ * campo. O modal renderiza o `LookupModal` já existente e cuida de abrir e
+ * fechar; quem consome só diz o que buscar e o que fazer com o escolhido.
+ */
+type RegistryFormModalLookupField<TItem> = {
+  label: string;
+  /** Descrição do item já escolhido. Vazio = nada escolhido ainda. */
+  value: string;
+  isRequired?: boolean;
+  modalTitle: string;
+  searchPlaceholder?: string;
+  fetchItems: (query: string) => Promise<TItem[]>;
+  getKey: (item: TItem) => string;
+  renderItem: (item: TItem) => { primary: string; secondary?: string };
+  onSelect: (item: TItem) => void;
+};
+
+type RegistryFormModalProps<TItem> = {
   title: string;
   fields: ModuleFieldDefinition[];
   initialValues?: Record<string, string>;
   submitLabel?: string;
   mediaField?: RegistryFormModalMediaField;
+  lookupField?: RegistryFormModalLookupField<TItem>;
+  /**
+   * Validação além de "preenchido/vazio" — mesmo papel do `validateRow` do
+   * motor de lote (`RegistryBatchFormModal`). Devolve mensagens de erro
+   * prontas (não nomes de campo); quem usa decide a regra (ex.: Financeiro
+   * recusa "abc" ou valor <= 0 no campo Valor total).
+   */
+  validate?: (values: Record<string, string>) => string[];
   onSubmit: (values: Record<string, string>) => void;
   onCancel: () => void;
 };
@@ -28,15 +59,17 @@ type RegistryFormModalProps = {
  * de metadados do módulo (`showInForm`), sem conhecer o domínio do módulo.
  * Usada tanto para "Novo" quanto "Editar" — a diferença é só `initialValues`.
  */
-export default function RegistryFormModal({
+export default function RegistryFormModal<TItem = unknown>({
   title,
   fields,
   initialValues,
   submitLabel = "Salvar",
   mediaField,
+  lookupField,
+  validate,
   onSubmit,
   onCancel,
-}: RegistryFormModalProps) {
+}: RegistryFormModalProps<TItem>) {
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const field of fields) {
@@ -44,15 +77,28 @@ export default function RegistryFormModal({
     }
     return initial;
   });
-  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [lookupOpen, setLookupOpen] = useState(false);
 
   function handleSubmit() {
-    const missing = fields.filter((field) => field.isRequired && !values[field.accessorKey]?.trim());
+    const missing = fields
+      .filter((field) => field.isRequired && !values[field.accessorKey]?.trim())
+      .map((field) => field.label);
+    if (lookupField?.isRequired && !lookupField.value.trim()) {
+      missing.unshift(lookupField.label);
+    }
+
+    const errors: string[] = [];
     if (missing.length > 0) {
-      setMissingFields(missing.map((field) => field.label));
+      errors.push(`Preencha os campos obrigatórios: ${missing.join(", ")}.`);
+    }
+    errors.push(...(validate?.(values) ?? []));
+
+    if (errors.length > 0) {
+      setFormErrors(errors);
       return;
     }
-    setMissingFields([]);
+    setFormErrors([]);
     onSubmit(values);
   }
 
@@ -65,11 +111,11 @@ export default function RegistryFormModal({
               <p>{title}</p>
             </Dialog.Title>
 
-            {missingFields.length > 0 && (
-              <p className="registry-form-modal__error">
-                Preencha os campos obrigatórios: {missingFields.join(", ")}.
+            {formErrors.map((message, index) => (
+              <p key={index} className="registry-form-modal__error">
+                {message}
               </p>
-            )}
+            ))}
 
             {mediaField && (
               <div className="registry-form-modal__media">
@@ -84,6 +130,19 @@ export default function RegistryFormModal({
             )}
 
             <div className="registry-form-modal__fields">
+              {lookupField && (
+                <FormField
+                  id="registry-form-lookup"
+                  label={lookupField.isRequired ? `${lookupField.label} *` : lookupField.label}
+                  value={lookupField.value}
+                  /* O valor só muda pelo modal de busca — digitar não faz nada
+                     de propósito, para não existir contato "de texto livre". */
+                  onChange={() => {}}
+                  lookup
+                  onLookup={() => setLookupOpen(true)}
+                />
+              )}
+
               {fields.map((field) => (
                 <FormField
                   key={field.accessorKey}
@@ -114,6 +173,25 @@ export default function RegistryFormModal({
                 {submitLabel}
               </button>
             </div>
+
+            {/* Dentro do `Dialog.Content` de propósito: é assim que o Radix
+                empilha um modal sobre outro sem que o de baixo se feche ao
+                clique. O `LookupModal` tem portal próprio, então não afeta
+                o layout daqui. */}
+            {lookupField && lookupOpen && (
+              <LookupModal<TItem>
+                title={lookupField.modalTitle}
+                placeholder={lookupField.searchPlaceholder}
+                fetchItems={lookupField.fetchItems}
+                getKey={lookupField.getKey}
+                renderItem={lookupField.renderItem}
+                onClose={() => setLookupOpen(false)}
+                onSelect={(item) => {
+                  lookupField.onSelect(item);
+                  setLookupOpen(false);
+                }}
+              />
+            )}
           </Dialog.Content>
         </Dialog.Overlay>
       </Dialog.Portal>

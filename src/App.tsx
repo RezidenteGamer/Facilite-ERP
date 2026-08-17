@@ -19,6 +19,7 @@ const StockAdjustPage = lazy(() => import("./features/products/StockAdjustPage")
 const PermissionsPage = lazy(() => import("./features/permissions/PermissionsPage"));
 const PurchasesPage = lazy(() => import("./features/purchases/PurchasesPage"));
 const InvoicesPage = lazy(() => import("./features/sales/InvoicesPage"));
+const SaleOrderFormPage = lazy(() => import("./features/sales/SaleOrderFormPage"));
 const SaleOrdersPage = lazy(() => import("./features/sales/SaleOrdersPage"));
 const SalePage = lazy(() => import("./features/sales/SalePage"));
 const SaleReturnPage = lazy(() => import("./features/sales/SaleReturnPage"));
@@ -41,6 +42,7 @@ function App() {
             <Route path="/produtos" element={<ProtectedRoute><ProductsPage /></ProtectedRoute>} />
             <Route path="/realizar-venda" element={<ProtectedRoute><SalePage /></ProtectedRoute>} />
             <Route path="/pedidos-venda" element={<ProtectedRoute><SaleOrdersPage /></ProtectedRoute>} />
+            <Route path="/pedidos-venda/novo" element={<ProtectedRoute><SaleOrderFormPage /></ProtectedRoute>} />
             <Route path="/notas-emitidas" element={<ProtectedRoute><InvoicesPage /></ProtectedRoute>} />
             <Route path="/financeiro" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
             <Route path="/ponto-de-venda" element={<ProtectedRoute><PosPage /></ProtectedRoute>} />

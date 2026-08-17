@@ -25,7 +25,13 @@ export type ModuleDefinition = {
   id: string;
   label: string;
   dataTable: string;
-  layoutVariant: "three" | "table-controls" | "single";
+  /**
+   * `three`/`table-controls`/`single` são variações da tela de registro único
+   * (criar/editar um por vez, via `RegistryFormModal`). `batch` é a tela de
+   * lançamento em lote: o formulário acumula N linhas e confirma tudo numa
+   * escrita atômica só (ver `RegistryBatchFormModal`).
+   */
+  layoutVariant: "three" | "table-controls" | "single" | "batch";
   isLocked: boolean;
   tabs: ModuleTabDefinition[];
   fields: ModuleFieldDefinition[];

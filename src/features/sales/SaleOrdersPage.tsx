@@ -1,23 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
+import ConfirmDialog from "../../components/ConfirmDialog";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
+import { useAuth } from "../auth/AuthContext";
 import { SaleOrdersIcon } from "../home/icons";
-import { SALE_ORDERS, formatOrderTotal, type SaleOrder } from "./saleOrders";
+import { SALE_PAYMENT_METHOD_LABEL } from "./sales";
+import { SALE_ORDER_STATUS_LABEL, formatOrderTotal, type SaleOrder } from "./saleOrders";
+import { useSaleOrdersData } from "./useSaleOrdersData";
 
 const COLUNAS: RegistryColumn<SaleOrder>[] = [
   { key: "code", label: "Codigo", width: "90px", align: "center", render: (o) => o.code },
-  { key: "client", label: "Cliente", width: "minmax(0, 1fr)", render: (o) => o.client },
-  { key: "paymentMethod", label: "Forma de pagamento", width: "200px", render: (o) => o.paymentMethod },
+  { key: "client", label: "Cliente", width: "minmax(0, 1fr)", render: (o) => o.contactName },
+  {
+    key: "paymentMethod",
+    label: "Forma de pagamento",
+    width: "200px",
+    render: (o) => SALE_PAYMENT_METHOD_LABEL[o.paymentMethod],
+  },
   { key: "installments", label: "Parcelas", width: "110px", align: "center", render: (o) => o.installments },
   {
     key: "total",
     label: "Valor total",
     width: "130px",
     align: "center",
-    render: (o) => formatOrderTotal(o.total),
+    render: (o) => formatOrderTotal(o.totalAmount),
   },
 ];
 
@@ -25,10 +34,17 @@ const COLUNAS: RegistryColumn<SaleOrder>[] = [
 export default function SaleOrdersPage() {
   const navigate = useNavigate();
   const { openWindow } = useOpenWindows();
+  const { hasPermission, currentBranchId, branches } = useAuth();
+  const { orders, loading, error, convertToSale } = useSaleOrdersData(currentBranchId);
+
+  const canCreate = hasPermission("pedidos-venda", "create");
 
   const [search, setSearch] = useState("");
-  const [orders] = useState(SALE_ORDERS);
-  const [selectedId, setSelectedId] = useState<string | null>(SALE_ORDERS[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirmingConvert, setConfirmingConvert] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [convertError, setConvertError] = useState<string | null>(null);
+  const [convertedMessage, setConvertedMessage] = useState<string | null>(null);
 
   useEffect(() => {
     openWindow({
@@ -39,12 +55,15 @@ export default function SaleOrdersPage() {
     });
   }, [openWindow]);
 
+  useEffect(() => {
+    if (selectedId && !orders.some((o) => o.id === selectedId)) setSelectedId(null);
+  }, [orders, selectedId]);
+
   const visibleOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return orders;
     return orders.filter(
-      (order) =>
-        order.client.toLowerCase().includes(term) || order.code.toLowerCase().includes(term),
+      (order) => order.contactName.toLowerCase().includes(term) || order.code.toLowerCase().includes(term),
     );
   }, [orders, search]);
 
@@ -57,6 +76,55 @@ export default function SaleOrdersPage() {
     { id: "configuracoes", label: "Configurações", icon: GearIcon, onClick: () => navigate("/configuracoes") },
   ];
 
+  async function handleConvert() {
+    if (!selected) return;
+    setConverting(true);
+    setConvertError(null);
+    try {
+      const sale = await convertToSale(selected.id);
+      setConvertedMessage(`Pedido ${selected.code} convertido — venda ${sale.code} criada.`);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : err && typeof err === "object" && "message" in err && typeof err.message === "string"
+            ? err.message
+            : "Não foi possível converter o pedido em venda.";
+      setConvertError(message);
+    } finally {
+      setConverting(false);
+      setConfirmingConvert(false);
+    }
+  }
+
+  if (error) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Pedidos de venda" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>{error}</p>
+      </AppShell>
+    );
+  }
+
+  if (!hasPermission("pedidos-venda", "view")) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Pedidos de venda" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>Você não tem permissão para acessar este módulo.</p>
+      </AppShell>
+    );
+  }
+
+  if (!currentBranchId) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Pedidos de venda" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>
+          {branches.length === 0
+            ? "Você ainda não tem acesso a nenhuma filial. Fale com um administrador."
+            : "Selecione uma filial no menu \"Filiais\" para ver os pedidos."}
+        </p>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell navItems={navItems} secondaryText="Pedidos de venda" contentTone="blue" fillViewport>
       <RegistryLayout variant="table-controls">
@@ -66,23 +134,60 @@ export default function SaleOrdersPage() {
           rows={visibleOrders}
           getRowId={(order) => order.id}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            setSelectedId(id);
+            setConvertError(null);
+            setConvertedMessage(null);
+          }}
         />
 
         <RegistryActions
           title="Controles"
           titleVariant="brand"
-          search={{ label: "Buscar Venda", value: search, onChange: setSearch }}
+          search={{ label: "Buscar pedido", value: search, onChange: setSearch }}
+          fieldsTitle={selected ? `Pedido ${selected.code}` : loading ? "Carregando..." : undefined}
+          fields={
+            selected
+              ? [
+                  { label: "Cliente", value: selected.contactName },
+                  { label: "Vendedor", value: selected.sellerName },
+                  { label: "Forma de pagamento", value: SALE_PAYMENT_METHOD_LABEL[selected.paymentMethod] },
+                  { label: "Parcelas", value: String(selected.installments) },
+                  { label: "Total", value: formatOrderTotal(selected.totalAmount) },
+                  { label: "Situação", value: SALE_ORDER_STATUS_LABEL[selected.status] },
+                  ...(convertError ? [{ label: "Erro", value: convertError }] : []),
+                  ...(convertedMessage ? [{ label: "Aviso", value: convertedMessage }] : []),
+                ]
+              : undefined
+          }
           actions={[
-            { id: "gerar-nf", label: "Gerar NF", disabled: !selected },
-            { id: "pre-visualizar", label: "Pré visualizar", disabled: !selected },
-            { id: "trocar", label: "Trocar", disabled: !selected },
-            { id: "financeiro", label: "Financeiro", disabled: !selected },
-            { id: "editar", label: "Editar", disabled: !selected },
-            { id: "excluir", label: "Excluir", disabled: !selected },
+            { id: "novo-pedido", label: "Novo pedido", disabled: !canCreate, onClick: () => navigate("/pedidos-venda/novo") },
+            {
+              id: "converter-venda",
+              label: "Converter em venda",
+              disabled: !selected || selected.status !== "aberto" || !canCreate,
+              onClick: () => setConfirmingConvert(true),
+            },
+            { id: "gerar-nf", label: "Gerar NF", disabled: true },
+            { id: "pre-visualizar", label: "Pré visualizar", disabled: true },
+            { id: "trocar", label: "Trocar", disabled: true },
+            { id: "financeiro", label: "Financeiro", disabled: true },
+            { id: "editar", label: "Editar", disabled: true },
+            { id: "excluir", label: "Excluir", disabled: true },
           ]}
         />
       </RegistryLayout>
+
+      {confirmingConvert && selected && (
+        <ConfirmDialog
+          title="Converter pedido em venda?"
+          message={`O pedido ${selected.code} vira uma venda de verdade — é aí que o estoque dos produtos baixa. Esta ação não pode ser desfeita.`}
+          confirmLabel={converting ? "Convertendo..." : "Converter"}
+          cancelLabel="Cancelar"
+          onConfirm={handleConvert}
+          onCancel={() => setConfirmingConvert(false)}
+        />
+      )}
     </AppShell>
   );
 }

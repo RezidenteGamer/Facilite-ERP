@@ -5,12 +5,22 @@
   padding: 20px 22px;
   border-radius: var(--radius-md);
   background: var(--blue-panel);
+  min-height: 0;
   /* Contorno sutil + sombra de elevação: o painel agora flutua sobre um
      canvas neutro, não sobre um fundo da mesma cor. */
   border: 1.5px solid rgba(255, 255, 255, .28);
   box-shadow: var(--shadow-2);
   color: var(--white);
   transition: background-color .2s var(--ease), box-shadow .2s var(--ease);
+}
+
+/* O painel é item de grid (altura definida pelo `.registry`), então numa
+   janela baixa ele pode ter menos altura do que os botões precisam — sem
+   isto o conteúdo simplesmente vazava por cima do rodapé da página. Rola
+   por dentro em vez de perder botão. Só no painel de desktop: a folha
+   mobile já tem seu próprio overflow-y (ver `.registry-actions--sheet`). */
+.registry-actions--panel {
+  overflow-y: auto;
 }
 
 .registry-actions__title {

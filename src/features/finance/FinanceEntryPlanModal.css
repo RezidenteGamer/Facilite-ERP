@@ -1,0 +1,57 @@
+.finance-entry-plan__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.finance-entry-plan__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.finance-entry-plan__checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--amber);
+  cursor: pointer;
+}
+
+.finance-entry-plan__preview {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, .08);
+}
+
+.finance-entry-plan__preview-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.finance-entry-plan__preview-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.finance-entry-plan__preview-item {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 10px;
+  font-size: 14px;
+  padding: 2px 0;
+}
+
+@media (max-width: 640px) {
+  .finance-entry-plan__row {
+    grid-template-columns: 1fr;
+  }
+}

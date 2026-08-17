@@ -3,53 +3,131 @@ import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
-import {
-  RegistryActions,
-  RegistryDetails,
-  RegistryLayout,
-  RegistryTable,
-  type RegistryColumn,
-} from "../../components/registry";
+import ProductPickerPanel from "../../components/product-picker/ProductPickerPanel";
+import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
 import { StockAdjustIcon } from "../home/icons";
-import { formatPrice } from "./products";
-import StockAdjustModal from "./StockAdjustModal";
+import { buildDetailFields, buildTableColumns } from "../registry-engine/moduleView";
+import RegistryBatchFormModal, {
+  type BatchItem,
+  type BatchRow,
+} from "../registry-engine/RegistryBatchFormModal";
+import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
+import { formatPrice, type Product } from "./products";
 import { useStockAdjustmentsData } from "./useStockAdjustmentsData";
 import type { StockAdjustment } from "../../lib/repositories/stockAdjustmentsRepository";
 
-const COLUNAS: RegistryColumn<StockAdjustment>[] = [
-  { key: "code", label: "Código", width: "88px", align: "center", render: (a) => a.productCode },
-  { key: "description", label: "Descrição", width: "minmax(0, 1fr)", render: (a) => a.productDescription },
-  { key: "change", label: "Alteração", width: "110px", align: "center", render: (a) => (a.change > 0 ? `+${a.change}` : String(a.change)) },
-  { key: "balanceAtDate", label: "Saldo na data", width: "130px", align: "center", render: (a) => String(a.balanceAfter) },
-];
+const MODULE_ID = "ajuste-estoque";
 
-function formatDateTime(value?: string) {
-  if (!value) return undefined;
-  return new Date(value).toLocaleString("pt-BR");
+/** Produto -> item do lote. Clicar e arrastar precisam produzir o mesmo item. */
+function toBatchItem(product: Product): BatchItem {
+  return {
+    id: product.id,
+    label: `${product.code} — ${product.description}`,
+    hint: `Estoque atual: ${product.stock}`,
+  };
 }
 
-/** Módulo "Ajuste de estoque": auditoria (criar + listar, sem editar/excluir) das alterações manuais em `products.stock`. */
+/** Campos de texto do formulário viram número aqui — o motor trata tudo como texto. */
+function toBatchNumber(raw: string): number | null {
+  const parsed = Number(raw.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Regra específica de Ajuste de estoque: cada linha informa a quantidade de um
+ * jeito **ou** do outro. O motor genérico só sabe cobrar `isRequired`.
+ */
+function validateAdjustmentRow(values: Record<string, string>): string | null {
+  const change = values.change?.trim() ?? "";
+  const counted = values.countedBalance?.trim() ?? "";
+
+  if (change === "" && counted === "") {
+    return "informe a alteração (+/-) ou o saldo contado.";
+  }
+  if (change !== "" && counted !== "") {
+    return "preencha só um dos dois — alteração (+/-) ou saldo contado.";
+  }
+
+  if (change !== "") {
+    const parsed = toBatchNumber(change);
+    if (parsed === null || parsed === 0) {
+      return "a alteração precisa ser um número diferente de zero.";
+    }
+    return null;
+  }
+
+  const parsed = toBatchNumber(counted);
+  if (parsed === null || parsed < 0) {
+    return "o saldo contado precisa ser um número maior ou igual a zero.";
+  }
+  return null;
+}
+
+type ProductBatchPickerProps = {
+  branchId: string | null;
+  onPick: (item: BatchItem) => void;
+};
+
+/**
+ * O "escolhedor de item" que este módulo entrega ao motor de lote. Fica aqui,
+ * e não dentro do `RegistryBatchFormModal`, justamente porque saber procurar
+ * produto é conhecimento de domínio — Compras/Devolução vão passar o seu.
+ * O `DndContext` vem do motor: ele precisa envolver também a lista de destino.
+ */
+function ProductBatchPicker({ branchId, onPick }: ProductBatchPickerProps) {
+  return (
+    <ProductPickerPanel
+      branchId={branchId}
+      hint="Clique num produto ou arraste-o para a lista ao lado."
+      onAddProduct={(product) => onPick(toBatchItem(product))}
+    />
+  );
+}
+
+function formatDateTime(value: string) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("pt-BR");
+}
+
+/**
+ * Módulo "Ajuste de estoque" — primeiro módulo de **lote** sobre o motor
+ * genérico: a listagem/ficha vêm de `module_fields` como em Produtos, e a
+ * criação usa o `RegistryBatchFormModal` para lançar vários produtos de uma
+ * vez (contagem física de loja). Sem editar/excluir: é auditoria.
+ */
 export default function StockAdjustPage() {
   const navigate = useNavigate();
   const { openWindow } = useOpenWindows();
-  const { hasPermission, currentBranchId } = useAuth();
-  const { adjustments, loading, error, createAdjustment } = useStockAdjustmentsData(currentBranchId);
+  const { hasPermission, currentBranchId, branches } = useAuth();
+
+  const canView = hasPermission(MODULE_ID, "view");
+  const canCreate = hasPermission(MODULE_ID, "create");
+
+  const { definition, loading: definitionLoading, error: definitionError } = useModuleDefinition(MODULE_ID);
+  const { adjustments, error: adjustmentsError, createAdjustmentBatch } =
+    useStockAdjustmentsData(currentBranchId);
 
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const canCreate = hasPermission("ajuste-estoque", "create");
-
   useEffect(() => {
     openWindow({
-      id: "ajuste-estoque",
+      id: MODULE_ID,
       label: "Ajuste de estoque",
       path: "/ajuste-estoque",
       icon: StockAdjustIcon,
     });
   }, [openWindow]);
+
+  useEffect(() => {
+    setSelectedId((current) => {
+      if (current && adjustments.some((adjustment) => adjustment.id === current)) return current;
+      return adjustments[0]?.id ?? null;
+    });
+  }, [adjustments]);
 
   const visibleAdjustments = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -61,10 +139,39 @@ export default function StockAdjustPage() {
     );
   }, [adjustments, search]);
 
-  const selected: StockAdjustment | null = visibleAdjustments.find((a) => a.id === selectedId) ?? null;
+  const selected: StockAdjustment | null =
+    visibleAdjustments.find((adjustment) => adjustment.id === selectedId) ?? null;
 
-  async function handleSubmit(input: { productId: string; change: number; reason: string }) {
-    await createAdjustment(input);
+  const columns = useMemo(
+    () => (definition ? buildTableColumns<StockAdjustment>(definition.fields) : []),
+    [definition],
+  );
+
+  // O motor entrega tudo como texto cru; data e dinheiro ganham formato aqui,
+  // mesmo caminho já usado em `ProductsPage`.
+  const detailFields = useMemo(() => {
+    if (!definition) return [];
+    return buildDetailFields<StockAdjustment>(definition.fields, selected).map((field) => {
+      if (!field.value) return field;
+      if (field.label === "Data do ajuste") return { ...field, value: formatDateTime(field.value) };
+      if (field.label === "Preço custo") return { ...field, value: formatPrice(Number(field.value)) };
+      return field;
+    });
+  }, [definition, selected]);
+
+  async function handleBatchSubmit(rows: BatchRow[]) {
+    await createAdjustmentBatch(
+      rows.map((row) => {
+        const change = row.values.change?.trim() ?? "";
+        const counted = row.values.countedBalance?.trim() ?? "";
+        return {
+          productId: row.item.id,
+          change: change === "" ? undefined : (toBatchNumber(change) ?? undefined),
+          countedBalance: counted === "" ? undefined : (toBatchNumber(counted) ?? undefined),
+          reason: row.values.reason?.trim() ?? "",
+        };
+      }),
+    );
     setModalOpen(false);
   }
 
@@ -75,20 +182,63 @@ export default function StockAdjustPage() {
     { id: "configuracoes", label: "Configurações", icon: GearIcon, onClick: () => navigate("/configuracoes") },
   ];
 
+  if (definitionError || adjustmentsError) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Ajuste de estoque" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>{definitionError ?? adjustmentsError}</p>
+      </AppShell>
+    );
+  }
+
+  if (definitionLoading && !definition) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Ajuste de estoque" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>Carregando módulo...</p>
+      </AppShell>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Ajuste de estoque" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>
+          Você não tem permissão para acessar este módulo.
+        </p>
+      </AppShell>
+    );
+  }
+
+  if (!currentBranchId) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Ajuste de estoque" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>
+          {branches.length === 0
+            ? "Você ainda não tem acesso a nenhuma filial. Fale com um administrador."
+            : "Selecione uma filial no menu \"Filiais\" para ver os ajustes."}
+        </p>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell navItems={navItems} secondaryText="Ajuste de estoque" contentTone="blue" fillViewport>
       <RegistryLayout>
+        {/* Sem "Editar"/"Excluir": ajuste é registro de auditoria — apagar não
+            desfaz a alteração de estoque. O conserto é um ajuste inverso. */}
         <RegistryActions
-          title="Ajuste de estoque"
+          title="Lançar um ajuste de estoque"
           actions={[
-            { id: "ajuste", label: "Ajuste de estoque", disabled: !canCreate, onClick: () => setModalOpen(true) },
+            {
+              id: "ajuste",
+              label: "Ajuste de estoque",
+              disabled: !canCreate,
+              onClick: () => setModalOpen(true),
+            },
           ]}
         />
 
-        {error && <p role="alert">{error}</p>}
-
         <RegistryTable
-          columns={COLUNAS}
+          columns={columns}
           rows={visibleAdjustments}
           getRowId={(adjustment) => adjustment.id}
           selectedId={selectedId}
@@ -99,24 +249,29 @@ export default function StockAdjustPage() {
           searchLabel="Buscar produto"
           search={search}
           onSearchChange={setSearch}
-          fields={[
-            { label: "Ultima alteração", value: formatDateTime(selected?.createdAt) },
-            { label: "Tipo", value: selected?.reason },
-            { label: "Preço custo", value: selected?.productCostPrice !== undefined ? formatPrice(selected.productCostPrice) : undefined },
-            { label: "Data alteração", value: formatDateTime(selected?.createdAt) },
-            { label: "Local", value: selected?.productLocation },
-            { label: "Sub-local", value: selected?.productSubLocation },
-            { label: "Operador", value: selected?.operatorName },
-            { label: "Estoque atual", value: selected ? String(selected.productCurrentStock) : undefined },
-          ]}
+          fields={detailFields}
           media={{ label: "Imagem", layout: "inline" }}
         />
       </RegistryLayout>
 
-      {loading && <p aria-hidden="true" style={{ display: "none" }}>Carregando…</p>}
-
-      {modalOpen && (
-        <StockAdjustModal branchId={currentBranchId} onSubmit={handleSubmit} onCancel={() => setModalOpen(false)} />
+      {modalOpen && definition && (
+        <RegistryBatchFormModal
+          title="Ajuste de estoque"
+          fields={definition.fields}
+          emptyHint="Clique nos produtos ao lado — ou arraste-os para cá — para montar a lista de contagem. Em cada linha, informe a alteração (+/-) ou o saldo contado."
+          submitLabel="Confirmar ajustes"
+          validateRow={validateAdjustmentRow}
+          renderItemPicker={(onPick) => (
+            <ProductBatchPicker branchId={currentBranchId} onPick={onPick} />
+          )}
+          // `ProductPickerPanel` põe o produto em `data: { product }` ao arrastar.
+          resolveDraggedItem={(dragData) => {
+            const product = dragData?.product as Product | undefined;
+            return product ? toBatchItem(product) : null;
+          }}
+          onSubmit={handleBatchSubmit}
+          onCancel={() => setModalOpen(false)}
+        />
       )}
     </AppShell>
   );

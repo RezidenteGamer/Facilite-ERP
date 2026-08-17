@@ -172,6 +172,11 @@
   --danger:       #D6281C;
   --danger-hover: #C22114;
 
+  /* Indicador positivo (ex.: entrada de dinheiro no Financeiro) — não havia
+     verde no sistema até então, só --danger para o lado negativo. */
+  --positive:       #1E8E3E;
+  --positive-hover: #167530;
+
   /* Grade de módulos (telas internas do ERP) */
   --tile-yellow:       #FFC331;
   --tile-yellow-hover: #FFB800;
@@ -244,6 +249,9 @@
 
   --danger:       #F0463A;
   --danger-hover: #FF5B4F;
+
+  --positive:       #3DDC84;
+  --positive-hover: #57E397;
 
   --tile-yellow:       #FFC331;
   --tile-yellow-hover: #FFD35C;

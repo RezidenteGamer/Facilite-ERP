@@ -74,6 +74,44 @@
    então nunca fica o cabeçalho fora de sincronia com as linhas embaixo.
    É a rede de segurança para tablets estreitos ou módulos com muitas
    colunas — em mobile este bloco inteiro cede lugar aos cards. */
+.registry-table__summary {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.registry-table__summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 130px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .1);
+}
+
+.registry-table__summary-label {
+  font-size: var(--font-size-xs);
+  color: var(--white);
+  opacity: .8;
+}
+
+.registry-table__summary-value {
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  color: var(--white);
+}
+
+.registry-table__summary-item--positive .registry-table__summary-value {
+  color: var(--positive);
+}
+
+.registry-table__summary-item--negative .registry-table__summary-value {
+  color: var(--danger);
+}
+
 .registry-table__scroll {
   flex: 1;
   min-height: 0;

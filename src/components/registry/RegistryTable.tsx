@@ -32,6 +32,18 @@ export type RegistryTableAction = {
   tone?: "default" | "danger";
 };
 
+/**
+ * Um número-resumo acima da lista (ex.: "Total em aberto", "Entrou"/"Saiu"
+ * no Financeiro). Genérico de propósito — o componente não sabe o que é "a
+ * pagar" ou "saldo", só recebe rótulo/valor/tom já prontos. Vendas, Compras
+ * e Controle de Caixa devem reaproveitar o mesmo slot quando chegar a vez.
+ */
+export type RegistrySummaryItem = {
+  label: string;
+  value: string;
+  tone?: "positive" | "negative" | "neutral";
+};
+
 type RegistryTableProps<T> = {
   /** Título acima do quadro (ex.: "Pedidos de venda"). */
   title?: string;
@@ -50,6 +62,8 @@ type RegistryTableProps<T> = {
   minRows?: number;
   /** Botões centralizados no rodapé do próprio painel (ex.: Tributações). */
   footerActions?: RegistryTableAction[];
+  /** Números-resumo acima da lista (ex.: totais do Financeiro). Sem isso, nada aparece. */
+  summary?: RegistrySummaryItem[];
 };
 
 /** Largura mínima assumida para uma coluna flexível (ex.: "minmax(0, 1fr)")
@@ -92,6 +106,7 @@ export default function RegistryTable<T>({
   onTabChange,
   minRows = 7,
   footerActions,
+  summary,
 }: RegistryTableProps<T>) {
   const gridTemplate = columns.map((column) => column.width).join(" ");
   const tableMinWidth = columns.reduce((sum, column) => sum + columnMinWidth(column.width), 0);
@@ -131,6 +146,20 @@ export default function RegistryTable<T>({
       )}
 
       <div className={`registry-table__panel${tabs?.length ? "" : " registry-table__panel--solo"}`}>
+        {summary && summary.length > 0 && (
+          <div className="registry-table__summary">
+            {summary.map((item) => (
+              <div
+                key={item.label}
+                className={`registry-table__summary-item registry-table__summary-item--${item.tone ?? "neutral"}`}
+              >
+                <span className="registry-table__summary-label">{item.label}</span>
+                <span className="registry-table__summary-value">{item.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Tablet/desktop: grade original, com rolagem horizontal própria
             se a soma das colunas não couber — nunca aparece em mobile
             (ver breakpoint em RegistryTable.css), onde vira cards. */}

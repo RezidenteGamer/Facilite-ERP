@@ -1,0 +1,259 @@
+@keyframes registry-batch-modal-in {
+  from { transform: translateY(14px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.registry-batch-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 20, 46, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.registry-batch-modal {
+  width: min(1000px, 100%);
+  max-height: calc(100vh - 48px);
+  padding: 30px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--acrylic-accent);
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-8);
+  color: var(--white);
+  animation: registry-batch-modal-in 0.2s var(--ease);
+}
+
+.registry-batch-modal:focus-visible {
+  outline: none;
+}
+
+.registry-batch-modal__title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.registry-batch-modal__error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--danger);
+}
+
+.registry-batch-modal__body {
+  display: grid;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  gap: 20px;
+  min-height: 0;
+  flex: 1;
+}
+
+.registry-batch-modal__picker {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A lista de linhas rola sozinha: o lote pode ter dezenas de itens sem
+   empurrar os botões de confirmar para fora da tela. */
+.registry-batch-modal__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1.5px dashed transparent;
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+
+/* Só aparece enquanto um item está pairando sobre a lista — em repouso a
+   área de soltar é invisível para não poluir o formulário. */
+.registry-batch-modal__rows--over {
+  border-color: var(--amber);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.registry-batch-modal__drag-ghost {
+  padding: 10px 16px;
+  background: var(--amber);
+  border-radius: var(--radius-pill);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: var(--shadow-8);
+  cursor: grabbing;
+}
+
+.registry-batch-modal__empty {
+  margin: 0;
+  padding: 24px 8px;
+  font-size: 14px;
+  opacity: 0.75;
+}
+
+.registry-batch-modal__row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: var(--radius-md);
+}
+
+.registry-batch-modal__row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.registry-batch-modal__row-label {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.registry-batch-modal__row-hint {
+  margin: 2px 0 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.registry-batch-modal__row-remove {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--white);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.registry-batch-modal__row-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.registry-batch-modal__row-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.registry-batch-modal__row-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.registry-batch-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.registry-batch-modal__count {
+  margin-right: auto;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.registry-batch-modal__btn {
+  min-width: 150px;
+  height: 50px;
+  padding: 0 20px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease), transform 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.registry-batch-modal__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.registry-batch-modal__btn--cancel {
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+  background: transparent;
+  color: var(--white);
+}
+
+.registry-batch-modal__btn--cancel:hover:not(:disabled) {
+  border-color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.registry-batch-modal__btn--confirm {
+  border: 0;
+  background: var(--amber);
+  color: var(--white);
+}
+
+.registry-batch-modal__btn--confirm:hover:not(:disabled) {
+  background: var(--amber-hover);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 860px) {
+  .registry-batch-modal__body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  @keyframes registry-batch-modal-in-mobile {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .registry-batch-modal__overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .registry-batch-modal {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    padding: 26px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+    border-radius: 24px 24px 0 0;
+    animation: registry-batch-modal-in-mobile .22s var(--ease);
+  }
+
+  .registry-batch-modal__actions {
+    flex-wrap: wrap;
+  }
+
+  .registry-batch-modal__count {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .registry-batch-modal__btn {
+    flex: 1;
+    min-width: 0;
+    height: var(--tap-target);
+  }
+}

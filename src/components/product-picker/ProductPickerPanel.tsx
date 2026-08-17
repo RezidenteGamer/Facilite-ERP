@@ -16,6 +16,11 @@ type ProductPickerPanelProps = {
   branchId: string | null;
   /** Clique num produto adiciona direto — arrastar (ver `PRODUCT_PICKER_DRAG_PREFIX`) é a alternativa. */
   onAddProduct: (product: Product) => void;
+  /**
+   * A frase de instrução muda com o destino do produto ("à venda", "ao lote"
+   * de ajuste, "à compra"). O padrão é o de Realizar Venda, primeiro a usar.
+   */
+  hint?: string;
 };
 
 type DraggableProductRowProps = {
@@ -74,7 +79,11 @@ function DraggableProductRow({ product, canEdit, onAdd, onEdit }: DraggableProdu
  * O lápis (só aparece com permissão de editar Produtos) abre o mesmo modal
  * de edição do módulo Produtos, sem duplicar formulário.
  */
-export default function ProductPickerPanel({ branchId, onAddProduct }: ProductPickerPanelProps) {
+export default function ProductPickerPanel({
+  branchId,
+  onAddProduct,
+  hint = "Clique ou arraste um produto para adicionar à venda.",
+}: ProductPickerPanelProps) {
   const { hasPermission } = useAuth();
   const canEditProducts = hasPermission("produtos", "edit");
   const { products, updateProduct } = useProductsData(branchId);
@@ -115,7 +124,7 @@ export default function ProductPickerPanel({ branchId, onAddProduct }: ProductPi
       </div>
 
       {visibleProducts.length > 0 && (
-        <p className="product-picker__hint">Clique ou arraste um produto para adicionar à venda.</p>
+        <p className="product-picker__hint">{hint}</p>
       )}
 
       <div className="product-picker__list">

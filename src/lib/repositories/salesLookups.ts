@@ -1,5 +1,6 @@
 import { supabase } from "../supabaseClient";
 import type { Contact } from "../../features/customers/contacts";
+import { fetchContactsByKind } from "./contactLookups";
 
 function assertSupabase() {
   if (!supabase) {
@@ -17,30 +18,8 @@ export type SaleSeller = {
 };
 
 /** Busca clientes (contacts kind=clientes) por nome ou documento — usado no lookup de Cliente. */
-export async function fetchSaleContacts(query: string): Promise<Contact[]> {
-  const client = assertSupabase();
-  let request = client.from("contacts").select("*").eq("kind", "clientes").eq("active", true).order("name");
-  const term = query.trim();
-  if (term) {
-    request = request.or(`name.ilike.%${term}%,document.ilike.%${term}%`);
-  }
-  const { data, error } = await request.limit(20);
-  if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    code: row.code,
-    name: row.name,
-    document: row.document,
-    active: row.active,
-    address: row.address ?? undefined,
-    rg: row.rg ?? undefined,
-    birthDate: row.birth_date ?? undefined,
-    phone: row.phone ?? undefined,
-    email: row.email ?? undefined,
-    whatsapp: row.whatsapp ?? undefined,
-    createdAt: row.created_at ?? undefined,
-    photoUrl: row.photo_url ?? undefined,
-  }));
+export function fetchSaleContacts(query: string): Promise<Contact[]> {
+  return fetchContactsByKind("clientes", query);
 }
 
 /** Busca vendedores (profiles ativos) por nome — usado no lookup de Vendedor. */
