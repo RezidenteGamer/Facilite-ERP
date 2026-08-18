@@ -182,6 +182,13 @@
   font-size: 17px;
   text-align: left;
   cursor: pointer;
+  /* A linha inteira é um <button> (clicar seleciona o registro), e por
+     padrão navegadores bloqueiam seleção de texto dentro de botões. Isso
+     reabilita — arrastar sobre o texto seleciona normalmente, e um clique
+     simples (sem arrastar) continua dando `onClick`, porque um clique que
+     produz seleção não dispara o evento `click`. */
+  user-select: text;
+  -webkit-user-select: text;
   /* Barra de seleção via box-shadow (não border): não consome espaço de
      layout, então as colunas continuam alinhadas com o cabeçalho mesmo
      quando a linha entra/sai do estado selecionado. */
@@ -194,6 +201,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Cursor de texto só em cima do valor em si — o resto da linha (o
+     respiro ao redor) continua com o ponteiro de "clicável". */
+  cursor: text;
 }
 
 /* Colunas separadas por linhas finas, como no desenho de referência. */
@@ -289,6 +299,10 @@
   font-family: var(--font-ui);
   text-align: left;
   cursor: pointer;
+  /* Mesma liberação de seleção de texto da linha desktop (ver
+     .registry-table__row) — o card também é um <button>. */
+  user-select: text;
+  -webkit-user-select: text;
   box-shadow: inset 3px 0 0 transparent;
   transition: background-color .15s var(--ease), box-shadow .15s var(--ease);
 }
@@ -315,6 +329,7 @@
   background: rgba(255, 255, 255, .18);
   font-size: var(--font-size-xs);
   font-weight: 600;
+  cursor: text;
 }
 
 .registry-table__card-title {
@@ -324,6 +339,7 @@
   white-space: nowrap;
   font-size: var(--font-size-md);
   font-weight: 600;
+  cursor: text;
 }
 
 .registry-table__card-meta {
@@ -352,6 +368,7 @@
   white-space: nowrap;
   font-size: var(--font-size-sm);
   font-weight: 500;
+  cursor: text;
 }
 
 .registry-table__cards-empty {
