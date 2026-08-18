@@ -128,6 +128,25 @@ export function MoonIcon(props: IconProps) {
   );
 }
 
+export function EyeIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M2.5 12C4.8 7.5 8.2 5.2 12 5.2s7.2 2.3 9.5 6.8c-2.3 4.5-5.7 6.8-9.5 6.8S4.8 16.5 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+    </svg>
+  );
+}
+
+export function EyeOffIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3.5 3.5 20.5 20.5" />
+      <path d="M9.9 6.05A9.9 9.9 0 0 1 12 5.2c3.8 0 7.2 2.3 9.5 6.8a13.6 13.6 0 0 1-3.06 3.96M6.6 7.24C4.94 8.4 3.55 9.98 2.5 12c1.55 3.02 3.6 5.02 5.98 6.06A9.9 9.9 0 0 0 12 18.8c1.02 0 2-.15 2.94-.44" />
+      <path d="M9.9 12a2.8 2.8 0 0 0 4 2.51" />
+    </svg>
+  );
+}
+
 /** Confirma visualmente um estado "ok" sem depender só de cor (ex.: pagamento batendo com o total). */
 export function CheckIcon(props: IconProps) {
   return (

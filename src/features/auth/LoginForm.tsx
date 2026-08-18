@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { EyeIcon, EyeOffIcon } from "../../components/icons";
 import { useAuth } from "./AuthContext";
 
 type FieldErrors = {
@@ -13,6 +14,7 @@ export default function LoginForm() {
 
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [senhaVisivel, setSenhaVisivel] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
@@ -88,22 +90,33 @@ export default function LoginForm() {
         <label className="field__label" htmlFor="senha">
           Senha
         </label>
-        <input
-          ref={senhaRef}
-          className="field__input"
-          id="senha"
-          name="senha"
-          type="password"
-          placeholder="Digite sua senha aqui!"
-          autoComplete="current-password"
-          value={senha}
-          onChange={(event) => {
-            setSenha(event.target.value);
-            clearFieldError("senha");
-          }}
-          aria-invalid={errors.senha ? "true" : undefined}
-          required
-        />
+        <div className="field__control">
+          <input
+            ref={senhaRef}
+            className="field__input field__input--with-toggle"
+            id="senha"
+            name="senha"
+            type={senhaVisivel ? "text" : "password"}
+            placeholder="Digite sua senha aqui!"
+            autoComplete="current-password"
+            value={senha}
+            onChange={(event) => {
+              setSenha(event.target.value);
+              clearFieldError("senha");
+            }}
+            aria-invalid={errors.senha ? "true" : undefined}
+            required
+          />
+          <button
+            className="field__toggle"
+            type="button"
+            aria-label={senhaVisivel ? "Ocultar senha" : "Mostrar senha"}
+            aria-pressed={senhaVisivel}
+            onClick={() => setSenhaVisivel((value) => !value)}
+          >
+            {senhaVisivel ? <EyeOffIcon /> : <EyeIcon />}
+          </button>
+        </div>
         <a className="field__forgot" href="#" data-action="recuperar-senha">
           Esqueceu a senha? Clique aqui!
         </a>

@@ -195,6 +195,43 @@
   caret-color: var(--ink);
 }
 
+/* ---------- Campo de senha (com botão de mostrar/ocultar) ---------- */
+.field__control {
+  position: relative;
+}
+
+.field__input--with-toggle {
+  padding-right: 54px;
+}
+
+.field__toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-placeholder);
+  cursor: pointer;
+  transition: background-color .15s var(--ease), color .15s var(--ease);
+}
+
+.field__toggle:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.field__toggle svg {
+  width: 22px;
+  height: 22px;
+}
+
 .field__forgot {
   display: block;
   margin-top: 3px;
