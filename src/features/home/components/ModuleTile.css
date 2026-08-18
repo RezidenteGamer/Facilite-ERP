@@ -45,7 +45,18 @@
   border-radius: 22px;
   background: var(--tile-yellow);
   color: var(--white);
-  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+  /* O quadrado em si fica parado — só a cor muda no hover. Todo o
+     movimento (o "efeito bacana") acontece no glifo/imagem lá dentro,
+     não na moldura. */
+  transition: background-color 0.15s var(--ease);
+}
+
+/* Glifo/imagem: o que de fato se move no hover — cresce e gira de leve,
+   como se "saltasse" para fora do quadrado parado atrás dele. */
+.module-tile__icon svg,
+.module-tile__icon-image {
+  transition: transform 0.2s var(--ease);
+  transform-origin: center;
 }
 
 .module-tile__icon svg {
@@ -66,15 +77,21 @@
   object-fit: contain;
 }
 
-.module-tile:hover .module-tile__icon,
-.module-tile:focus-visible .module-tile__icon {
+.module-tile:hover .module-tile__icon {
   background: var(--tile-yellow-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 22px rgba(255, 180, 20, 0.35);
 }
 
-.module-tile:active .module-tile__icon {
-  transform: translateY(0);
+.module-tile:hover .module-tile__icon svg,
+.module-tile:focus-visible .module-tile__icon svg,
+.module-tile:hover .module-tile__icon-image,
+.module-tile:focus-visible .module-tile__icon-image {
+  transform: scale(1.16) rotate(-6deg);
+}
+
+.module-tile:active .module-tile__icon svg,
+.module-tile:active .module-tile__icon-image {
+  transform: scale(1.05) rotate(0deg);
+  transition-duration: 0.1s;
 }
 
 .module-tile__badge {
