@@ -467,6 +467,127 @@ export type Database = {
           },
         ]
       }
+      purchase_items: {
+        Row: {
+          created_at: string
+          id: string
+          product_id: string
+          purchase_id: string
+          quantity: number
+          total_amount: number
+          unit_cost: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          product_id: string
+          purchase_id: string
+          quantity: number
+          total_amount: number
+          unit_cost: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          product_id?: string
+          purchase_id?: string
+          quantity?: number
+          total_amount?: number
+          unit_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_items_purchase_id_fkey"
+            columns: ["purchase_id"]
+            isOneToOne: false
+            referencedRelation: "purchases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      purchases: {
+        Row: {
+          branch_id: string
+          code: string
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          document: string | null
+          entry_date: string
+          id: string
+          installment_total: number
+          issue_date: string
+          payment_method: Database["public"]["Enums"]["sale_payment_method"]
+          status: Database["public"]["Enums"]["purchase_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          branch_id: string
+          code?: string
+          contact_id: string
+          created_at?: string
+          created_by?: string | null
+          document?: string | null
+          entry_date?: string
+          id?: string
+          installment_total?: number
+          issue_date?: string
+          payment_method: Database["public"]["Enums"]["sale_payment_method"]
+          status?: Database["public"]["Enums"]["purchase_status"]
+          subtotal_amount?: number
+          total_amount?: number
+          updated_at?: string
+        }
+        Update: {
+          branch_id?: string
+          code?: string
+          contact_id?: string
+          created_at?: string
+          created_by?: string | null
+          document?: string | null
+          entry_date?: string
+          id?: string
+          installment_total?: number
+          issue_date?: string
+          payment_method?: Database["public"]["Enums"]["sale_payment_method"]
+          status?: Database["public"]["Enums"]["purchase_status"]
+          subtotal_amount?: number
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchases_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchases_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchases_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       role_permissions: {
         Row: {
           can_create: boolean
@@ -1077,6 +1198,32 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      create_purchase: {
+        Args: { payload: Json }
+        Returns: {
+          branch_id: string
+          code: string
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          document: string | null
+          entry_date: string
+          id: string
+          installment_total: number
+          issue_date: string
+          payment_method: Database["public"]["Enums"]["sale_payment_method"]
+          status: Database["public"]["Enums"]["purchase_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "purchases"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_sale: {
         Args: { payload: Json }
         Returns: {
@@ -1201,9 +1348,10 @@ export type Database = {
     }
     Enums: {
       contact_kind: "clientes" | "fornecedores"
-      financial_entry_origin_kind: "manual" | "venda"
+      financial_entry_origin_kind: "manual" | "venda" | "compra"
       financial_entry_status: "aberto" | "baixado" | "cancelado"
       financial_entry_type: "a_pagar" | "a_receber"
+      purchase_status: "confirmed" | "cancelled"
       sale_order_status: "aberto" | "convertido" | "cancelado"
       sale_payment_method:
         | "dinheiro"
@@ -1341,9 +1489,10 @@ export const Constants = {
   public: {
     Enums: {
       contact_kind: ["clientes", "fornecedores"],
-      financial_entry_origin_kind: ["manual", "venda"],
+      financial_entry_origin_kind: ["manual", "venda", "compra"],
       financial_entry_status: ["aberto", "baixado", "cancelado"],
       financial_entry_type: ["a_pagar", "a_receber"],
+      purchase_status: ["confirmed", "cancelled"],
       sale_order_status: ["aberto", "convertido", "cancelado"],
       sale_payment_method: [
         "dinheiro",

@@ -18,6 +18,7 @@ const ProductsPage = lazy(() => import("./features/products/ProductsPage"));
 const StockAdjustPage = lazy(() => import("./features/products/StockAdjustPage"));
 const PermissionsPage = lazy(() => import("./features/permissions/PermissionsPage"));
 const PurchasesPage = lazy(() => import("./features/purchases/PurchasesPage"));
+const PurchaseFormPage = lazy(() => import("./features/purchases/PurchaseFormPage"));
 const InvoicesPage = lazy(() => import("./features/sales/InvoicesPage"));
 const SaleOrderFormPage = lazy(() => import("./features/sales/SaleOrderFormPage"));
 const SaleOrdersPage = lazy(() => import("./features/sales/SaleOrdersPage"));
@@ -48,6 +49,7 @@ function App() {
             <Route path="/ponto-de-venda" element={<ProtectedRoute><PosPage /></ProtectedRoute>} />
             <Route path="/tributacoes" element={<ProtectedRoute><TaxationsPage /></ProtectedRoute>} />
             <Route path="/compras" element={<ProtectedRoute><PurchasesPage /></ProtectedRoute>} />
+            <Route path="/compras/nova" element={<ProtectedRoute><PurchaseFormPage /></ProtectedRoute>} />
             <Route path="/devolucao-venda" element={<ProtectedRoute><SaleReturnPage /></ProtectedRoute>} />
             <Route path="/ajuste-estoque" element={<ProtectedRoute><StockAdjustPage /></ProtectedRoute>} />
             <Route path="/controle-caixa" element={<ProtectedRoute><CashControlPage /></ProtectedRoute>} />

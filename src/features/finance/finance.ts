@@ -5,7 +5,7 @@ export type FinanceEntryType = "a_pagar" | "a_receber";
 export type FinanceEntryStatus = "aberto" | "baixado" | "cancelado";
 
 /** De onde o lançamento veio — 'manual' é o formulário; os demais são gerados por outro módulo. */
-export type FinanceOriginKind = "manual" | "venda";
+export type FinanceOriginKind = "manual" | "venda" | "compra";
 
 /**
  * Aba da tela. Não é o mesmo que `FinanceEntryType`: "baixados" não é um

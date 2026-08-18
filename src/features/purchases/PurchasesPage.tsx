@@ -4,25 +4,35 @@ import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
+import { useAuth } from "../auth/AuthContext";
 import { PurchasesIcon } from "../home/icons";
-import { PURCHASES, formatPurchaseTotal, type Purchase } from "./purchases";
+import { SALE_PAYMENT_METHOD_LABEL } from "../sales/sales";
+import { PURCHASE_STATUS_LABEL, formatPurchaseTotal, type Purchase } from "./purchases";
+import { usePurchasesData } from "./usePurchasesData";
 
 const COLUNAS: RegistryColumn<Purchase>[] = [
   { key: "code", label: "Código", width: "80px", render: (p) => p.code },
-  { key: "supplier", label: "Fornecedor", width: "minmax(0, 1fr)", render: (p) => p.supplier },
-  { key: "installments", label: "Parcelas", width: "90px", align: "center", render: (p) => p.installments },
-  { key: "paymentMethod", label: "Forma Pagamento", width: "150px", render: (p) => p.paymentMethod },
-  { key: "total", label: "Valor total", width: "170px", render: (p) => formatPurchaseTotal(p.total) },
-  { key: "operator", label: "Operador", width: "140px", align: "right", render: (p) => p.operator },
+  { key: "supplier", label: "Fornecedor", width: "minmax(0, 1fr)", render: (p) => p.contactName },
+  { key: "installments", label: "Parcelas", width: "90px", align: "center", render: (p) => p.installmentTotal },
+  {
+    key: "paymentMethod",
+    label: "Forma Pagamento",
+    width: "150px",
+    render: (p) => SALE_PAYMENT_METHOD_LABEL[p.paymentMethod],
+  },
+  { key: "total", label: "Valor total", width: "170px", render: (p) => formatPurchaseTotal(p.totalAmount) },
 ];
 
 /** Módulo "Compras". */
 export default function PurchasesPage() {
   const navigate = useNavigate();
   const { openWindow } = useOpenWindows();
+  const { hasPermission, currentBranchId, branches } = useAuth();
+  const { purchases, loading, error } = usePurchasesData(currentBranchId);
+
+  const canCreate = hasPermission("compras", "create");
 
   const [search, setSearch] = useState("");
-  const [purchases] = useState(PURCHASES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,12 +44,16 @@ export default function PurchasesPage() {
     });
   }, [openWindow]);
 
+  useEffect(() => {
+    if (selectedId && !purchases.some((p) => p.id === selectedId)) setSelectedId(null);
+  }, [purchases, selectedId]);
+
   const visiblePurchases = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return purchases;
     return purchases.filter(
       (purchase) =>
-        purchase.supplier.toLowerCase().includes(term) || purchase.code.toLowerCase().includes(term),
+        purchase.contactName.toLowerCase().includes(term) || purchase.code.toLowerCase().includes(term),
     );
   }, [purchases, search]);
 
@@ -51,6 +65,34 @@ export default function PurchasesPage() {
     { id: "suporte", label: "Suporte", icon: HeadsetIcon },
     { id: "configuracoes", label: "Configurações", icon: GearIcon, onClick: () => navigate("/configuracoes") },
   ];
+
+  if (error) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Compras" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>{error}</p>
+      </AppShell>
+    );
+  }
+
+  if (!hasPermission("compras", "view")) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Compras" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>Você não tem permissão para acessar este módulo.</p>
+      </AppShell>
+    );
+  }
+
+  if (!currentBranchId) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Compras" contentTone="blue" fillViewport>
+        <p style={{ color: "var(--white)", padding: 24 }}>
+          {branches.length === 0
+            ? "Você ainda não tem acesso a nenhuma filial. Fale com um administrador."
+            : "Selecione uma filial no menu \"Filiais\" para ver as compras."}
+        </p>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell navItems={navItems} secondaryText="Compras" contentTone="blue" fillViewport>
@@ -65,18 +107,20 @@ export default function PurchasesPage() {
 
         <RegistryActions
           search={{ label: "Buscar Compra", value: search, onChange: setSearch, showLabel: true }}
+          fieldsTitle={selected ? `Compra ${selected.code}` : loading ? "Carregando..." : undefined}
           fields={[
-            { label: "Data compra", value: selected?.purchaseDate },
-            { label: "Data faturamento", value: selected?.billingDate },
-            { label: "Número documento", value: selected?.documentNumber },
-            { label: "Movimento", value: selected?.movement },
+            { label: "Fornecedor", value: selected?.contactName },
+            { label: "Data emissão", value: selected?.issueDate },
+            { label: "Data entrada", value: selected?.entryDate },
+            { label: "Número documento", value: selected?.document },
+            { label: "Situação", value: selected ? PURCHASE_STATUS_LABEL[selected.status] : undefined },
           ]}
           actionsTitle="Opções para compras"
           actions={[
-            { id: "nova-compra", label: "Nova Compra" },
-            { id: "importar-xml", label: "Importar XML" },
-            { id: "devolver-compra", label: "Devolver Compra", disabled: !selected },
-            { id: "excluir", label: "Excluir", disabled: !selected },
+            { id: "nova-compra", label: "Nova Compra", disabled: !canCreate, onClick: () => navigate("/compras/nova") },
+            { id: "importar-xml", label: "Importar XML", disabled: true },
+            { id: "devolver-compra", label: "Devolver Compra", disabled: true },
+            { id: "excluir", label: "Excluir", disabled: true },
           ]}
         />
       </RegistryLayout>

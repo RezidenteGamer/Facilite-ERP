@@ -164,6 +164,24 @@
   background: rgba(255, 255, 255, 0.22);
 }
 
+/* ---------- Compras: 5 colunas (sem desconto por item) ---------- */
+.sale__cart-line--purchase {
+  grid-template-columns: 1fr 70px 130px 110px 32px;
+}
+
+.sale__update-cost {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--white);
+  font-size: 14px;
+}
+
+.sale__update-cost input {
+  width: 18px;
+  height: 18px;
+}
+
 .sale__payments {
   display: flex;
   flex-direction: column;
@@ -536,6 +554,14 @@
      (pensado pra uma linha só) não tem como acompanhar, então some; o
      aria-label de cada campo continua garantindo o nome pro leitor de tela. */
   .sale__cart-line--head, .sale__payment-line--head { display: none; }
+
+  .sale__cart-line--purchase {
+    grid-template-areas:
+      "info info"
+      "qty cost"
+      "total total"
+      "remove remove";
+  }
 
   .sale__payment-line {
     grid-template-columns: 1fr 1fr;
