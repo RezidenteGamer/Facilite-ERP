@@ -454,28 +454,46 @@ export type Database = {
       }
       modules: {
         Row: {
+          access_gate: string
+          branch_scoped: boolean
           created_at: string
-          data_table: string
+          data_table: string | null
+          icon_key: string | null
           id: string
           is_locked: boolean
           label: string
           layout_variant: string
+          path: string | null
+          show_on_home: boolean
+          sort_order: number
         }
         Insert: {
+          access_gate?: string
+          branch_scoped?: boolean
           created_at?: string
-          data_table: string
+          data_table?: string | null
+          icon_key?: string | null
           id: string
           is_locked?: boolean
           label: string
           layout_variant?: string
+          path?: string | null
+          show_on_home?: boolean
+          sort_order?: number
         }
         Update: {
+          access_gate?: string
+          branch_scoped?: boolean
           created_at?: string
-          data_table?: string
+          data_table?: string | null
+          icon_key?: string | null
           id?: string
           is_locked?: boolean
           label?: string
           layout_variant?: string
+          path?: string | null
+          show_on_home?: boolean
+          sort_order?: number
         }
         Relationships: []
       }

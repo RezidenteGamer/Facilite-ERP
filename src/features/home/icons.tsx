@@ -185,3 +185,17 @@ export function RefreshIcon(props: IconProps) {
   );
 }
 
+/**
+ * Ícone de reserva para módulo sem asset próprio — é o que um módulo criado
+ * pelo usuário (M3) vai usar até alguém desenhar um ícone para ele.
+ */
+export function GenericModuleIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1.4" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.4" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.4" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.4" />
+    </svg>
+  );
+}

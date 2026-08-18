@@ -8,10 +8,11 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
-import { HOME_MODULES } from "../features/home/modules";
+import { useModuleCatalog } from "../features/modules/ModuleCatalogContext";
+import { moduleIconFor } from "../features/modules/moduleIcons";
 
 export type OpenWindow = {
-  /** Mesmo id do módulo em HOME_MODULES quando a janela é um módulo do ERP. */
+  /** Mesmo id do módulo no catálogo quando a janela é um módulo do ERP. */
   id: string;
   label: string;
   path: string;
@@ -39,30 +40,37 @@ const OpenWindowsContext = createContext<OpenWindowsValue | null>(null);
  * (id/rótulo/rota); estado interno de cada tela entra aqui quando existir.
  */
 export function OpenWindowsProvider({ children }: { children: ReactNode }) {
+  const { byId } = useModuleCatalog();
   const [windows, setWindows] = useState<OpenWindow[]>([]);
 
-  const openWindow = useCallback((next: OpenWindow) => {
-    setWindows((current) => {
-      if (current.some((item) => item.id === next.id)) return current;
+  const openWindow = useCallback(
+    (next: OpenWindow) => {
+      /* O dock deve mostrar sempre o mesmo ícone da tela inicial. Em vez de
+         cada página escolher seu próprio desenho, a chave de ícone vem do
+         catálogo (`modules.icon_key`) e o asset vem do registro de ícones do
+         código — a mesma dupla que a tela inicial usa. Módulo sem asset
+         próprio (o caso de um módulo criado pelo usuário) cai no ícone
+         genérico de reserva, nunca em nada. */
+      const catalogEntry = byId(next.id);
+      const icon = moduleIconFor(catalogEntry?.iconKey ?? next.id);
 
-      /* O dock deve mostrar sempre o mesmo ícone da tela inicial — em vez
-         de cada página escolher seu próprio desenho, buscamos aqui pela
-         imagem oficial do módulo (HOME_MODULES), com o `icon` recebido
-         como fallback só para itens que ainda não têm iconImage. */
-      const module = HOME_MODULES.find((item) => item.id === next.id);
-      const withHomeIcon: OpenWindow = module
-        ? {
+      setWindows((current) => {
+        if (current.some((item) => item.id === next.id)) return current;
+
+        return [
+          ...current,
+          {
             ...next,
-            iconImage: module.iconImage,
-            iconImagePlaceholder: module.iconImagePlaceholder,
-            iconScale: module.iconScale,
-            icon: module.iconImage ? undefined : module.icon,
-          }
-        : next;
-
-      return [...current, withHomeIcon];
-    });
-  }, []);
+            iconImage: icon.image,
+            iconImagePlaceholder: icon.imagePlaceholder,
+            iconScale: icon.scale,
+            icon: icon.image ? undefined : icon.icon,
+          },
+        ];
+      });
+    },
+    [byId],
+  );
 
   const closeWindow = useCallback((id: string) => {
     setWindows((current) => current.filter((item) => item.id !== id));

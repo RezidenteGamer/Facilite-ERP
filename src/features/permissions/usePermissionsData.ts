@@ -37,7 +37,17 @@ export function usePermissionsData() {
       const client = assertSupabase();
       const [rolesResult, modulesResult, permsResult] = await Promise.all([
         client.from("roles").select("*").order("name", { ascending: true }),
-        client.from("modules").select("id, label").order("label", { ascending: true }),
+        /* Só os módulos que realmente passam por `has_permission`. As telas
+           administrativas (`/permissoes`, `/usuarios-operadores`,
+           `/configuracoes`) também vivem no catálogo, mas são controladas
+           pelas flags globais do papel — mostrá-las aqui daria quatro
+           checkboxes que não decidem nada e sugeriria que desmarcar "Ver" em
+           Permissões tranca a tela, o que não é verdade. */
+        client
+          .from("modules")
+          .select("id, label")
+          .eq("access_gate", "permission")
+          .order("label", { ascending: true }),
         client.from("role_permissions").select("*"),
       ]);
 

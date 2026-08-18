@@ -24,7 +24,8 @@ export type ModuleTabDefinition = {
 export type ModuleDefinition = {
   id: string;
   label: string;
-  dataTable: string;
+  /** Nulo em módulos de navegação sem dados próprios (telas mock/administrativas). */
+  dataTable: string | null;
   /**
    * `three`/`table-controls`/`single` são variações da tela de registro único
    * (criar/editar um por vez, via `RegistryFormModal`). `batch` é a tela de

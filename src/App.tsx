@@ -4,63 +4,89 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import RouteFallback from "./components/RouteFallback";
 import { OpenWindowsProvider } from "./components/openWindows";
 import LoginPage from "./features/auth/LoginPage";
+import { ModuleCatalogProvider, useModuleCatalog } from "./features/modules/ModuleCatalogContext";
+import ModuleRoute, { ModuleSubrouteGuard } from "./features/modules/ModuleRoute";
+import { MODULE_SUBROUTES } from "./features/modules/moduleComponents";
 
-// Rotas carregadas sob demanda: só a tela de login (rota "/", primeira coisa
-// que qualquer usuário vê) entra no bundle inicial. O resto do sistema só é
-// baixado quando o usuário efetivamente navega até lá.
-const CashControlPage = lazy(() => import("./features/cashcontrol/CashControlPage"));
-const ConditionalsPage = lazy(() => import("./features/conditionals/ConditionalsPage"));
-const CustomersPage = lazy(() => import("./features/customers/CustomersPage"));
-const FinancePage = lazy(() => import("./features/finance/FinancePage"));
+// A tela inicial não é um módulo do catálogo (é o lugar de onde se abre os
+// módulos), então continua declarada à mão — como o login.
 const HomePage = lazy(() => import("./features/home/HomePage"));
-const PosPage = lazy(() => import("./features/pos/PosPage"));
-const ProductsPage = lazy(() => import("./features/products/ProductsPage"));
-const StockAdjustPage = lazy(() => import("./features/products/StockAdjustPage"));
-const PermissionsPage = lazy(() => import("./features/permissions/PermissionsPage"));
-const PurchasesPage = lazy(() => import("./features/purchases/PurchasesPage"));
-const PurchaseFormPage = lazy(() => import("./features/purchases/PurchaseFormPage"));
-const InvoicesPage = lazy(() => import("./features/sales/InvoicesPage"));
-const SaleOrderFormPage = lazy(() => import("./features/sales/SaleOrderFormPage"));
-const SaleOrdersPage = lazy(() => import("./features/sales/SaleOrdersPage"));
-const SalePage = lazy(() => import("./features/sales/SalePage"));
-const SaleReturnPage = lazy(() => import("./features/sales/SaleReturnPage"));
-const SettingsPage = lazy(() => import("./features/settings/SettingsPage"));
-const TaxationsPage = lazy(() => import("./features/taxations/TaxationsPage"));
-const UsersPage = lazy(() => import("./features/users/UsersPage"));
+
+/**
+ * As rotas protegidas vêm do catálogo de módulos (tabela `modules`), não de
+ * uma lista escrita à mão: cada linha com `path` vira uma `<Route>`, e o
+ * componente de cada uma é resolvido pelo registro do código, caindo no motor
+ * genérico quando o módulo não tem tela própria.
+ *
+ * O `<Route path="*">` é a parte delicada. Antes ele mandava qualquer rota
+ * desconhecida para o login, o que era seguro quando a lista de rotas era
+ * estática. Com o catálogo vindo do banco existe uma janela em que ele ainda
+ * não chegou — e nessa janela *toda* rota é desconhecida. Decidir ali jogaria
+ * quem deu F5 em `/produtos` na tela de login. Por isso o `*` só existe
+ * depois que o catálogo resolveu; enquanto isso a tela é a de carregamento.
+ */
+function AppRoutes() {
+  const { modules, status, error } = useModuleCatalog();
+
+  if (status === "loading") return <RouteFallback />;
+
+  if (status === "error") {
+    return (
+      <div style={{ color: "var(--white)", padding: 24 }} role="alert">
+        <p>Não foi possível carregar o catálogo de módulos.</p>
+        <p>{error}</p>
+      </div>
+    );
+  }
+
+  const routableModules = modules.filter((module) => module.path);
+
+  return (
+    <Routes>
+      <Route path="/" element={<LoginPage />} />
+      <Route path="/inicio" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+
+      {routableModules.map((module) => (
+        <Route
+          key={module.id}
+          path={module.path as string}
+          element={
+            <ProtectedRoute>
+              <ModuleRoute module={module} />
+            </ProtectedRoute>
+          }
+        />
+      ))}
+
+      {MODULE_SUBROUTES.map(({ moduleId, path, component: Component }) => (
+        <Route
+          key={path}
+          path={path}
+          element={
+            <ProtectedRoute>
+              <ModuleSubrouteGuard module={modules.find((item) => item.id === moduleId)}>
+                <Component />
+              </ModuleSubrouteGuard>
+            </ProtectedRoute>
+          }
+        />
+      ))}
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
 
 function App() {
   return (
     <BrowserRouter>
-      <OpenWindowsProvider>
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route path="/" element={<LoginPage />} />
-            <Route path="/inicio" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-            <Route
-              path="/clientes-fornecedores"
-              element={<ProtectedRoute><CustomersPage /></ProtectedRoute>}
-            />
-            <Route path="/produtos" element={<ProtectedRoute><ProductsPage /></ProtectedRoute>} />
-            <Route path="/realizar-venda" element={<ProtectedRoute><SalePage /></ProtectedRoute>} />
-            <Route path="/pedidos-venda" element={<ProtectedRoute><SaleOrdersPage /></ProtectedRoute>} />
-            <Route path="/pedidos-venda/novo" element={<ProtectedRoute><SaleOrderFormPage /></ProtectedRoute>} />
-            <Route path="/notas-emitidas" element={<ProtectedRoute><InvoicesPage /></ProtectedRoute>} />
-            <Route path="/financeiro" element={<ProtectedRoute><FinancePage /></ProtectedRoute>} />
-            <Route path="/ponto-de-venda" element={<ProtectedRoute><PosPage /></ProtectedRoute>} />
-            <Route path="/tributacoes" element={<ProtectedRoute><TaxationsPage /></ProtectedRoute>} />
-            <Route path="/compras" element={<ProtectedRoute><PurchasesPage /></ProtectedRoute>} />
-            <Route path="/compras/nova" element={<ProtectedRoute><PurchaseFormPage /></ProtectedRoute>} />
-            <Route path="/devolucao-venda" element={<ProtectedRoute><SaleReturnPage /></ProtectedRoute>} />
-            <Route path="/ajuste-estoque" element={<ProtectedRoute><StockAdjustPage /></ProtectedRoute>} />
-            <Route path="/controle-caixa" element={<ProtectedRoute><CashControlPage /></ProtectedRoute>} />
-            <Route path="/usuarios-operadores" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
-            <Route path="/permissoes" element={<ProtectedRoute><PermissionsPage /></ProtectedRoute>} />
-            <Route path="/condicionais" element={<ProtectedRoute><ConditionalsPage /></ProtectedRoute>} />
-            <Route path="/configuracoes" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-      </OpenWindowsProvider>
+      <ModuleCatalogProvider>
+        <OpenWindowsProvider>
+          <Suspense fallback={<RouteFallback />}>
+            <AppRoutes />
+          </Suspense>
+        </OpenWindowsProvider>
+      </ModuleCatalogProvider>
     </BrowserRouter>
   );
 }

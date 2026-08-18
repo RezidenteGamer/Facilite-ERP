@@ -58,6 +58,7 @@ O que **não** muda por causa disso:
   - `/controle-caixa` — controle de caixa (real: sessão de caixa e sangria/suprimento sobre `cash_registers`/`cash_sessions`/`cash_movements`, lê vendas em dinheiro de `financial_entries` sem escrever nela — ver decisão abaixo);
   - `/ponto-de-venda` — PDV (real: exige sessão de caixa aberta e grava a venda via `create_pos_sale`, que reaproveita `create_sale` — ver decisão abaixo);
   - `/configuracoes` — configurações.
+- **As rotas acima não são mais escritas à mão**: desde 18/08/2026 elas vêm do catálogo na tabela `modules` (só `/` e `/inicio` continuam declaradas em `src/App.tsx`). Um módulo novo passa a existir inserindo uma linha nessa tabela — e, se não tiver componente próprio registrado, abre pelo motor genérico assim mesmo. Ver a decisão "catálogo de módulos no banco + roteador dirigido por metadados" abaixo.
 - A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos, Realizar Venda, Ajuste de estoque, Pedidos de venda, Financeiro, Compras, Controle de caixa e Ponto de venda, que já são reais.
 - Existe agora um projeto Supabase real (`Facilite-ERP`, id `ifmdedruuetbbqjbnrkd`, região sa-east-1), configurado em `.env.local` (não versionado). `src/lib/supabaseClient.ts` usa `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` de lá. Não crie, exponha ou invente credenciais.
 - **Autenticação é real** (Supabase Auth, email/senha) — ver decisão de RBAC abaixo. Rotas internas são protegidas por `src/components/ProtectedRoute.tsx`.
@@ -69,7 +70,7 @@ Decisão do usuário: para viabilizar futuramente um recurso "Faça você mesmo"
 - Metadados de módulo ficam em tabelas Supabase: `modules`, `module_tabs`, `module_fields` (colunas, larguras, obrigatoriedade, onde cada campo aparece — tabela/ficha/formulário).
 - Os **dados** de cada módulo oficial ficam em tabela dedicada e tipada (ex.: `contacts`), não em JSONB genérico — módulos oficiais precisam de índices, FKs futuras e constraints, e o catálogo de módulos oficiais cresce devagar (controlado pelo time, não pelo usuário final). Um "Faça você mesmo" futuro pode implementar o mesmo contrato (`ModuleDataRepository<T>` em `src/lib/repositories/types.ts`) sobre uma tabela JSONB genérica, sem mudar a camada de apresentação.
 - A engine (`src/features/registry-engine/`) lê a definição do módulo e monta as props dos componentes existentes em `src/components/registry/` (`RegistryTable`, `RegistryActions`, `RegistryDetails`, `RegistryLayout`) — esses componentes **não foram alterados**, continuam 100% dirigidos por props.
-- Roteamento e menu (`src/App.tsx`, `src/features/home/modules.ts`) permanecem estáticos por enquanto — só o conteúdo interno da página do módulo passa a vir de metadados. Rotas dinâmicas só fazem sentido quando houver mais de um módulo na engine.
+- ~~Roteamento e menu (`src/App.tsx`, `src/features/home/modules.ts`) permanecem estáticos por enquanto — só o conteúdo interno da página do módulo passa a vir de metadados. Rotas dinâmicas só fazem sentido quando houver mais de um módulo na engine.~~ — **superado em 18/08/2026**: a condição ("mais de um módulo na engine") se cumpriu com folga, e roteamento, tela inicial e dock passaram a vir do catálogo no banco. Ver a decisão "catálogo de módulos no banco + roteador dirigido por metadados" abaixo.
 - Plano completo da implementação: ver histórico de conversa / commits relacionados ao módulo Clientes e Fornecedores.
 
 ### Decisão arquitetural: autenticação real + permissões granulares (RBAC) (13/08/2026)
@@ -394,18 +395,196 @@ Sem sessão aberta: `/ponto-de-venda` carregou com o catálogo navegável e "Con
 
 Pausar/Retomar venda (botões desabilitados de propósito — seria uma feature real de "venda em espera", não pedida nesta etapa); scanner de código de barras/câmera/captura de foto (toolbar decorativa, hardware/integração futura); edição/cancelamento de venda de PDV já confirmada (mesma situação de `sales`/`sale_orders` em geral); emissão fiscal de verdade (só o gancho, ver acima).
 
+### Decisão arquitetural: catálogo de módulos no banco + roteador dirigido por metadados (18/08/2026, noite)
+
+Extensão do motor genérico no mesmo peso da decisão original dele — e a fundação de M3 ("Faça você mesmo": usuário final cria os próprios módulos). Até aqui o motor sabia montar o **conteúdo** de uma tela a partir de metadados, mas a existência de cada módulo continuava escrita à mão em três lugares que ninguém garantia estarem de acordo:
+
+1. `src/App.tsx` — 19 `<Route>` com um `lazy(() => import(...))` cada;
+2. `src/features/home/modules.ts` — `HOME_MODULES`, 15 itens (rótulo/ícone/rota), consumido pela tela inicial e pelo dock;
+3. a tabela `modules` — 9 linhas, só os módulos que passaram pelo RBAC, sem rota, sem ícone, sem ordem.
+
+Os três divergiam de fato: 6 módulos da tela inicial nunca chegaram ao banco, e `realizar-venda` se chamava "Realizar uma venda" no tile e "Realizar Venda" na grade de `/permissoes`.
+
+#### A divisão que é o núcleo da etapa: catálogo no banco, registro no código
+
+O erro que tornaria isto inútil seria mover a lista do `App.tsx` para uma tabela e continuar precisando de um `case` em código para cada módulo novo — só o hardcode mudando de lugar, com passos a mais. Um componente React não cabe no Postgres, então a pergunta não era "como guardar a rota no banco", era **"como um módulo que não tem componente próprio ainda assim vira uma tela"**.
+
+- **O banco guarda o catálogo** (`modules`): quais módulos existem, rótulo, rota, ordem, chave de ícone, portão de acesso, se é do sistema ou do usuário.
+- **O código guarda dois registros**, com o que não cabe no Postgres:
+  - `src/features/modules/moduleComponents.ts` — `Record<string, LazyExoticComponent>`, id do módulo → tela própria, com os `lazy()` que moravam soltos no `App.tsx` (o code splitting não mudou: cada página continua um chunk).
+  - `src/features/modules/moduleIcons.ts` — chave de ícone → asset. `import x from "...webp"` é resolvido pelo Vite no build (hash no nome, placeholder inline); uma string no banco nunca viraria um asset. O banco guarda a *chave*, o bundle guarda a *imagem*.
+- **O roteador percorre o catálogo** e resolve cada módulo pelo registro; **quando não acha, cai na `GenericModulePage`**.
+
+**"Tem componente próprio" NÃO é coluna no banco** — é "o id está no registro do código", e ponto. O banco não teria como validar que o componente existe, e as duas fontes divergiriam no primeiro rename de arquivo. Uma regra, uma fonte.
+
+#### `GenericModulePage` — o fallback, que é a etapa toda
+
+`src/features/modules/GenericModulePage.tsx` recebe a entrada de catálogo e se monta inteira a partir de `useModuleDefinition(moduleId)` + `module_fields` (`buildTableColumns`/`buildDetailFields`/`buildFormFields`, os mesmos de Produtos e Clientes) sobre `src/lib/repositories/genericModuleRepository.ts`, que lê e grava na tabela que `modules.data_table` aponta. Lista, ficha, formulário de criação/edição e exclusão, sem um arquivo por módulo.
+
+- **É isto que faz M3 ser possível**: um módulo criado pelo usuário nunca vai ter entrada em `MODULE_COMPONENTS`, e precisa funcionar mesmo assim. Sem o caminho genérico funcionando ponta a ponta, M3 teria que refazer esta etapa.
+- **O repositório genérico é o único lugar do projeto que abre mão da tipagem** (`supabase as unknown as SupabaseClient`): o nome da tabela só existe em tempo de execução, e os tipos gerados só aceitam nomes conhecidos em tempo de compilação. É o preço de um módulo poder existir sem código escrito para ele, e está confinado a um arquivo. Quem garante a forma dos dados é `module_fields`; quem garante o acesso é a RLS.
+- **Módulos oficiais continuam com repositório tipado próprio** (`productsRepository`, `contactsRepository`): eles têm regra de negócio de verdade (sequencial de código, conversão de preço, joins). O genérico é o caminho de quem não tem nenhuma — não é para substituir os existentes.
+- Campo opcional vazio vira `null` (não string vazia); obrigatório vazio já é barrado pelo `RegistryFormModal` lendo o próprio `module_fields`. A ordenação da lista sai do primeiro campo com `show_in_table`, não de um `created_at` que nem toda tabela tem.
+
+#### Schema novo de `modules`
+
+Antes: `id`, `label`, `data_table`, `layout_variant`, `is_locked`, `created_at`. Colunas novas:
+
+| Coluna | Para quê |
+| --- | --- |
+| `path` | Rota. **Nulo** = item de catálogo sem tela (Relatórios: o tile existe e não leva a lugar nenhum, exatamente como antes). Índice único parcial impede duas linhas reivindicarem a mesma rota. |
+| `icon_key` | Chave no registro de ícones do código. Nula ou sem entrada → ícone genérico de reserva. |
+| `sort_order` | Ordem padrão na tela inicial (10..150, reproduzindo a ordem de `HOME_MODULES`). |
+| `show_on_home` | Se ganha tile. Falso em Configurações (alcançada pela engrenagem) e Permissões (alcançada de dentro de Usuários) — as duas nunca tiveram tile. |
+| `access_gate` | Qual portão decide o acesso — ver abaixo. |
+| `branch_scoped` | Se a tabela é isolada por filial; o motor genérico filtra/grava com a filial ativa. |
+
+- **`data_table` virou nulável**: um módulo de navegação pode não ter tabela (tela mock, tela administrativa). Só o motor genérico precisa dela. `ModuleDefinition.dataTable` acompanhou (`string | null`).
+- **`is_locked` foi reaproveitado, não duplicado.** A coluna já existia e **não tinha nenhum leitor** — nem em código, nem em função SQL, e valia `true` nas 9 linhas. Passa a significar o que o nome já sugeria: `true` = módulo de sistema, `false` = módulo criado pelo usuário (M3). Nenhuma coluna `is_system` nova.
+- **`access_gate` tem CHECK constraint**, diferente de `layout_variant` (que é só convenção + tipo TS). O motivo é o modo de falha: um valor errado em `layout_variant` erra um layout; um valor errado aqui **tranca gente para fora de uma tela**. No TS, valor desconhecido cai em `permission` (o mais restritivo) — falha fechado de propósito.
+
+#### Telas administrativas: a armadilha que o catálogo tinha que tratar explicitamente
+
+`/usuarios-operadores`, `/permissoes` e `/configuracoes` **não são gated por `has_permission`** — são controladas pelas flags globais do papel (`can_manage_users`, `can_manage_permissions`, `can_manage_branches`) ou por nada além de estar logado. Inseri-las em `modules` como módulo comum criaria um **segundo portão** (`has_permission('usuarios-operadores', 'view')`) que ninguém tem marcado, trancando todo mundo para fora de `/permissoes` — inclusive o Administrador, **inclusive a própria tela que se usa para consertar permissões**.
+
+Decisão: **elas ficam no catálogo** (senão a tela inicial voltaria a ter uma segunda fonte para o tile de Usuários), **mas o catálogo diz qual portão se aplica a cada uma** via `access_gate`. Cinco valores: `permission` (o normal), `manage_users`, `manage_permissions`, `manage_branches`, `authenticated`.
+
+- `canAccessModule()` (`src/features/modules/moduleAccess.ts`) é **uma função só com dois consumidores** — a tela inicial (quais tiles aparecem) e o roteador (quais rotas abrem). Se cada um decidisse por conta própria, um tile visível poderia levar a uma rota bloqueada, ou pior: uma rota aberta ficaria sem tile e ninguém notaria o furo.
+- **A grade de `/permissoes` passou a filtrar `access_gate = 'permission'`**. Sem isso ela mostraria quatro checkboxes para "Permissões" e "Configurações" que não decidem nada, sugerindo que desmarcar "Ver" tranca a tela — o que não é verdade e faria alguém tentar.
+- Isto é imposição de **UI**. Quem impõe de verdade continua sendo a RLS de cada tabela (`has_permission` nas policies); esconder o tile só evita o usuário descobrir a porta trancada depois de bater nela.
+
+#### O estado de carregamento do roteador (o F5 que caía no login)
+
+`<Route path="*">` redireciona rota desconhecida para `/` (login). Isso era seguro com a lista de rotas estática. Com o catálogo vindo do banco existe uma janela em que ele ainda não chegou — e nessa janela **toda** rota é desconhecida: um F5 em `/produtos` mandaria o usuário para o login em vez da tela dele.
+
+`ModuleCatalogProvider` (`src/features/modules/ModuleCatalogContext.tsx`) expõe `status`, e `App.tsx` **só renderiza `<Routes>` — incluindo o `*` — depois de `status !== "loading"`**. Três estados, todos deliberados:
+
+- `loading` enquanto a sessão não resolveu ou a consulta não voltou → tela de carregamento, nenhuma decisão de rota;
+- `ready` com catálogo vazio quando **não há sessão** — aí o catálogo é vazio de direito, não "ainda carregando", e o `*` pode decidir na hora (a policy de leitura de `modules` é só para `authenticated`);
+- `error` → mensagem com o erro, em vez de um app sem rota nenhuma redirecionando para o login em silêncio.
+
+**Testado com F5 de verdade** (não só navegação por dentro do app) em `/produtos` e `/financeiro`.
+
+#### Tela inicial, dock e sub-rotas
+
+- **`HOME_MODULES` deixou de existir.** `src/features/home/modules.ts` só exporta o tipo `HomeModule` agora — que virou uma *forma de apresentação*, não um cadastro. `useModuleOrder` junta catálogo + registro de ícones e devolve esses objetos.
+- **`reconcileOrder` adaptou limpo, como esperado** — ele já lidava com ids desconhecidos/faltando; a única mudança é de onde saem os ids. Como o catálogo chega depois do primeiro render, a reconciliação virou um efeito, com dois cuidados: não gravar no `localStorage` antes do catálogo chegar (apagaria a ordem do usuário) e devolver o mesmo array quando nada muda (evita render à toa).
+- **Tiles sem `can_view` somem**, não ficam desabilitados. A tela inicial é um lançador: um tile que não abre nada só ocupa espaço e ensina o usuário a ignorar tiles. Antes os 15 tiles apareciam para todo mundo e a recusa só chegava no clique.
+  - Consequência tratada: os 6 módulos que só existiam na tela inicial nunca tiveram permissão marcada. **Sem isso o Administrador perderia 5 tiles** — a migration insere `can_view` para eles.
+- **`openWindows.tsx` não conhece mais `HOME_MODULES`**: pega `icon_key` no catálogo e o asset no registro de ícones — a mesma dupla que a tela inicial usa, então dock e tile nunca divergem. Módulo sem asset cai no ícone genérico, nunca em nada.
+- **Rotas que não são módulo continuam declaradas à mão**: `/` (login) e `/inicio` (é o lugar de onde se abre os módulos, não um módulo).
+- **Sub-rotas** (`/pedidos-venda/novo`, `/compras/nova`) ficam em `MODULE_SUBROUTES`, ao lado do registro de componentes: não são entradas de catálogo (ninguém navega até elas pela tela inicial, não têm ícone, não fazem sentido sozinhas), são um segundo cômodo do mesmo módulo — e **herdam o portão de acesso dele**.
+- O portão passou a ser aplicado **no roteador**, não dentro de cada tela. Efeito colateral bom: as telas mock (que nunca checaram permissão nenhuma) passaram a ser barradas junto com as reais.
+
+#### Prova do caminho genérico (feita de verdade, e desfeita no fim)
+
+Criado **só por SQL** um módulo `teste-generico` (linha em `modules` + 6 linhas em `module_fields` apontando para `contacts`), **sem escrever nenhum componente para ele**, com `is_locked = false` (primeira linha marcada como "módulo do usuário") e `icon_key` nulo de propósito, para exercitar também o ícone de reserva. Confirmado no navegador:
+
+- apareceu na tela inicial como 16º tile, com o ícone genérico;
+- `/teste-generico` abriu (inclusive por navegação direta, sem passar pela tela inicial);
+- lista com as 5 colunas de `show_in_table` (E-mail, que é `false`, ficou de fora); ficha com os 6 campos de `show_in_details` (E-mail incluído); formulário com os 6 campos e asterisco só nos 4 `is_required`;
+- **CRUD completo**: criado um registro pelo formulário (gravado em `contacts`, com o campo opcional vazio virando `null`, não `''`), editado, e excluído com o `ConfirmDialog`;
+- entrou no dock com o ícone genérico, ao lado dos módulos com webp próprio.
+
+**O módulo de teste foi removido no fim** (as três tabelas + o registro criado), e a tela inicial voltou aos 15 tiles originais na ordem original — o que é, de quebra, mais uma prova de que o catálogo dirige tudo.
+
+- **Achado que vale registrar para M3**: a RLS de `contacts` é `has_permission('clientes-fornecedores', ...)`, então o módulo de teste **pegou carona nas policies de outro módulo**. Um módulo criado pelo usuário não terá esse luxo: ou o M3 gera policies junto com a tabela, ou (mais provável, e já previsto na decisão original do motor) o armazenamento genérico JSONB nasce com uma policy genérica que resolve o módulo pelo id da própria linha. Esta etapa não decide isso — só deixa claro que é a próxima pergunta, não um detalhe.
+
+#### Testado no navegador
+
+Os 15 módulos existentes abrindo pela tela inicial e pelo dock, com os ícones certos, na ordem certa e com o selo "+" de Clientes e Fornecedores preservado; as 19 rotas (17 do catálogo + 2 sub-rotas) resolvendo cada uma na sua tela, nenhuma em branco, nenhuma redirecionada. F5 direto em `/produtos` e `/financeiro` sem cair no login. Reordenação por arraste (eventos de mouse reais, exercitando o `MouseSensor`) persistindo depois do reload. `/permissoes`, `/usuarios-operadores` e `/configuracoes` acessíveis pelas flags globais, e a grade de `/permissoes` mostrando só os 15 módulos gated por permissão. Com `can_view` de Financeiro desligado no papel Administrador: o tile sumiu (16 → 15), a rota passou a mostrar a recusa, e o `select` direto pelo cliente voltou **0 linhas** — religando, voltou 5, confirmando que quem barra é a RLS e não a UI. `tsc`, `oxlint` e `vite build` limpos, com o code splitting por página preservado. Nenhum erro no console em nenhum momento.
+
+#### Fora de escopo
+
+Criar módulo pela interface (é M3 — esta etapa só prova que um módulo sem componente próprio funciona quando inserido por SQL); armazenamento genérico JSONB (M3); editor visual de campos, permissões por campo, workflow. Nenhum módulo existente teve comportamento interno alterado — a única mudança de dado foi o rótulo de `realizar-venda`, unificado em "Realizar uma venda" (o que o tile já dizia) porque agora há um rótulo só para as duas telas.
+
+### Decisão arquitetural: camada de emissão fiscal — interface + provedor simulado (18/08/2026, noite)
+
+Fundação para NF-e/NFC-e. **Esta etapa não emite nota nenhuma** e não constrói Notas Emitidas, NFC-e nem Tributações: constrói só a interface, uma implementação simulada e o ponto único de troca entre as duas. Mesmo papel que `ModuleDataRepository<T>` cumpre para dado de módulo, só que para emissão fiscal.
+
+**Por que agora, antes dos módulos que vão consumir isto**: o usuário quer validar o produto antes de assumir CNPJ, certificado digital A1 e mensalidade de provedor — ele ainda não sabe se o sistema vinga comercialmente. Isso só é possível se a emissão nascer isolada atrás de uma interface própria, com uma implementação que não depende de nada externo.
+
+#### O payload foi modelado contra a documentação de um provedor real, não inventado
+
+Este é o ponto central. A diferença entre o simulado e o real tem que ser **transporte** (gerar localmente vs. um `POST` numa API), não **estrutura**. Se o payload fosse inventado agora e o formato do provedor divergisse, a troca depois viraria reescrita — exatamente o que esta etapa existe para evitar.
+
+- **Referência usada**: API da Focus NFe v2 — [`emitir_nfe`](https://doc.focusnfe.com.br/reference/emitir_nfe), [`consultar_nfe`](https://doc.focusnfe.com.br/reference/consultar_nfe), [`cancelar_nfe`](https://doc.focusnfe.com.br/reference/cancelar_nfe) e a tabela completa de campos em [campos.focusnfe.com.br](https://campos.focusnfe.com.br/nfe/NotaFiscalXML.html) (a página de referência do endpoint só documenta o núcleo dos campos de item; os campos de **valor** de imposto — `icms_base_calculo`, `icms_aliquota`, `icms_valor`, `pis_aliquota_porcentual`, `cofins_aliquota_porcentual` etc. — só aparecem na tabela completa, que foi consultada para não inventar grafia).
+- `NfePayload` (`src/lib/fiscal/types.ts`) usa **snake_case em português, literalmente os nomes da Focus** — quebra a convenção camelCase do resto do projeto de propósito. Com isso, o `emit` do provedor real é um `JSON.stringify(payload)`.
+- Os nomes não são invenção da Focus: são a tradução 1:1 do schema oficial da SEFAZ (`ide`, `emit`, `dest`, `det`/`prod`/`imposto`, `total`), o denominador comum de qualquer provedor sério. PlugNotas/Nuvem Fiscal/NFe.io expõem os mesmos conceitos com grafias próprias — migrar seria um mapa de nomes, não uma remodelagem.
+- **O retorno, ao contrário, é camelCase nosso** (`FiscalDocument`), com o campo da Focus anotado em cada linha. O resultado é pequeno (uma dúzia de campos) e é o que os nossos módulos guardam e exibem; normalizá-lo custa uma função de adaptação dentro do provedor real e é o que permite um segundo provedor entrar sem tocar em Notas Emitidas.
+
+#### Três desvios do desenho de partida do plano, todos por causa da documentação real
+
+1. **`cancel`/`query` recebem `ref`, não `chave`.** No provedor real a chave de acesso não serve como identificador: ela só existe **depois** da autorização. Uma emissão que ainda está processando (ou que falhou) não tem chave nenhuma e precisa ser consultada do mesmo jeito. A Focus identifica tudo por `ref` — um identificador **gerado por nós**, usado na query string do `POST` e como chave do `GET`/`DELETE`. Manter `chave` obrigaria o provedor real a manter um mapa chave→ref e deixaria a consulta de nota em processamento sem resposta possível.
+2. **Status usam o vocabulário da Focus**, que é o da SEFAZ: `autorizado` (não "autorizada"), `cancelado`, `erro_autorizacao`, `denegado`, `nao_encontrado` — e `processando_autorizacao`, que **o simulado nunca devolve** mas está no tipo porque a emissão real é assíncrona por padrão (a API responde 202 e a autorização sai depois, por consulta ou webhook). Deixar o estado de fora faria os módulos nascerem sem tratar o caso mais comum do provedor real.
+3. **`xml`/`pdf` são `FiscalArtifact`, não string.** O simulado **gera o conteúdo localmente** (`content` preenchido, `path` nulo); a Focus **guarda o arquivo no servidor dela** e devolve o caminho (`caminho_xml_nota_fiscal`/`caminho_danfe` → `path` preenchido, `content` nulo até alguém baixar). Os dois campos nomeiam exatamente a diferença de transporte, em vez de escondê-la.
+
+Além disso: **rejeição não é exceção**. Nota recusada pela SEFAZ volta como `status: "erro_autorizacao"` com `mensagemSefaz` — é resultado de negócio que a tela mostra, não falha de programa. As implementações só lançam quando o transporte falha.
+
+#### `SimulatedFiscalProvider`
+
+`src/lib/fiscal/simulatedFiscalProvider.ts` — sem I/O externo, sem custo, roda em script, teste ou navegador sem configurar nada.
+
+- **Chave de acesso estruturalmente real** (`src/lib/fiscal/accessKey.ts`): 44 dígitos no layout do MOC — cUF/AAMM/CNPJ/modelo/série/número/tpEmis/cNF/cDV — com o **dígito verificador calculado pelo módulo 11 de verdade** (pesos 2..9 ciclando da direita, resto 0 ou 1 → DV 0). Um `substring` ou uma validação de DV feita por um módulo futuro se comporta como se comportaria com uma chave autorizada. O que ela não é, e não precisa ser, é uma chave *emitida*.
+- `xml` é um XML na árvore do schema da SEFAZ (`infNFe` com `ide`/`emit`/`dest`/`det`/`total`, mais `protNFe`), com aviso de documento simulado no cabeçalho; `pdf` é um "DANFE" em HTML (não PDF: gerar PDF de verdade exigiria uma biblioteca para um arquivo descartável, e o provedor real devolve o PDF pronto).
+- **Validação estrutural, não tributária**: falta de CFOP, NCM, CST, descrição ou quantidade positiva vira `erro_autorizacao` com a lista de problemas. Isso deixa os módulos consumidores exercitarem o caminho de recusa sem API real — justamente o caminho que ninguém testa. Alíquota e CFOP continuam fora de escopo (são Tributações, etapa 7).
+- **Coerência de estado**: não dá para cancelar `ref` inexistente (`nao_encontrado`); justificativa fora de 15–255 caracteres é recusada antes de "sair" (regra da SEFAZ); cancelar duas vezes dá `erro_cancelamento` com SEFAZ 573 (duplicidade de evento); `query` de nota cancelada devolve `cancelado` preservando chave, protocolo e XML original, mais o XML do evento.
+- **`emit` é idempotente por `ref`**: reemitir a mesma referência devolve o documento existente em vez de gerar uma segunda nota — proteção contra duplo clique/retry. **O provedor real precisa preservar isso** (a Focus recusa `ref` repetida; o adaptador mapeia essa recusa para uma consulta do `ref` existente).
+- **Estado em memória, e nenhuma tabela nova nesta etapa.** Recarregar a página zera o registro, de propósito: quem persiste documento emitido é Notas Emitidas (etapa 8), que terá tabela própria — duplicar essa persistência aqui criaria duas fontes para o mesmo dado antes de a primeira existir. O provedor real também não guarda nada localmente; quem guarda é a API dele.
+- `now` e `randomInt` são injetáveis, para um teste poder fixar chave e protocolo.
+
+#### O ponto único de configuração
+
+`src/lib/fiscal/provider.ts`, função `getFiscalProvider()`. **Nenhum módulo que emite nota pode ter um `if` de provedor** — todos chamam essa função. Trocar de provedor é mudar `VITE_FISCAL_PROVIDER` e acrescentar uma linha em `PROVIDER_FACTORIES`; nenhum arquivo de Notas Emitidas/NFC-e/Devolução é tocado.
+
+**Por que variável de ambiente** (e não linha no banco nem constante): constante exigiria editar e rebuildar para alternar, e o mesmo bundle não serviria dois ambientes; linha no banco partiria a configuração em dois lugares, porque o provedor real precisa de **token** e de ambiente (homologação/produção), que são segredo e já moram no `.env.local` junto das credenciais do Supabase — guardar o token numa tabela seria pior, e guardar só o nome no banco deixaria as duas metades podendo divergir. Env var é o padrão que o projeto já usa para "com qual back-end eu falo".
+
+**Falha fechado**: valor ausente ou desconhecido cai no simulado, com aviso no console. Mesmo raciocínio do `access_gate` — o modo de falha é que decide: erro de digitação no máximo deixa de emitir de verdade; o contrário emitiria nota fiscal real sem querer. `getFiscalProvider()` devolve **instância única** por sessão (o simulado guarda estado em memória; instância nova a cada chamada faria a consulta não achar o que a emissão acabou de emitir).
+
+#### Prova do ciclo emit → query → cancel → query
+
+`scripts/fiscal-cycle-check.mjs`, rodado com `node scripts/fiscal-cycle-check.mjs`: **23/23 verificações passaram**. Não é teste de navegador porque esta etapa não tem UI nenhuma.
+
+O script carrega os módulos pelo `ssrLoadModule` do Vite em vez de rodar direto no Node — o Node 24 executa TS, mas exige extensão explícita nos imports e o projeto todo importa sem extensão; pelo Vite, o que é exercitado é **o mesmo grafo de módulos que o navegador carrega**, e `import.meta.env` fica populado a partir do `.env.local` (é assim que o ponto único de configuração é lido de verdade no teste). Ele **loga com a conta de testes** e monta o payload a partir de uma **venda real do banco** (venda `0009`, com filial, cliente, item e produto reais).
+
+O que ficou provado:
+
+- payload montado com os dados **como estão hoje** no banco → `erro_autorizacao` listando `item 1: CFOP ausente; item 1: NCM ausente`, **sem lançar exceção** (o caminho de recusa funciona);
+- com as lacunas preenchidas → `autorizado`, chave `35260800000000000191550010000000011707425342` (44 dígitos, **DV conferido por implementação independente**: soma 438, resto 9, DV 2), com o CNPJ da filial nas posições 7-20; protocolo de 15 dígitos; XML de 2306 caracteres contendo `<chNFe>` e a descrição do item da venda real; DANFE HTML de 1589 caracteres;
+- `query` devolve a nota autorizada; `query` de ref inexistente devolve `nao_encontrado`;
+- `cancel` recusa justificativa curta e ref inexistente; cancela a nota autorizada devolvendo o XML do evento (`<tpEvento>110111</tpEvento>`) com a justificativa dentro; recancelar dá `erro_cancelamento` 573;
+- `query` depois do cancelamento devolve `cancelado` preservando chave, protocolo e XML original;
+- reemitir a mesma `ref` devolve o documento existente, não uma segunda nota.
+
+`tsc -b`, `oxlint` e `vite build` limpos (só os 4 avisos `only-export-components` que já existiam), com o code splitting por página preservado.
+
+#### Achados sobre o dado que já existe (etapa 0)
+
+O teste com dado real expôs lacunas que as etapas seguintes precisam fechar — nenhuma é problema desta camada:
+
+- **`contacts.indicador_ie` é texto livre** ("Não Contribuinte"), mas o payload quer o código da SEFAZ (1/2/9). Precisa virar código, ou ganhar mapeamento em Notas Emitidas. Mesma situação de `branches.regime_tributario`, que guarda o CRT como texto (esse pelo menos já é o próprio código).
+- **`branches` só tem `address` como texto livre**, mas o payload quer logradouro/número/bairro/município/UF/CEP separados, e a UF é obrigatória para formar o `cUF` da chave. Hoje o simulado cai num `fallbackUfCode` (`35`). Endereço de filial vai precisar ser quebrado em colunas.
+- **`products.ncm` e `sale_items.cfop` estão nulos** nos dados de teste — esperado (etapa 0 criou as colunas; quem preenche é Tributações), e é exatamente o que a validação estrutural do simulado apontou.
+- O mapeamento venda → payload mora **no script**, de propósito, e não deve virar código de produção: ele é responsabilidade de Notas Emitidas (etapa 8), com os valores de imposto que Tributações (etapa 7) calcula.
+
+`src/features/pos/fiscalDocument.ts` (o no-op deixado pela etapa do PDV) **continua intocado** — ele é o gancho da etapa de NFC-e, que passará a chamar `getFiscalProvider()`.
+
+#### Fora de escopo
+
+`FocusNfeProvider` (nenhuma chamada de rede foi implementada — a entrada existe em `PROVIDER_FACTORIES` valendo `null`, e entra quando o gatilho de ativação disparar: primeiro cliente real, ou etapas 0–9 concluídas em modo simulado, o que vier primeiro); Notas Emitidas, NFC-e e Devolução (as três consomem esta interface, nenhuma foi construída); cálculo de imposto e CFOP (é Tributações, etapa 7, que alimenta o payload com valores já calculados — esta camada não sabe nada sobre alíquota); certificado digital, assinatura de XML e DANFE de verdade (só existem no provedor real). Nenhuma tabela nova, nenhuma migration, nenhum módulo existente alterado.
+
 ## Roteiro para criar um novo módulo
 
 Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer módulo novo (Vendas, Compras, Financeiro etc.) deve seguir o mesmo, para não divergir do motor genérico nem do RBAC.
 
-1. **Metadados primeiro**: inserir em `modules`/`module_fields` (e `module_tabs` se tiver abas) antes de qualquer código — `layout_variant`, `data_table`, quais campos aparecem em tabela/ficha/formulário. Campos numéricos usam `data_type: 'text'` mesmo assim (a engine não converte tipos ainda); a conversão pra número é manual no handler de submit da página, como em `ProductsPage.tsx`.
+1. **Metadados primeiro**: inserir em `modules`/`module_fields` (e `module_tabs` se tiver abas) antes de qualquer código — `layout_variant`, `data_table`, quais campos aparecem em tabela/ficha/formulário. **A linha de `modules` também é o que cria a rota e o tile**: preencha `path`, `icon_key`, `sort_order`, `show_on_home`, `access_gate` e `branch_scoped` (ver a decisão do catálogo abaixo). Um módulo sobre o motor genérico simples pode parar aqui — sem componente no registro, ele já abre pela `GenericModulePage`; os passos 4 e 5 só são necessários quando a tela precisa de regra própria. Campos numéricos usam `data_type: 'text'` mesmo assim (a engine não converte tipos ainda); a conversão pra número é manual no handler de submit da página, como em `ProductsPage.tsx`.
 2. **Tabela de dados dedicada e tipada** (não JSONB) — com FKs reais, `unique`, índices. Decidir **branch_id ou não**: dado operacional (estoque, preço, movimentação) é isolado por filial; dado cadastral compartilhado (como contatos) não é. Confirme com o usuário se não for óbvio.
 3. **RLS desde o início, já correta**:
    - Policies de `select`/`insert`/`update`/`delete` **separadas** (nunca `for all`) — `for all` duplica a cobertura do `select` e dispara o aviso "multiple permissive policies" no advisor.
    - `using (has_permission('modulo-id', 'view') and has_branch_access(branch_id))` — só inclua `has_branch_access` se o módulo tiver `branch_id`.
    - Qualquer função SQL nova precisa de `revoke execute ... from anon` explícito — o Supabase regrante EXECUTE a `anon`/`authenticated`/`service_role` por padrão ao criar a função, e `revoke ... from public` sozinho não basta.
 4. **Repositório**: implementar `ModuleDataRepository<T>` (`src/lib/repositories/types.ts`), no padrão de `productsRepository.ts` (fábrica recebe `branchId` se o módulo for isolado por filial) ou `contactsRepository.ts` (sem filial). **Se o módulo for de lançamento em lote** (vários itens confirmados juntos, sem editar/excluir depois), use o contrato irmão `ModuleBatchRepository` e o padrão de `stockAdjustmentsRepository.ts` — ver a decisão do motor de lote acima.
-5. **Hook + página**: espelhar `useProductsData.ts`/`ProductsPage.tsx` — `useModuleDefinition(moduleId)`, `useAuth().hasPermission`, `RegistryFormModal` para criar/editar, `ConfirmDialog` para excluir. Módulo de lote troca o `RegistryFormModal` pelo `RegistryBatchFormModal` (`layout_variant: 'batch'`), espelhando `StockAdjustPage.tsx`. Registrar a janela com `openWindow({ id, label, path })` — **não precisa mais passar `icon` manualmente**: `openWindow` já busca a imagem certa em `HOME_MODULES` pelo `id`, então o dock some sincronizado com o ícone da tela inicial automaticamente (ver `src/components/openWindows.tsx`). Só garanta que o módulo tem uma entrada em `HOME_MODULES` (`src/features/home/modules.ts`) com `iconImage` — sem isso o dock cai pro ícone de traço genérico (`icon`), que é decorativo/reserva.
+5. **Hook + página** — **só se a tela precisar de regra própria**; sem isso o módulo já funciona pela `GenericModulePage`. Espelhar `useProductsData.ts`/`ProductsPage.tsx` — `useModuleDefinition(moduleId)`, `useAuth().hasPermission`, `RegistryFormModal` para criar/editar, `ConfirmDialog` para excluir. Módulo de lote troca o `RegistryFormModal` pelo `RegistryBatchFormModal` (`layout_variant: 'batch'`), espelhando `StockAdjustPage.tsx`. Depois **registre o componente em `MODULE_COMPONENTS`** (`src/features/modules/moduleComponents.ts`) — é isso, e só isso, que faz o roteador preferir a tela própria ao motor genérico; não há coluna no banco dizendo isso. Registrar a janela com `openWindow({ id, label, path })` — **não precisa passar `icon`**: `openWindow` resolve `modules.icon_key` no registro de ícones sozinho, então o dock fica sincronizado com o tile da tela inicial automaticamente (ver `src/components/openWindows.tsx`). Para o módulo ter ícone próprio, adicione o asset em `src/assets/icons/modules/` e uma entrada em `MODULE_ICONS` (`src/features/modules/moduleIcons.ts`) com a mesma chave de `modules.icon_key` — sem isso ele cai no ícone genérico de reserva, que funciona mas é neutro.
 6. **Se o módulo precisar de imagem** (produto, item etc.), reaproveite `PhotoDropzone` (`src/features/registry-engine/PhotoDropzone.tsx`) — já é genérico, só falta: criar bucket próprio no Storage (não reaproveite `contact-photos`), coluna `*_url` na tabela, policies de `storage.objects` no mesmo padrão de `has_permission`, e ligar via prop `media`/`mediaField`. Sem redimensionamento/limite de tamanho client-side ainda — replicar esse débito técnico é aceitável, mas documente se mudar.
 7. **Depois de aplicar as migrations**: rodar `get_advisors` (security e performance) e corrigir avisos novos na hora — não deixar acumular para o fim.
 8. **Gerar tipos**: `generate_typescript_types` e atualizar `src/types/supabase.ts` manualmente (o projeto não usa geração automática no build).
