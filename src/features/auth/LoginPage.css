@@ -336,13 +336,16 @@
   margin-top: 4px;
 }
 
-/* Borda em volta da região do chat (mensagens + campo), separando-a
-   visualmente do resto do card. */
+/* Fundo sólido (não-vidro) para a região do chat (mensagens + campo) —
+   diferente do card em volta, este miolo precisa de contraste firme e
+   consistente para o texto das mensagens, sem depender de quanto da foto
+   de fundo aparece atrás do blur. */
 .support__chat-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
+  background: var(--blue-panel-edge);
   border: 1.5px solid rgba(255, 255, 255, .32);
   border-radius: 16px;
 }
