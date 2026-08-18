@@ -104,7 +104,7 @@ export default function RegistryTable<T>({
   tabs,
   activeTab,
   onTabChange,
-  minRows = 7,
+  minRows = 5,
   footerActions,
   summary,
 }: RegistryTableProps<T>) {
