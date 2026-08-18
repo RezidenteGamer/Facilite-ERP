@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { SearchIcon } from "../../components/icons";
+import LookupModal from "../../components/form/LookupModal";
+import { useAuth } from "../auth/AuthContext";
+import { useProductsData } from "../products/useProductsData";
+import type { Product } from "../products/products";
+import type { Contact } from "../customers/contacts";
+import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
 import {
   CancelSaleIcon,
   CardIcon,
@@ -15,27 +21,13 @@ import {
   PlayIcon,
   SplitIcon,
 } from "./icons";
-import { POS_PRODUCTS, formatMoney, type PosCategory, type PosProduct } from "./posProducts";
+import { formatMoney, productPlaceholder } from "./pos";
+import { useOpenCashSession, usePosSale, type PosPaymentMethod } from "./usePosSale";
 import "./PosPage.css";
 
 const LOW_STOCK_DEFAULT = 15;
 
-type CategoryFilter = "todos" | PosCategory;
-
-const CATEGORY_LABEL: Record<PosCategory, string> = {
-  vegetais: "Vegetais",
-  automoveis: "Automóveis",
-  outros: "Outros",
-};
-
-type CartLine = {
-  product: PosProduct;
-  quantity: number;
-};
-
-type PaymentMethod = "dinheiro" | "debito" | "credito" | "pix" | "dividir";
-
-const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: typeof CardIcon }[] = [
+const PAYMENT_METHODS: { id: PosPaymentMethod | "dividir"; label: string; icon: typeof CardIcon }[] = [
   { id: "dinheiro", label: "Dinheiro", icon: CardIcon },
   { id: "debito", label: "Débito", icon: CardIcon },
   { id: "credito", label: "Crédito", icon: CardIcon },
@@ -43,11 +35,16 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: typeof CardIcon
   { id: "dividir", label: "Dividir", icon: SplitIcon },
 ];
 
-function productBadge(product: PosProduct): { label: string; tone: "low" | "out" } | null {
+const SPLIT_METHOD_LABEL: Record<PosPaymentMethod, string> = {
+  dinheiro: "Dinheiro",
+  debito: "Débito",
+  credito: "Crédito",
+  pix: "PIX",
+};
+
+function productBadge(product: Product): { label: string; tone: "low" | "out" } | null {
   if (product.stock <= 0) return { label: "Sem estoque", tone: "out" };
-  if (product.stock <= (product.lowStockThreshold ?? LOW_STOCK_DEFAULT)) {
-    return { label: "Estoque baixo", tone: "low" };
-  }
+  if (product.stock <= LOW_STOCK_DEFAULT) return { label: "Estoque baixo", tone: "low" };
   return null;
 }
 
@@ -55,78 +52,44 @@ function productBadge(product: PosProduct): { label: string; tone: "low" | "out"
 export default function PosPage() {
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
+  const { hasPermission, currentBranchId, profile, user } = useAuth();
+  const sellerId = profile?.id ?? user?.id ?? null;
+  const canCreate = hasPermission("ponto-de-venda", "create");
+
+  const { products } = useProductsData(currentBranchId);
+  const { session: openSession, loading: sessionLoading, reload: reloadSession } = useOpenCashSession(currentBranchId);
+  const sale = usePosSale(currentBranchId, sellerId);
 
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<CategoryFilter>("todos");
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [client, setClient] = useState("");
-  const [discount, setDiscount] = useState("");
-  const [discountMode, setDiscountMode] = useState<"percent" | "value">("percent");
-  const [payment, setPayment] = useState<PaymentMethod>("dinheiro");
-  const [received, setReceived] = useState("");
+  const [clientLookupOpen, setClientLookupOpen] = useState(false);
 
-  // "outros" não vira aba própria — os produtos continuam visíveis em "Todos".
-  const categories = useMemo(() => {
-    const found = new Set(POS_PRODUCTS.map((p) => p.category));
-    found.delete("outros");
-    return Array.from(found);
-  }, []);
+  // Recarrega a sessão depois de uma venda confirmada — o extrato do Controle
+  // de caixa nesta sessão muda, e uma segunda sessão pode ter sido aberta
+  // em outra aba nesse meio-tempo.
+  useEffect(() => {
+    if (sale.confirmedSale) reloadSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sale.confirmedSale]);
 
+  // Sem taxonomia de categoria: `products.type` é campo livre sem dado
+  // estruturado hoje (a categoria vegetais/automóveis/outros do mock era só
+  // exemplo) — ver AGENTS.md. Filtra só por busca e produto ativo.
   const visibleProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return POS_PRODUCTS.filter((p) => {
-      const matchesCategory = category === "todos" || p.category === category;
-      const matchesTerm = !term || p.name.toLowerCase().includes(term) || p.id.includes(term);
-      return matchesCategory && matchesTerm;
+    return products.filter((product) => {
+      if (!product.active) return false;
+      if (!term) return true;
+      return product.description.toLowerCase().includes(term) || product.code.toLowerCase().includes(term);
     });
-  }, [category, search]);
+  }, [products, search]);
 
-  function addToCart(product: PosProduct) {
-    if (product.stock <= 0) return;
-    setCart((current) => {
-      const existing = current.find((line) => line.product.id === product.id);
-      if (existing) {
-        if (existing.quantity >= product.stock) return current;
-        return current.map((line) =>
-          line.product.id === product.id ? { ...line, quantity: line.quantity + 1 } : line,
-        );
-      }
-      return [...current, { product, quantity: 1 }];
-    });
-  }
+  const canConfirm =
+    canCreate && !sessionLoading && !!openSession && sale.cart.length > 0 && sale.paymentValid && !sale.submitting;
 
-  function changeQuantity(productId: string, delta: number) {
-    setCart((current) =>
-      current
-        .map((line) =>
-          line.product.id === productId
-            ? { ...line, quantity: Math.min(line.quantity + delta, line.product.stock) }
-            : line,
-        )
-        .filter((line) => line.quantity > 0),
-    );
-  }
-
-  function removeLast() {
-    setCart((current) => current.slice(0, -1));
-  }
-
-  const subtotal = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
-  const discountValueRaw = Math.max(0, Number(discount.replace(",", ".")) || 0);
-  const discountValue = discountMode === "percent" ? Math.min(discountValueRaw, 100) : discountValueRaw;
-  const discountAmount = discountMode === "percent" ? subtotal * (discountValue / 100) : discountValue;
-  const total = Math.max(0, subtotal - discountAmount);
-  const receivedValue = Number(received.replace(",", ".")) || 0;
-  const troco = Math.max(0, receivedValue - total);
-
-  function confirmSale() {
-    if (cart.length === 0) return;
-    // Sem back-end ainda: só limpa a venda atual.
-    setCart([]);
-    setClient("");
-    setDiscount("");
-    setReceived("");
+  function handleConfirm() {
+    if (!canConfirm) return;
+    void sale.confirmSale(!!openSession);
   }
 
   useEffect(() => {
@@ -142,16 +105,16 @@ export default function PosPage() {
         searchRef.current?.focus();
       } else if (event.key === "F4") {
         event.preventDefault();
-        confirmSale();
+        handleConfirm();
       } else if (event.key === "Escape") {
         event.preventDefault();
-        removeLast();
+        sale.removeLast();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart]);
+  }, [sale.cart, canConfirm]);
 
   return (
     <div className="pos">
@@ -189,26 +152,6 @@ export default function PosPage() {
           </div>
 
           <div className="pos__filters">
-            <div className="pos__tabs" role="tablist">
-              <button
-                className={`pos__tab${category === "todos" ? " pos__tab--active" : ""}`}
-                type="button"
-                onClick={() => setCategory("todos")}
-              >
-                Todos
-              </button>
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  className={`pos__tab${category === cat ? " pos__tab--active" : ""}`}
-                  type="button"
-                  onClick={() => setCategory(cat)}
-                >
-                  {CATEGORY_LABEL[cat]}
-                </button>
-              ))}
-            </div>
-
             <div className="pos__view-toggle">
               <button
                 className={`pos__view-btn${view === "grid" ? " pos__view-btn--active" : ""}`}
@@ -233,43 +176,41 @@ export default function PosPage() {
             {visibleProducts.map((product) => {
               const badge = productBadge(product);
               const outOfStock = product.stock <= 0;
+              const placeholder = productPlaceholder(product.description, product.code);
               return (
                 <button
                   key={product.id}
                   className="pos__card"
                   type="button"
                   disabled={outOfStock}
-                  onClick={() => addToCart(product)}
+                  onClick={() => sale.addProduct(product)}
                 >
                   {badge && <span className={`pos__badge pos__badge--${badge.tone}`}>{badge.label}</span>}
-                  <span
-                    className="pos__card-image"
-                    style={{ background: product.placeholder.color }}
-                    aria-hidden="true"
-                  >
-                    {product.placeholder.label}
+                  <span className="pos__card-image" style={{ background: placeholder.color }} aria-hidden="true">
+                    {placeholder.label}
                   </span>
                   <span className="pos__card-body">
-                    <span className="pos__card-name">{product.name}</span>
-                    <span className="pos__card-price">{formatMoney(product.price)}</span>
+                    <span className="pos__card-name">{product.description}</span>
+                    <span className="pos__card-price">{formatMoney(product.salePrice)}</span>
                     <span className="pos__card-stock">Estoque: {product.stock}</span>
                   </span>
                 </button>
               );
             })}
+            {visibleProducts.length === 0 && <p className="pos__cart-empty">Nenhum produto encontrado.</p>}
           </div>
 
           <div className="pos__toolbar">
-            <button type="button" aria-label="Focar câmera">
+            <button type="button" aria-label="Focar câmera" title="Scanner de código de barras (não implementado)">
               <CropIcon />
             </button>
-            <button type="button" aria-label="Digitar código">
+            <button type="button" aria-label="Digitar código" title="Digitar código (não implementado)">
               T
             </button>
-            <button type="button" aria-label="Editar produto">
+            <button type="button" aria-label="Editar produto" title="Editar produto (não implementado)">
               <PencilIcon />
             </button>
-            <button type="button" aria-label="Capturar foto">
+            <button type="button" aria-label="Capturar foto" title="Capturar foto (não implementado)">
               <FrameIcon />
             </button>
           </div>
@@ -282,39 +223,43 @@ export default function PosPage() {
               Venda Atual
             </div>
             <div className="pos__cart-controls">
-              <button type="button" aria-label="Pausar venda">
+              <button type="button" aria-label="Pausar venda" title="Pausar venda (não implementado nesta etapa)" disabled>
                 <PauseIcon />
               </button>
-              <button type="button" aria-label="Retomar venda">
+              <button type="button" aria-label="Retomar venda" title="Retomar venda (não implementado nesta etapa)" disabled>
                 <PlayIcon />
               </button>
-              <button type="button" aria-label="Cancelar venda" onClick={() => setCart([])}>
+              <button type="button" aria-label="Cancelar venda" onClick={sale.reset}>
                 <CancelSaleIcon />
               </button>
             </div>
           </div>
 
           <div className="pos__cart-items">
-            {cart.length === 0 ? (
+            {sale.cart.length === 0 ? (
               <p className="pos__cart-empty">Adicione produtos à venda</p>
             ) : (
-              cart.map((line) => (
-                <div className="pos__cart-line" key={line.product.id}>
+              sale.cart.map((line) => (
+                <div className="pos__cart-line" key={line.lineId}>
                   <div className="pos__cart-line-info">
-                    <span className="pos__cart-line-name">{line.product.name}</span>
-                    <span className="pos__cart-line-price">{formatMoney(line.product.price)} un.</span>
+                    <span className="pos__cart-line-name">{line.product.description}</span>
+                    <span className="pos__cart-line-price">{formatMoney(line.product.salePrice)} un.</span>
                   </div>
                   <div className="pos__cart-line-qty">
-                    <button type="button" onClick={() => changeQuantity(line.product.id, -1)}>
+                    <button type="button" onClick={() => sale.changeQuantity(line.lineId, -1)}>
                       −
                     </button>
                     <span>{line.quantity}</span>
-                    <button type="button" onClick={() => changeQuantity(line.product.id, 1)}>
+                    <button
+                      type="button"
+                      disabled={line.quantity >= line.product.stock}
+                      onClick={() => sale.changeQuantity(line.lineId, 1)}
+                    >
                       +
                     </button>
                   </div>
                   <span className="pos__cart-line-total">
-                    {formatMoney(line.product.price * line.quantity)}
+                    {formatMoney(line.product.salePrice * line.quantity)}
                   </span>
                 </div>
               ))
@@ -322,13 +267,28 @@ export default function PosPage() {
           </div>
 
           <div className="pos__cart-footer">
-            <input
-              className="pos__client"
-              type="text"
-              placeholder="Cliente (opcional) — buscar por nome ou CPF"
-              value={client}
-              onChange={(event) => setClient(event.target.value)}
-            />
+            {!sessionLoading && !openSession && (
+              <div className="pos__session-warning" role="alert">
+                <span>Abra uma sessão de caixa antes de vender.</span>
+                <Link to="/controle-caixa">Abrir no Controle de caixa →</Link>
+              </div>
+            )}
+
+            <div className="pos__client-row">
+              <button type="button" className="pos__client" onClick={() => setClientLookupOpen(true)}>
+                {sale.contact ? sale.contact.name : "Cliente (opcional) — buscar por nome ou CPF"}
+              </button>
+              {sale.contact && (
+                <button
+                  type="button"
+                  className="pos__client-clear"
+                  aria-label="Remover cliente selecionado"
+                  onClick={() => sale.setContact(null)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
 
             <div className="pos__discount-row">
               <span>Desconto:</span>
@@ -336,21 +296,21 @@ export default function PosPage() {
                 className="pos__discount-input"
                 type="text"
                 inputMode="decimal"
-                value={discount}
-                onChange={(event) => setDiscount(event.target.value)}
+                value={sale.discount}
+                onChange={(event) => sale.setDiscount(event.target.value)}
               />
               <div className="pos__discount-toggle">
                 <button
                   type="button"
-                  className={discountMode === "percent" ? "pos__discount-toggle--active" : ""}
-                  onClick={() => setDiscountMode("percent")}
+                  className={sale.discountMode === "percent" ? "pos__discount-toggle--active" : ""}
+                  onClick={() => sale.setDiscountMode("percent")}
                 >
                   %
                 </button>
                 <button
                   type="button"
-                  className={discountMode === "value" ? "pos__discount-toggle--active" : ""}
-                  onClick={() => setDiscountMode("value")}
+                  className={sale.discountMode === "value" ? "pos__discount-toggle--active" : ""}
+                  onClick={() => sale.setDiscountMode("value")}
                 >
                   R$
                 </button>
@@ -360,11 +320,11 @@ export default function PosPage() {
             <div className="pos__totals">
               <div className="pos__totals-row">
                 <span>Subtotal</span>
-                <span>{formatMoney(subtotal)}</span>
+                <span>{formatMoney(sale.subtotal)}</span>
               </div>
               <div className="pos__totals-row pos__totals-row--total">
                 <span>Total</span>
-                <span>{formatMoney(total)}</span>
+                <span>{formatMoney(sale.total)}</span>
               </div>
             </div>
 
@@ -375,8 +335,8 @@ export default function PosPage() {
                   <button
                     key={method.id}
                     type="button"
-                    className={`pos__payment${payment === method.id ? " pos__payment--active" : ""}`}
-                    onClick={() => setPayment(method.id)}
+                    className={`pos__payment${sale.method === method.id ? " pos__payment--active" : ""}`}
+                    onClick={() => sale.selectMethod(method.id)}
                   >
                     <Icon />
                     <span>{method.label}</span>
@@ -385,31 +345,128 @@ export default function PosPage() {
               })}
             </div>
 
-            <div className="pos__received-row">
-              <label>
-                Recebido:
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  value={received}
-                  onChange={(event) => setReceived(event.target.value)}
-                />
-              </label>
-              <span className="pos__troco">Troco: {formatMoney(troco)}</span>
-            </div>
+            {sale.method === "dinheiro" && (
+              <div className="pos__received-row">
+                <label>
+                  Recebido:
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={sale.received}
+                    onChange={(event) => sale.setReceived(event.target.value)}
+                  />
+                </label>
+                <span className="pos__troco">Troco: {formatMoney(sale.troco)}</span>
+              </div>
+            )}
 
-            <button
-              className="pos__confirm"
-              type="button"
-              disabled={cart.length === 0}
-              onClick={confirmSale}
-            >
-              Confirmar Venda — {formatMoney(total)}
+            {sale.method === "credito" && (
+              <div className="pos__received-row">
+                <label>
+                  Parcelas:
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={sale.installments}
+                    onChange={(event) => sale.setInstallments(Math.max(1, Number(event.target.value) || 1))}
+                  />
+                </label>
+              </div>
+            )}
+
+            {sale.method === "dividir" && (
+              <div className="pos__split">
+                {sale.splitLines.map((line, index) => (
+                  <div className="pos__split-line" key={line.lineId}>
+                    <select
+                      aria-label={`Forma de pagamento ${index + 1}`}
+                      value={line.method}
+                      onChange={(event) =>
+                        sale.updateSplitLine(line.lineId, { method: event.target.value as PosPaymentMethod })
+                      }
+                    >
+                      {Object.entries(SPLIT_METHOD_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      aria-label={`Valor do pagamento ${index + 1}`}
+                      value={line.amount === 0 ? "" : String(line.amount)}
+                      onChange={(event) =>
+                        sale.updateSplitLine(line.lineId, { amount: Number(event.target.value.replace(",", ".")) || 0 })
+                      }
+                    />
+                    {line.method === "credito" && (
+                      <input
+                        className="pos__split-installments"
+                        type="number"
+                        min={1}
+                        step={1}
+                        aria-label={`Parcelas do pagamento ${index + 1}`}
+                        value={line.installments}
+                        onChange={(event) =>
+                          sale.updateSplitLine(line.lineId, {
+                            installments: Math.max(1, Number(event.target.value) || 1),
+                          })
+                        }
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="pos__split-remove"
+                      aria-label={`Remover pagamento ${index + 1}`}
+                      onClick={() => sale.removeSplitLine(line.lineId)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className="pos__split-add" onClick={sale.addSplitLine}>
+                  + Adicionar forma de pagamento
+                </button>
+                <div
+                  className={`pos__split-summary${sale.splitMatches ? " pos__split-summary--ok" : " pos__split-summary--warn"}`}
+                >
+                  <span>Somado: {formatMoney(sale.splitTotal)}</span>
+                  {!sale.splitMatches && <span>Falta bater com o total de {formatMoney(sale.total)}.</span>}
+                </div>
+              </div>
+            )}
+
+            {sale.submitError && <p className="pos__error">{sale.submitError}</p>}
+            {sale.confirmedSale && (
+              <p className="pos__success">Venda {sale.confirmedSale.code} confirmada.</p>
+            )}
+            {!canCreate && <p className="pos__error">Sem permissão para vender no ponto de venda.</p>}
+
+            <button className="pos__confirm" type="button" disabled={!canConfirm} onClick={handleConfirm}>
+              Confirmar Venda — {formatMoney(sale.total)}
             </button>
           </div>
         </aside>
       </div>
+
+      {clientLookupOpen && (
+        <LookupModal<Contact>
+          title="Selecionar cliente"
+          placeholder="Buscar por nome ou documento..."
+          onClose={() => setClientLookupOpen(false)}
+          fetchItems={(query) => fetchContactsByKind("clientes", query)}
+          getKey={(c) => c.id}
+          renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+          onSelect={(c) => {
+            sale.setContact(c);
+            setClientLookupOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

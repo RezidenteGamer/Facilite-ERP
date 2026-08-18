@@ -30,7 +30,8 @@ export type Sale = {
   branchId: string;
   code: string;
   status: "confirmed" | "cancelled";
-  contactId: string;
+  /** Opcional só no PDV (venda sem cliente identificado) — ver AGENTS.md. */
+  contactId?: string;
   sellerId: string;
   address?: string;
   deliveryAddress?: string;
@@ -45,6 +46,8 @@ export type Sale = {
   totalAmount: number;
   createdAt?: string;
   confirmedAt?: string;
+  /** Preenchido só para vendas nascidas no Ponto de venda (ver AGENTS.md). */
+  cashSessionId?: string;
 };
 
 /** Formato monetário do sistema (pt-BR, com símbolo — usado em totais/carrinho). */

@@ -111,13 +111,19 @@ export function createFinancialEntriesRepository(branchId: string): FinancialEnt
       const { data, error } = await client.rpc("create_financial_entry_installments", {
         p_branch_id: branchId,
         p_type: input.type,
-        p_contact_id: input.contactId ?? null,
+        // Os três campos abaixo aceitam null de verdade em tempo de execução
+        // (contato/forma/documento são opcionais em financial_entries) — o
+        // gerador de tipos passou a inferir esses parâmetros de função como
+        // `string` não-nulável nesta rodada (regressão do gerador, não do
+        // contrato da RPC); o cast documenta a divergência em vez de
+        // escondê-la com `any`.
+        p_contact_id: (input.contactId ?? null) as string,
         p_total: input.total,
         p_installment_count: input.installmentCount,
         p_first_due_date: input.firstDueDate,
         p_interval_days: input.intervalDays,
-        p_payment_method: input.paymentMethod ?? null,
-        p_document: input.document ?? null,
+        p_payment_method: (input.paymentMethod ?? null) as string,
+        p_document: (input.document ?? null) as string,
         p_settled: input.settled,
       });
       if (error) throw error;

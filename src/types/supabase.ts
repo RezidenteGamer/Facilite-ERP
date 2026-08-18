@@ -59,6 +59,160 @@ export type Database = {
         }
         Relationships: []
       }
+      cash_movements: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          description: string
+          id: string
+          session_id: string
+          type: Database["public"]["Enums"]["cash_movement_type"]
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          id?: string
+          session_id: string
+          type: Database["public"]["Enums"]["cash_movement_type"]
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          id?: string
+          session_id?: string
+          type?: Database["public"]["Enums"]["cash_movement_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_movements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_movements_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "cash_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cash_registers: {
+        Row: {
+          active: boolean
+          branch_id: string
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          active?: boolean
+          branch_id: string
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          active?: boolean
+          branch_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_registers_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cash_sessions: {
+        Row: {
+          branch_id: string
+          closed_at: string | null
+          closed_by: string | null
+          code: string
+          counted_amount: number | null
+          difference: number | null
+          expected_amount: number | null
+          id: string
+          opened_at: string
+          opened_by: string | null
+          opening_amount: number
+          register_id: string
+          status: Database["public"]["Enums"]["cash_session_status"]
+        }
+        Insert: {
+          branch_id: string
+          closed_at?: string | null
+          closed_by?: string | null
+          code?: string
+          counted_amount?: number | null
+          difference?: number | null
+          expected_amount?: number | null
+          id?: string
+          opened_at?: string
+          opened_by?: string | null
+          opening_amount: number
+          register_id: string
+          status?: Database["public"]["Enums"]["cash_session_status"]
+        }
+        Update: {
+          branch_id?: string
+          closed_at?: string | null
+          closed_by?: string | null
+          code?: string
+          counted_amount?: number | null
+          difference?: number | null
+          expected_amount?: number | null
+          id?: string
+          opened_at?: string
+          opened_by?: string | null
+          opening_amount?: number
+          register_id?: string
+          status?: Database["public"]["Enums"]["cash_session_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cash_sessions_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_sessions_closed_by_fkey"
+            columns: ["closed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_sessions_opened_by_fkey"
+            columns: ["opened_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cash_sessions_register_id_fkey"
+            columns: ["register_id"]
+            isOneToOne: false
+            referencedRelation: "cash_registers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           active: boolean
@@ -912,11 +1066,12 @@ export type Database = {
         Row: {
           address: string | null
           branch_id: string
+          cash_session_id: string | null
           cbs_total: number | null
           code: string
           cofins_total: number | null
           confirmed_at: string | null
-          contact_id: string
+          contact_id: string | null
           cost_center: string | null
           created_at: string
           created_by: string
@@ -941,11 +1096,12 @@ export type Database = {
         Insert: {
           address?: string | null
           branch_id: string
+          cash_session_id?: string | null
           cbs_total?: number | null
           code: string
           cofins_total?: number | null
           confirmed_at?: string | null
-          contact_id: string
+          contact_id?: string | null
           cost_center?: string | null
           created_at?: string
           created_by: string
@@ -970,11 +1126,12 @@ export type Database = {
         Update: {
           address?: string | null
           branch_id?: string
+          cash_session_id?: string | null
           cbs_total?: number | null
           code?: string
           cofins_total?: number | null
           confirmed_at?: string | null
-          contact_id?: string
+          contact_id?: string | null
           cost_center?: string | null
           created_at?: string
           created_by?: string
@@ -1002,6 +1159,13 @@ export type Database = {
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_cash_session_id_fkey"
+            columns: ["cash_session_id"]
+            isOneToOne: false
+            referencedRelation: "cash_sessions"
             referencedColumns: ["id"]
           },
           {
@@ -1118,16 +1282,41 @@ export type Database = {
       can_manage_permissions: { Args: never; Returns: boolean }
       can_manage_users: { Args: never; Returns: boolean }
       can_manage_users_for: { Args: { p_user_id: string }; Returns: boolean }
+      close_cash_session: {
+        Args: { p_counted_amount: number; p_session_id: string }
+        Returns: {
+          branch_id: string
+          closed_at: string | null
+          closed_by: string | null
+          code: string
+          counted_amount: number | null
+          difference: number | null
+          expected_amount: number | null
+          id: string
+          opened_at: string
+          opened_by: string | null
+          opening_amount: number
+          register_id: string
+          status: Database["public"]["Enums"]["cash_session_status"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cash_sessions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       convert_sale_order_to_sale: {
         Args: { p_sale_order_id: string }
         Returns: {
           address: string | null
           branch_id: string
+          cash_session_id: string | null
           cbs_total: number | null
           code: string
           cofins_total: number | null
           confirmed_at: string | null
-          contact_id: string
+          contact_id: string | null
           cost_center: string | null
           created_at: string
           created_by: string
@@ -1159,12 +1348,12 @@ export type Database = {
       create_financial_entry_installments: {
         Args: {
           p_branch_id: string
-          p_contact_id: string | null
-          p_document: string | null
+          p_contact_id: string
+          p_document: string
           p_first_due_date: string
           p_installment_count: number
           p_interval_days: number
-          p_payment_method: string | null
+          p_payment_method: string
           p_settled: boolean
           p_total: number
           p_type: Database["public"]["Enums"]["financial_entry_type"]
@@ -1198,6 +1387,45 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      create_pos_sale: {
+        Args: { payload: Json }
+        Returns: {
+          address: string | null
+          branch_id: string
+          cash_session_id: string | null
+          cbs_total: number | null
+          code: string
+          cofins_total: number | null
+          confirmed_at: string | null
+          contact_id: string | null
+          cost_center: string | null
+          created_at: string
+          created_by: string
+          delivery_address: string | null
+          department: string | null
+          discount_amount: number
+          exit_date: string | null
+          freight_amount: number
+          ibs_total: number | null
+          icms_total: number | null
+          id: string
+          ipi_total: number | null
+          issue_date: string
+          operation_type: string | null
+          pis_total: number | null
+          seller_id: string
+          status: Database["public"]["Enums"]["sale_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "sales"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_purchase: {
         Args: { payload: Json }
         Returns: {
@@ -1229,11 +1457,12 @@ export type Database = {
         Returns: {
           address: string | null
           branch_id: string
+          cash_session_id: string | null
           cbs_total: number | null
           code: string
           cofins_total: number | null
           confirmed_at: string | null
-          contact_id: string
+          contact_id: string | null
           cost_center: string | null
           created_at: string
           created_by: string
@@ -1295,18 +1524,54 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      financial_entries_cash_sales_in_window: {
+        Args: {
+          p_branch_id: string
+          p_from: string
+          p_session_id?: string
+          p_to: string
+        }
+        Returns: {
+          branch_id: string
+          code: string
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          document: string | null
+          due_date: string
+          id: string
+          installment_group_id: string
+          installment_number: number
+          installment_total: number
+          issue_date: string
+          origin_id: string | null
+          origin_kind: Database["public"]["Enums"]["financial_entry_origin_kind"]
+          payment_method: string | null
+          settled_at: string | null
+          status: Database["public"]["Enums"]["financial_entry_status"]
+          total: number
+          type: Database["public"]["Enums"]["financial_entry_type"]
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "financial_entries"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       financial_entries_create_installments: {
         Args: {
           p_branch_id: string
-          p_contact_id: string | null
-          p_document: string | null
+          p_contact_id: string
+          p_document: string
           p_first_due_date: string
           p_installment_count: number
           p_interval_days: number
           p_issue_date?: string
-          p_origin_id: string | null
+          p_origin_id: string
           p_origin_kind: Database["public"]["Enums"]["financial_entry_origin_kind"]
-          p_payment_method: string | null
+          p_payment_method: string
           p_settled: boolean
           p_total: number
           p_type: Database["public"]["Enums"]["financial_entry_type"]
@@ -1345,8 +1610,88 @@ export type Database = {
         Args: { p_action: string; p_module_id: string }
         Returns: boolean
       }
+      list_cash_session_cash_sales: {
+        Args: { p_session_id: string }
+        Returns: {
+          branch_id: string
+          code: string
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          document: string | null
+          due_date: string
+          id: string
+          installment_group_id: string
+          installment_number: number
+          installment_total: number
+          issue_date: string
+          origin_id: string | null
+          origin_kind: Database["public"]["Enums"]["financial_entry_origin_kind"]
+          payment_method: string | null
+          settled_at: string | null
+          status: Database["public"]["Enums"]["financial_entry_status"]
+          total: number
+          type: Database["public"]["Enums"]["financial_entry_type"]
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "financial_entries"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      open_cash_session: {
+        Args: { p_opening_amount: number; p_register_id: string }
+        Returns: {
+          branch_id: string
+          closed_at: string | null
+          closed_by: string | null
+          code: string
+          counted_amount: number | null
+          difference: number | null
+          expected_amount: number | null
+          id: string
+          opened_at: string
+          opened_by: string | null
+          opening_amount: number
+          register_id: string
+          status: Database["public"]["Enums"]["cash_session_status"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cash_sessions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      register_cash_movement: {
+        Args: {
+          p_amount: number
+          p_description: string
+          p_session_id: string
+          p_type: Database["public"]["Enums"]["cash_movement_type"]
+        }
+        Returns: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          description: string
+          id: string
+          session_id: string
+          type: Database["public"]["Enums"]["cash_movement_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cash_movements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
+      cash_movement_type: "sangria" | "suprimento"
+      cash_session_status: "aberto" | "fechado"
       contact_kind: "clientes" | "fornecedores"
       financial_entry_origin_kind: "manual" | "venda" | "compra"
       financial_entry_status: "aberto" | "baixado" | "cancelado"
@@ -1488,6 +1833,8 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      cash_movement_type: ["sangria", "suprimento"],
+      cash_session_status: ["aberto", "fechado"],
       contact_kind: ["clientes", "fornecedores"],
       financial_entry_origin_kind: ["manual", "venda", "compra"],
       financial_entry_status: ["aberto", "baixado", "cancelado"],

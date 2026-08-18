@@ -121,37 +121,15 @@
 }
 
 /* ---------- Filtros ---------- */
+/* Sem abas de categoria: products.type não tem taxonomia estruturada ainda
+   (ver AGENTS.md) — só resta o alternador de visualização. */
 .pos__filters {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   margin-bottom: 14px;
-}
-
-.pos__tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.pos__tab {
-  padding: 7px 16px;
-  border-radius: 999px;
-  border: 1px solid #D9DEE7;
-  background: var(--white);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: 13.5px;
-  cursor: pointer;
-  transition: background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease);
-}
-
-.pos__tab--active {
-  background: var(--blue-panel);
-  border-color: var(--blue-panel);
-  color: var(--white);
 }
 
 .pos__view-toggle {
@@ -479,18 +457,65 @@
   border-top: 1px solid #E4E7EC;
 }
 
+.pos__session-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #FDECEA;
+  color: #9A3B32;
+  font-size: 12.5px;
+}
+
+.pos__session-warning a {
+  flex-shrink: 0;
+  color: #9A3B32;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.pos__client-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .pos__client {
+  flex: 1;
+  min-width: 0;
   border: 1px solid #D9DEE7;
   border-radius: 8px;
   padding: 9px 12px;
+  background: var(--white);
+  color: var(--ink);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-ui);
   font-size: var(--font-size-input);
   outline: 0;
+  cursor: pointer;
   transition: border-color .15s var(--ease);
 }
 
-.pos__client:focus {
+.pos__client:focus,
+.pos__client:hover {
   border-color: var(--blue-panel);
+}
+
+.pos__client-clear {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #D9DEE7;
+  border-radius: 8px;
+  background: var(--white);
+  color: #5B6472;
+  cursor: pointer;
 }
 
 .pos__discount-row {
@@ -613,6 +638,96 @@
 .pos__troco {
   flex-shrink: 0;
   font-weight: 600;
+}
+
+.pos__received-row input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #D9DEE7;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-input);
+}
+
+/* ---------- Dividir pagamento ---------- */
+.pos__split {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pos__split-line {
+  display: grid;
+  grid-template-columns: 1fr 84px auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.pos__split-line select,
+.pos__split-line input {
+  border: 1px solid #D9DEE7;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.pos__split-installments {
+  width: 56px;
+}
+
+.pos__split-remove {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: #F1F3F6;
+  color: #5B6472;
+  cursor: pointer;
+}
+
+.pos__split-add {
+  align-self: flex-start;
+  border: 1px dashed #BFD6FA;
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--blue-panel);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.pos__split-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pos__split-summary--ok {
+  color: var(--positive, #2E9E52);
+}
+
+.pos__split-summary--warn {
+  color: var(--danger, #C0453B);
+}
+
+.pos__error {
+  margin: 0;
+  font-size: 12.5px;
+  color: #C0453B;
+}
+
+.pos__success {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--positive, #2E9E52);
 }
 
 .pos__confirm {

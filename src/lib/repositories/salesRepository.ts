@@ -13,13 +13,13 @@ function assertSupabase() {
   return supabase;
 }
 
-function toSale(row: SaleRow): Sale {
+export function toSale(row: SaleRow): Sale {
   return {
     id: row.id,
     branchId: row.branch_id,
     code: row.code,
     status: row.status,
-    contactId: row.contact_id,
+    contactId: row.contact_id ?? undefined,
     sellerId: row.seller_id,
     address: row.address ?? undefined,
     deliveryAddress: row.delivery_address ?? undefined,
@@ -34,6 +34,7 @@ function toSale(row: SaleRow): Sale {
     totalAmount: row.total_amount,
     createdAt: row.created_at ?? undefined,
     confirmedAt: row.confirmed_at ?? undefined,
+    cashSessionId: row.cash_session_id ?? undefined,
   };
 }
 
@@ -52,7 +53,8 @@ export type SalePaymentInput = {
 
 export type CreateSaleInput = {
   branchId: string;
-  contactId: string;
+  /** Nulo/omitido só faz sentido para o PDV (venda sem cliente identificado) — Realizar Venda/Pedidos exigem escolha na própria UI. */
+  contactId?: string | null;
   sellerId: string;
   address?: string;
   deliveryAddress?: string;
@@ -67,10 +69,10 @@ export type CreateSaleInput = {
   payments: SalePaymentInput[];
 };
 
-function toPayload(input: CreateSaleInput) {
+export function toPayload(input: CreateSaleInput) {
   return {
     branch_id: input.branchId,
-    contact_id: input.contactId,
+    contact_id: input.contactId || null,
     seller_id: input.sellerId,
     address: input.address || null,
     delivery_address: input.deliveryAddress || null,
