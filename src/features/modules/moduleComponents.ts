@@ -30,7 +30,6 @@ export const MODULE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType
   "ponto-de-venda": lazy(() => import("../pos/PosPage")),
   produtos: lazy(() => import("../products/ProductsPage")),
   "realizar-venda": lazy(() => import("../sales/SalePage")),
-  tributacoes: lazy(() => import("../taxations/TaxationsPage")),
   "usuarios-operadores": lazy(() => import("../users/UsersPage")),
 };
 

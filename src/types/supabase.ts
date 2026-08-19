@@ -1264,6 +1264,66 @@ export type Database = {
           },
         ]
       }
+      tax_rules: {
+        Row: {
+          aliquota_cofins: number | null
+          aliquota_icms: number | null
+          aliquota_pis: number | null
+          cclasstrib: string | null
+          cfop: string
+          created_at: string
+          csosn: string | null
+          cst_cofins: string | null
+          cst_ibs_cbs: string | null
+          cst_icms: string | null
+          cst_pis: string | null
+          id: string
+          natureza_operacao: string
+          regime: string
+          tipo_cliente: string
+          uf_destino: string
+          uf_origem: string
+        }
+        Insert: {
+          aliquota_cofins?: number | null
+          aliquota_icms?: number | null
+          aliquota_pis?: number | null
+          cclasstrib?: string | null
+          cfop: string
+          created_at?: string
+          csosn?: string | null
+          cst_cofins?: string | null
+          cst_ibs_cbs?: string | null
+          cst_icms?: string | null
+          cst_pis?: string | null
+          id?: string
+          natureza_operacao: string
+          regime: string
+          tipo_cliente: string
+          uf_destino: string
+          uf_origem: string
+        }
+        Update: {
+          aliquota_cofins?: number | null
+          aliquota_icms?: number | null
+          aliquota_pis?: number | null
+          cclasstrib?: string | null
+          cfop?: string
+          created_at?: string
+          csosn?: string | null
+          cst_cofins?: string | null
+          cst_ibs_cbs?: string | null
+          cst_icms?: string | null
+          cst_pis?: string | null
+          id?: string
+          natureza_operacao?: string
+          regime?: string
+          tipo_cliente?: string
+          uf_destino?: string
+          uf_origem?: string
+        }
+        Relationships: []
+      }
       user_branches: {
         Row: {
           branch_id: string
