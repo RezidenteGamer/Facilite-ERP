@@ -444,6 +444,7 @@ export default function PosPage() {
             {sale.confirmedSale && (
               <p className="pos__success">Venda {sale.confirmedSale.code} confirmada.</p>
             )}
+            {sale.fiscalWarning && <p className="pos__fiscal-warning">{sale.fiscalWarning}</p>}
             {!canCreate && <p className="pos__error">Sem permissão para vender no ponto de venda.</p>}
 
             <button className="pos__confirm" type="button" disabled={!canConfirm} onClick={handleConfirm}>

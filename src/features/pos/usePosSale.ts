@@ -121,6 +121,13 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<Sale | null>(null);
+  /**
+   * Aviso não bloqueante de falha na emissão da NFC-e — separado de
+   * `submitError` de propósito: a venda já foi confirmada quando isto pode
+   * acontecer, então não é "a venda falhou", é "a venda foi, a nota não saiu"
+   * (ver `fiscalDocument.ts`).
+   */
+  const [fiscalWarning, setFiscalWarning] = useState<string | null>(null);
 
   // A confirmação vira um aviso passageiro, não uma tela nova — o operador
   // já está de olho no carrinho vazio pronto pra próxima venda.
@@ -238,6 +245,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
 
     setSubmitting(true);
     setSubmitError(null);
+    setFiscalWarning(null);
     try {
       const sale = await createPosSale({
         branchId,
@@ -254,8 +262,13 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
       });
       setConfirmedSale(sale);
       reset();
-      // Ponto de extensão da etapa 8.5 (NFC-e) — hoje é um no-op, ver fiscalDocument.ts.
-      await emitFiscalDocumentForSale(sale.id);
+      // A venda já está confirmada aqui — `emitFiscalDocumentForSale` nunca
+      // lança (ver fiscalDocument.ts), então uma falha de NFC-e vira aviso
+      // não bloqueante, nunca `submitError` (que significaria "venda falhou").
+      const fiscalOutcome = await emitFiscalDocumentForSale(sale.id, branchId);
+      if (!fiscalOutcome.ok) {
+        setFiscalWarning(`Venda confirmada, mas a NFC-e não saiu: ${fiscalOutcome.errors.join(" ")}`);
+      }
     } catch (err) {
       setSubmitError(extractErrorMessage(err, cart));
     } finally {
@@ -295,6 +308,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     submitting,
     submitError,
     confirmedSale,
+    fiscalWarning,
     confirmSale,
     reset,
   };

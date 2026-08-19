@@ -16,13 +16,17 @@ export type Product = {
   origemMercadoria?: string;
   unidadeComercial?: string;
   unidadeTributavel?: string;
-  cstIcms?: string;
-  csosn?: string;
   cstIpi?: string;
-  cstPis?: string;
-  cstCofins?: string;
-  cstIbsCbs?: string;
-  cclasstrib?: string;
+  /**
+   * Grupo tributário do produto (`tax_groups`) — de onde saem CST/CSOSN e
+   * alíquotas na emissão. Desde a correção de 19/08/2026 é a **única** fonte
+   * de tributação do produto: os CSTs que a etapa 0 tinha posto direto em
+   * `products` saíram da tabela. `cstIpi` continua aqui porque o grupo não
+   * tem campo de IPI (ver AGENTS.md).
+   */
+  taxGroupId?: string | null;
+  /** Só leitura (vem de join) — o formulário grava `taxGroupId`, nunca o nome. */
+  taxGroupName?: string;
   createdAt?: string;
 };
 
@@ -43,8 +47,16 @@ export function toOptionalNumber(value: string | undefined): number | undefined 
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** Monta o input de create/update de Produto a partir dos valores (texto) do RegistryFormModal. */
-export function buildProductInput(values: Record<string, string>): Omit<Product, "id" | "code" | "createdAt"> {
+/**
+ * Monta o input de create/update de Produto a partir dos valores (texto) do
+ * `RegistryFormModal`. O grupo tributário vem à parte porque é escolhido pelo
+ * `lookupField` (um id, não um campo de texto do formulário) — mesmo formato
+ * do contato no Financeiro.
+ */
+export function buildProductInput(
+  values: Record<string, string>,
+  taxGroupId: string | null,
+): Omit<Product, "id" | "code" | "createdAt"> {
   return {
     description: values.description ?? "",
     stock: toNumber(values.stock),
@@ -61,12 +73,7 @@ export function buildProductInput(values: Record<string, string>): Omit<Product,
     origemMercadoria: values.origemMercadoria || undefined,
     unidadeComercial: values.unidadeComercial || undefined,
     unidadeTributavel: values.unidadeTributavel || undefined,
-    cstIcms: values.cstIcms || undefined,
-    csosn: values.csosn || undefined,
     cstIpi: values.cstIpi || undefined,
-    cstPis: values.cstPis || undefined,
-    cstCofins: values.cstCofins || undefined,
-    cstIbsCbs: values.cstIbsCbs || undefined,
-    cclasstrib: values.cclasstrib || undefined,
+    taxGroupId,
   };
 }

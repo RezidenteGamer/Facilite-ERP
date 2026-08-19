@@ -10,6 +10,11 @@
  * Passa pelo Vite (`ssrLoadModule`) pelo mesmo motivo do script da etapa F1:
  * o Node exige extensão explícita em imports relativos, e o projeto inteiro
  * importa sem extensão — carregar via Vite resolve exatamente como o app.
+ *
+ * Atualizado na correção de 19/08/2026: a função devolve **só o CFOP**
+ * (`result.cfop`/`result.ruleId`), não mais a regra inteira com CST/alíquota —
+ * esses passaram a vir do grupo tributário do produto (`tax_groups`). As
+ * regras de teste abaixo, por consequência, também só têm CFOP como saída.
  */
 
 import { createServer } from "vite";
@@ -34,15 +39,6 @@ const rules = [
     ufDestino: "RJ",
     tipoCliente: "contribuinte",
     cfop: "6102",
-    cstIcms: "00",
-    csosn: null,
-    aliquotaIcms: 12,
-    cstPis: "01",
-    aliquotaPis: 1.65,
-    cstCofins: "01",
-    aliquotaCofins: 7.6,
-    cstIbsCbs: "000",
-    cclasstrib: "000001",
   },
   {
     id: "rule-sp-coringa",
@@ -52,15 +48,6 @@ const rules = [
     ufDestino: WILDCARD_UF_DESTINO,
     tipoCliente: "contribuinte",
     cfop: "6108",
-    cstIcms: "00",
-    csosn: null,
-    aliquotaIcms: 18,
-    cstPis: "01",
-    aliquotaPis: 1.65,
-    cstCofins: "01",
-    aliquotaCofins: 7.6,
-    cstIbsCbs: "000",
-    cclasstrib: "000001",
   },
   {
     id: "rule-sp-interna-consumidor-final",
@@ -70,15 +57,6 @@ const rules = [
     ufDestino: "SP",
     tipoCliente: "consumidor_final",
     cfop: "5102",
-    cstIcms: "00",
-    csosn: null,
-    aliquotaIcms: 18,
-    cstPis: "01",
-    aliquotaPis: 1.65,
-    cstCofins: "01",
-    aliquotaCofins: 7.6,
-    cstIbsCbs: "000",
-    cclasstrib: "000001",
   },
 ];
 
@@ -88,9 +66,9 @@ const rules = [
     { regime: "3", naturezaOperacao: "venda", ufOrigem: "SP", ufDestino: "RJ", tipoCliente: "contribuinte" },
     rules,
   );
-  check("bate regra exata (SP -> RJ)", result.found === true && result.rule.id === "rule-sp-rj-exata");
+  check("bate regra exata (SP -> RJ)", result.found === true && result.ruleId === "rule-sp-rj-exata");
   check("regra exata não é marcada como coringa", result.found === true && result.matchedWildcard === false);
-  check("CFOP da regra exata é o dela, não o da coringa", result.found === true && result.rule.cfop === "6102");
+  check("CFOP da regra exata é o dela, não o da coringa", result.found === true && result.cfop === "6102");
 }
 
 /* 2. Só bate por coringa (SP -> MG, contribuinte — não há regra específica para MG). */
@@ -99,7 +77,7 @@ const rules = [
     { regime: "3", naturezaOperacao: "venda", ufOrigem: "SP", ufDestino: "MG", tipoCliente: "contribuinte" },
     rules,
   );
-  check("bate a regra coringa quando não há regra exata", result.found === true && result.rule.id === "rule-sp-coringa");
+  check("bate a regra coringa quando não há regra exata", result.found === true && result.ruleId === "rule-sp-coringa");
   check("regra coringa é marcada como tal", result.found === true && result.matchedWildcard === true);
 }
 
@@ -122,7 +100,7 @@ const rules = [
     { regime: "3", naturezaOperacao: " Venda ", ufOrigem: "sp", ufDestino: "rj", tipoCliente: "Contribuinte" },
     rules,
   );
-  check("normaliza caixa/espaço nas dimensões de entrada", result.found === true && result.rule.id === "rule-sp-rj-exata");
+  check("normaliza caixa/espaço nas dimensões de entrada", result.found === true && result.ruleId === "rule-sp-rj-exata");
 }
 
 /* 5. tipo_cliente diferente muda a regra (SP -> SP, consumidor_final vs. contribuinte). */
@@ -137,11 +115,11 @@ const rules = [
   );
   check(
     "SP -> SP contribuinte só bate a coringa (nenhuma regra interna p/ contribuinte)",
-    asContribuinte.found === true && asContribuinte.rule.id === "rule-sp-coringa",
+    asContribuinte.found === true && asContribuinte.ruleId === "rule-sp-coringa",
   );
   check(
     "SP -> SP consumidor_final bate a regra interna específica",
-    asConsumidorFinal.found === true && asConsumidorFinal.rule.id === "rule-sp-interna-consumidor-final",
+    asConsumidorFinal.found === true && asConsumidorFinal.ruleId === "rule-sp-interna-consumidor-final",
   );
 }
 
@@ -159,6 +137,21 @@ const rules = [
   check(
     "empate entre duas regras exatas devolve found: false com as duas sinalizadas, não escolhe uma",
     result.found === false && Array.isArray(result.ambiguousRuleIds) && result.ambiguousRuleIds.length === 2,
+  );
+}
+
+/* 7. A correção em si: o resultado não carrega mais tributação nenhuma — CST e alíquota
+      são do grupo tributário do produto, não da regra da operação. */
+{
+  const result = resolveTaxRule(
+    { regime: "3", naturezaOperacao: "venda", ufOrigem: "SP", ufDestino: "RJ", tipoCliente: "contribuinte" },
+    rules,
+  );
+  const chaves = Object.keys(result).sort().join(",");
+  check(
+    "resultado só expõe cfop/ruleId/matchedWildcard — nenhum CST ou alíquota",
+    chaves === "cfop,found,matchedWildcard,ruleId",
+    chaves,
   );
 }
 

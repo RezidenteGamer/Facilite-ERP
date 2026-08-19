@@ -6,7 +6,12 @@ export type Contact = {
   name: string;
   document: string;
   active: boolean;
-  address?: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  municipio?: string;
+  uf?: string;
+  cep?: string;
   rg?: string;
   birthDate?: string;
   phone?: string;
@@ -18,4 +23,12 @@ export type Contact = {
   indicadorIe?: string;
   codigoIbgeMunicipio?: string;
 };
+
+/** Endereço em uma linha só (logradouro, número - bairro, município/UF), para telas que só mostram texto (ex.: snapshot de venda). */
+export function formatContactAddress(contact: Pick<Contact, "logradouro" | "numero" | "bairro" | "municipio" | "uf">): string {
+  const rua = [contact.logradouro, contact.numero].filter(Boolean).join(", ");
+  const linha1 = [rua, contact.bairro].filter(Boolean).join(" - ");
+  const cidade = [contact.municipio, contact.uf].filter(Boolean).join("/");
+  return [linha1, cidade].filter(Boolean).join(", ");
+}
 

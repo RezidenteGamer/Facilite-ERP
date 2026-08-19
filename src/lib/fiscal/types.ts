@@ -100,6 +100,15 @@ export type FiscalDocument = {
   pdf: FiscalArtifact | null;
   /** XML do evento de cancelamento (Focus: `caminho_xml_cancelamento`). */
   xmlCancelamento: FiscalArtifact | null;
+  /**
+   * URL de consulta do QR Code (Focus: `qrcode_url`) — **só existe para NFC-e**;
+   * `null` em documentos NF-e. O CSC (Código de Segurança do Contribuinte) que
+   * assina o QR Code **não é campo de payload nem de resposta**: no provedor
+   * real ele é configurado por fora, por CNPJ+UF, direto no painel da Focus —
+   * não viaja em `NfePayload` nem em `FiscalDocument` (confirmado contra a
+   * documentação pública da Focus antes de desenhar este campo).
+   */
+  qrCodeUrl: string | null;
 };
 
 /**

@@ -730,6 +730,18 @@
   color: var(--positive, #2E9E52);
 }
 
+/* Aviso não bloqueante: a venda foi, a nota não saiu — nem verde (não é
+   sucesso pleno) nem vermelho (não é falha da venda, ver usePosSale.ts). */
+.pos__fiscal-warning {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #FFF4E5;
+  color: #8A5A15;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
 .pos__confirm {
   width: 100%;
   padding: 14px;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Contact } from "../customers/contacts";
+import { formatContactAddress, type Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createSale, type CreateSaleInput } from "../../lib/repositories/salesRepository";
 import { formatMoney, type SalePaymentMethod, type Sale } from "./sales";
@@ -160,12 +160,13 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
   }
 
   function selectContact(contact: Contact) {
+    const endereco = formatContactAddress(contact);
     setHeader((current) => ({
       ...current,
       clienteId: contact.id,
       clienteNome: contact.name,
-      endereco: contact.address ?? current.endereco,
-      enderecoEntrega: current.enderecoEntrega || contact.address || "",
+      endereco: endereco || current.endereco,
+      enderecoEntrega: current.enderecoEntrega || endereco || "",
     }));
   }
 

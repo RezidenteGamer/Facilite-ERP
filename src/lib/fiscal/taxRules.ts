@@ -1,17 +1,37 @@
 /**
- * Resolução de regra fiscal (Tributações).
+ * Resolução de CFOP pela forma da operação (Tributações).
  *
- * `resolveTaxRule` é a função pura que a etapa 8 (Notas Emitidas) vai chamar
- * para montar a parte de imposto do `payload` do `FiscalProvider` (ver
- * `src/lib/fiscal/types.ts`, `NfePayloadItem`). Esta etapa não aplica a regra
- * em nenhuma venda — só produz a função e a tabela (`tax_rules`) que ela lê.
+ * `resolveTaxRule` é a função pura que Notas Emitidas (etapa 8) chama para
+ * descobrir **o CFOP** de uma operação. Não lê o banco — quem chama já buscou
+ * as regras (a função não sabe o que é Supabase).
  *
  * Mesmo espírito de `FiscalProvider`: nunca lança exceção para "não achei
  * regra" — devolve um resultado explícito que quem chama consegue mostrar
  * como "cadastre uma regra para esta operação" em vez de quebrar a emissão.
+ *
+ * ## Só CFOP — a correção de 19/08/2026
+ *
+ * A primeira versão desta função devolvia a regra inteira: CFOP **e**
+ * CST/alíquota. Estava errada pela metade. CFOP realmente depende da forma da
+ * operação — uma venda interna e uma interestadual têm CFOPs diferentes
+ * independente do produto vendido. **CST/CSOSN e alíquota, não**: dois
+ * produtos na mesma operação (mesma UF origem/destino, mesmo tipo de cliente)
+ * podem ter tributação diferente — um com substituição tributária, outro
+ * isento, outro monofásico. Uma regra por combinação de operação não tem como
+ * representar isso.
+ *
+ * Quem decide CST/alíquota agora é o **grupo tributário do produto**
+ * (`products.tax_group_id` → `tax_groups`, ver `taxGroups.ts`) — o padrão que
+ * os ERPs brasileiros de referência usam. Quem monta o item de uma nota
+ * precisa dos dois: esta função para o CFOP, e o grupo do produto para
+ * CST/alíquota.
  */
 
-/** Linha de `tax_rules`, já em camelCase (o mesmo formato que o motor genérico expõe). */
+/**
+ * Linha de `tax_rules`, já em camelCase (o mesmo formato que o motor genérico
+ * expõe). Só as cinco dimensões de entrada e o CFOP — os campos de saída de
+ * tributação saíram da tabela na correção de 19/08/2026.
+ */
 export type TaxRuleRow = {
   id: string;
   regime: string;
@@ -21,18 +41,9 @@ export type TaxRuleRow = {
   ufDestino: string;
   tipoCliente: string;
   cfop: string;
-  cstIcms: string | null;
-  csosn: string | null;
-  aliquotaIcms: number | null;
-  cstPis: string | null;
-  aliquotaPis: number | null;
-  cstCofins: string | null;
-  aliquotaCofins: number | null;
-  cstIbsCbs: string | null;
-  cclasstrib: string | null;
 };
 
-/** As cinco dimensões de uma operação — o que decide qual regra se aplica. */
+/** As cinco dimensões de uma operação — o que decide qual CFOP se aplica. */
 export type TaxRuleQuery = {
   /** CRT de quem emite (mesmo código de `branches.regime_tributario`: '1', '2' ou '3'). */
   regime: string;
@@ -46,7 +57,14 @@ export type TaxRuleQuery = {
 export const WILDCARD_UF_DESTINO = "*";
 
 export type TaxRuleResolution =
-  | { found: true; rule: TaxRuleRow; matchedWildcard: boolean }
+  | {
+      found: true;
+      /** O único dado de saída que uma regra carrega. CST/alíquota vêm do grupo do produto. */
+      cfop: string;
+      /** Qual linha de `tax_rules` decidiu — para rastrear/depurar, não para ler tributação dela. */
+      ruleId: string;
+      matchedWildcard: boolean;
+    }
   | {
       found: false;
       /** Mensagem pronta para a tela mostrar ("cadastre uma regra para esta operação"). */
@@ -66,7 +84,7 @@ function norm(value: string): string {
 }
 
 /**
- * Resolve a regra fiscal aplicável a uma operação.
+ * Resolve o CFOP aplicável a uma operação.
  *
  * Critério de desempate quando mais de uma regra combina: **mais específica
  * vence** — uma regra com `uf_destino` exato bate uma regra coringa
@@ -116,5 +134,10 @@ export function resolveTaxRule(query: TaxRuleQuery, rules: TaxRuleRow[]): TaxRul
   }
 
   const rule = winners[0];
-  return { found: true, rule, matchedWildcard: norm(rule.ufDestino) === WILDCARD_UF_DESTINO };
+  return {
+    found: true,
+    cfop: rule.cfop,
+    ruleId: rule.id,
+    matchedWildcard: norm(rule.ufDestino) === WILDCARD_UF_DESTINO,
+  };
 }

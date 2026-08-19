@@ -57,10 +57,11 @@ O que **não** muda por causa disso:
   - `/compras` e `/compras/nova` — compras (real: grava em `purchases`/`purchase_items`, sobe estoque e lança financeiro a pagar via `create_purchase` — ver decisão abaixo);
   - `/controle-caixa` — controle de caixa (real: sessão de caixa e sangria/suprimento sobre `cash_registers`/`cash_sessions`/`cash_movements`, lê vendas em dinheiro de `financial_entries` sem escrever nela — ver decisão abaixo);
   - `/ponto-de-venda` — PDV (real: exige sessão de caixa aberta e grava a venda via `create_pos_sale`, que reaproveita `create_sale` — ver decisão abaixo);
-  - `/tributacoes` — regras de CFOP/CST/alíquota por natureza da operação × UF origem/destino × tipo de cliente × regime (real: motor genérico puro sobre `tax_rules`, sem componente próprio — ver decisão abaixo);
+  - `/tributacoes` — regras de **CFOP** por natureza da operação × UF origem/destino × tipo de cliente × regime (real: motor genérico puro sobre `tax_rules`, sem componente próprio — ver decisão abaixo e a correção de 19/08/2026);
+  - `/grupos-tributarios` — grupos tributários (CST/CSOSN + alíquotas), o perfil de tributação que se atrela ao produto (real: motor genérico puro sobre `tax_groups`, sem componente próprio — ver a correção de 19/08/2026);
   - `/configuracoes` — configurações.
 - **As rotas acima não são mais escritas à mão**: desde 18/08/2026 elas vêm do catálogo na tabela `modules` (só `/` e `/inicio` continuam declaradas em `src/App.tsx`). Um módulo novo passa a existir inserindo uma linha nessa tabela — e, se não tiver componente próprio registrado, abre pelo motor genérico assim mesmo. Ver a decisão "catálogo de módulos no banco + roteador dirigido por metadados" abaixo.
-- A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos, Realizar Venda, Ajuste de estoque, Pedidos de venda, Financeiro, Compras, Controle de caixa, Ponto de venda e Tributações, que já são reais.
+- A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos, Realizar Venda, Ajuste de estoque, Pedidos de venda, Financeiro, Compras, Controle de caixa, Ponto de venda, Tributações e Notas Emitidas, que já são reais.
 - Existe agora um projeto Supabase real (`Facilite-ERP`, id `ifmdedruuetbbqjbnrkd`, região sa-east-1), configurado em `.env.local` (não versionado). `src/lib/supabaseClient.ts` usa `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` de lá. Não crie, exponha ou invente credenciais.
 - **Autenticação é real** (Supabase Auth, email/senha) — ver decisão de RBAC abaixo. Rotas internas são protegidas por `src/components/ProtectedRoute.tsx`.
 
@@ -576,13 +577,15 @@ O teste com dado real expôs lacunas que as etapas seguintes precisam fechar —
 
 ### Decisão arquitetural: módulo Tributações — regras de CFOP/CST/alíquota (19/08/2026)
 
+> ⚠️ **Esta decisão foi corrigida pela metade no mesmo dia** — ver "Correção: CFOP é da operação, CST/alíquota são do produto (grupos tributários)" mais abaixo. O que continua valendo: `tax_rules`, as cinco dimensões de entrada, a constraint de unicidade, o critério de desempate e a `GenericModulePage`. O que **não** vale mais: `tax_rules` guardar CST/CSOSN e alíquota, e `resolveTaxRule` devolver a regra inteira. Leia as duas seções juntas.
+
 Etapa 7 do plano fiscal. Substitui o mock de duas linhas (`TAXATIONS`, "Simples nacional - ICMS"/"Lucro real" — que nomeava o conceito errado: regime tributário da empresa, já coberto por `branches.regime_tributario`) por um cadastro real de **regras de decisão fiscal**: para uma combinação de natureza da operação × UF origem/destino × tipo de cliente × regime de quem emite, qual CFOP/CST/alíquota se aplica. `src/features/taxations/` (página e mock antigos) foi removido por inteiro, não adaptado.
 
 #### Schema: `tax_rules`
 
 - **Não é isolada por filial** — `branch_scoped = false` em `modules`, sem coluna `branch_id`. UF de origem já é uma dimensão da própria regra: uma empresa com filiais em dois estados tem regras diferentes por UF, não duas cópias da mesma regra sob `branch_id`s diferentes — mesmo raciocínio já aplicado a Clientes e Fornecedores.
 - Dimensões de entrada, todas `text` (mesma convenção de `branches.regime_tributario`: sem enum/constraint, o motor genérico não tem campo de seleção): `regime` (código CRT — '1'/'2'/'3', mesmo vocabulário de `branches.regime_tributario`, porque CST e CSOSN não coexistem na mesma operação), `natureza_operacao` ('venda'/'devolucao' por ora), `uf_origem`, `uf_destino` (aceita `'*'` como coringa para "qualquer UF destino" — é o único eixo de coringa que a tabela permite), `tipo_cliente` ('contribuinte'/'nao_contribuinte'/'consumidor_final').
-- Saída: `cfop` (obrigatório), `cst_icms`/`csosn` (os dois convivem, opcionais — mesma decisão já tomada em `products`, porque a regra escolhida depende do `regime` da própria linha), `aliquota_icms`/`aliquota_pis`/`aliquota_cofins` (`numeric(7,4)`, únicos campos numéricos do módulo — ver achado abaixo), `cst_pis`, `cst_cofins`, `cst_ibs_cbs`/`cclasstrib` (Reforma Tributária, mesmo vocabulário de `products.cst_ibs_cbs`/`products.cclasstrib`).
+- ~~Saída: `cfop` (obrigatório), `cst_icms`/`csosn` (os dois convivem, opcionais — mesma decisão já tomada em `products`, porque a regra escolhida depende do `regime` da própria linha), `aliquota_icms`/`aliquota_pis`/`aliquota_cofins` (`numeric(7,4)`, únicos campos numéricos do módulo — ver achado abaixo), `cst_pis`, `cst_cofins`, `cst_ibs_cbs`/`cclasstrib`.~~ — **corrigido no mesmo dia**: a saída é **só `cfop`**. As nove colunas de CST/alíquota foram removidas de `tax_rules` e viraram `tax_groups`, atrelado ao produto (ver a correção abaixo). O achado sobre campo numérico no motor genérico continua válido — só mudou de tabela (as alíquotas `numeric(7,4)` agora estão em `tax_groups`).
 - **Constraint `tax_rules_dimensions_unique`** — `unique (regime, natureza_operacao, uf_origem, uf_destino, tipo_cliente)`: impede duas linhas idênticas nas cinco dimensões de entrada. Efeito colateral que simplifica a resolução: para uma operação qualquer, existe no máximo uma regra exata (`uf_destino` = a UF pedida) e no máximo uma regra coringa (`uf_destino = '*'`) — nunca duas do mesmo tipo brigando pelo mesmo lugar.
 - RLS: quatro policies separadas (`select`/`insert`/`update`/`delete`, nunca `for all`) usando só `has_permission('tributacoes', ...)`, sem `has_branch_access` (a tabela não tem `branch_id`).
 
@@ -595,7 +598,7 @@ Primeiro módulo de verdade desde M2 a nascer só com metadados (`modules`/`modu
 
 #### `resolveTaxRule` — a função pura que a etapa 8 vai chamar
 
-`src/lib/fiscal/taxRules.ts`. Recebe as cinco dimensões de uma operação e as regras carregadas (`TaxRuleRow[]`) e devolve `{ found: true, rule, matchedWildcard }` ou `{ found: false, reason, ambiguousRuleIds? }` — **nunca lança exceção**, mesmo espírito do `FiscalProvider`: quem chama consegue mostrar "cadastre uma regra para esta operação" em vez de quebrar a emissão. Não lê o banco — quem chama já buscou as regras (a função não sabe o que é Supabase).
+`src/lib/fiscal/taxRules.ts`. Recebe as cinco dimensões de uma operação e as regras carregadas (`TaxRuleRow[]`) e devolve ~~`{ found: true, rule, matchedWildcard }`~~ (**corrigido**: `{ found: true, cfop, ruleId, matchedWildcard }` — só o CFOP) ou `{ found: false, reason, ambiguousRuleIds? }` — **nunca lança exceção**, mesmo espírito do `FiscalProvider`: quem chama consegue mostrar "cadastre uma regra para esta operação" em vez de quebrar a emissão. Não lê o banco — quem chama já buscou as regras (a função não sabe o que é Supabase).
 
 - **Critério de desempate: mais específica vence.** Uma regra com `uf_destino` exato bate uma regra coringa (`uf_destino = '*'`) para a mesma combinação de regime/natureza/UF origem/tipo de cliente. É o único eixo de coringa que `tax_rules` permite, e a constraint `tax_rules_dimensions_unique` garante que não existem duas regras exatas nem duas coringas competindo pelo mesmo lugar — não foi preciso inventar uma prioridade arbitrária além dessa.
 - **Empate defensivo devolve `found: false`, não escolhe uma regra sozinho** — `ambiguousRuleIds` lista as regras empatadas. Não deveria acontecer com dados vindos do banco (a constraint impede), mas a função não assume que quem chama sempre respeita isso (ex.: dado de teste montado à mão), e o pedido foi explícito: não decidir prioridade arbitrária sem avisar.
@@ -610,6 +613,179 @@ Logado com a conta de testes: criada uma regra (regime 3, venda, SP→RJ, contri
 #### Fora de escopo
 
 Aplicar a regra numa venda de verdade (preencher `sale_items.cfop`, montar o `payload` do `FiscalProvider` chamando `resolveTaxRule`) — **isso é a etapa 8 (Notas Emitidas)**, que consome esta função, não a reimplementa; `sale_items.cfop` continua nulo. NFS-e/CT-e/MDF-e (fora do escopo do plano). Cálculo de verdade de IBS/CBS (a tabela só guarda os códigos que uma regra carrega). Validação cruzada com a SEFAZ de alíquota vigente (as alíquotas cadastradas aqui são responsabilidade de quem opera o sistema manter corretas). Tela de administração de mais de uma UF/natureza/tipo de cliente por regra (cada linha é uma combinação — "matriz" fica para quem cadastra criar N linhas, não para o motor).
+
+### Decisão arquitetural: módulo Notas Emitidas — emissão fiscal de verdade (19/08/2026)
+
+Etapa 8 do plano fiscal, a que liga tudo que as etapas anteriores construíram separado: uma venda vira `NfePayload` (com CFOP/CST/alíquota de `resolveTaxRule`), passa por `getFiscalProvider()` (hoje sempre o `SimulatedFiscalProvider`) e o resultado é persistido e listado. `InvoicesPage.tsx`/`invoices.ts` eram mock (uma linha hardcoded, seis ações sem `onClick`) — viraram reais.
+
+#### Lacunas de dado fechadas antes de mapear (as que a etapa F1 tinha exposto)
+
+- **`branches.address` e `contacts.address` (texto livre) viraram seis colunas cada**: `logradouro`, `numero`, `bairro`, `municipio`, `uf`, `cep`. `branches` não tem UI (administração continua só por SQL); `contacts` é o módulo piloto do motor genérico, então a mudança também tocou `module_fields` (a linha `address` saiu, seis entraram no lugar, mesmo tratamento show_in_details/show_in_form) e o código feito à mão que já falava de `address` (`contactsRepository.ts`, `contactLookups.ts`, `CustomersPage.tsx`, `useSaleDraft.ts` — que ganhou `formatContactAddress()` em `contacts.ts` para montar o endereço de uma venda a partir das partes). Migração destrutiva: o `address` antigo (só uma linha tinha texto de verdade, "Rua Florianopolis") foi copiado inteiro para `logradouro` — não dá pra decompor texto livre em partes sem inventar dado, e essa é a única linha que sobrevive do formato anterior.
+- **`contacts.indicador_ie` foi normalizado de texto livre para o código da SEFAZ** (`1` = contribuinte, `2` = isento, `9` = não contribuinte) — `update` com heurística de texto (`ilike '%isento%'` etc.) nos dados existentes, seguido de `CHECK (indicador_ie is null or indicador_ie in ('1','2','9'))`. `module_fields.label` ganhou a legenda dos códigos ("Indicador IE (1=Contribuinte, 2=Isento, 9=Não contribuinte)") porque o motor genérico não tem campo de seleção — mesma convenção já usada em `regime_tributario`/CRT.
+- **NCM ausente não é inventado.** `resolveTaxRule`/a validação da emissão continuam exigindo que o cadastro do produto tenha `ncm` preenchido; sem ele, a emissão para com erro acionável citando o item, nunca grava nota parcial.
+
+#### O mapeamento venda → payload (`src/features/sales/invoiceMapping.ts`)
+
+Isto é o que morava em `scripts/fiscal-cycle-check.mjs` "de propósito, e não deveria virar código de produção" (decisão da etapa F1) — agora é `buildNfePayloadFromSale(sale, rules)`, pura (não fala com o Supabase, recebe os dados já buscados), nunca lança exceção — devolve `{ ok: false, errors }` (mesmo espírito de `resolveTaxRule`/`FiscalProvider`).
+
+- ~~**Uma regra fiscal só por venda, não por item.** ... todo item da mesma venda usa o mesmo CFOP/CST/alíquota que a regra resolvida devolve. **CST/CSOSN do ICMS vêm da regra (Tributações), não mais do produto.**~~ — **corrigido no mesmo dia, e este era o bug**: só o **CFOP** é da venda inteira (é da operação). CST/CSOSN e alíquota passaram a ser **por item**, vindos do grupo tributário do produto — ver a correção logo abaixo. Na primeira versão, dois produtos de tributação diferente na mesma venda saíam com CST/alíquota idênticos. O que continua verdade: NCM/CEST/origem da mercadoria/unidade vêm do cadastro do produto.
+- **`tipo_cliente` é derivado de CPF/CNPJ + indicador de IE, não só do indicador**: CPF (11 dígitos) é sempre `consumidor_final` — pessoa física não é contribuinte de ICMS, independente do que estiver em `indicador_ie`; CNPJ com indicador `1` é `contribuinte`; CNPJ com indicador `2`/`9`/ausente é `nao_contribuinte`. Documentado aqui porque a instrução original só citava "derivar do indicador normalizado" — o documento entrou na conta porque sem isso um cliente pessoa física com `indicador_ie` nulo (comum, já que a maioria dos cadastros não preenche isso pra CPF) cairia em `nao_contribuinte` por padrão, o que é semanticamente errado.
+- **Validações que bloqueiam a emissão** (todas com mensagem acionável, nunca exceção): venda sem cliente identificado (NF-e exige destinatário — diferente do PDV/NFC-e, que é outra etapa); filial sem CNPJ/UF/regime tributário; cliente sem UF; item sem NCM; e o próprio `resolveTaxRule` devolvendo `found: false` (nenhuma regra cadastrada, ou empate — mesma mensagem que a função já produz).
+- **Valores de imposto são calculados quando a regra tem alíquota** (base = valor bruto do item, `valor = base × alíquota / 100`, arredondado a centavos) para ICMS/PIS/COFINS — multiplicação simples, não a "conta de verdade" que a decisão de Tributações deixou de fora (essa ressalva era especificamente sobre IBS/CBS da Reforma Tributária, que nem tem campo em `NfePayloadItem`). Sem alíquota cadastrada na regra, os campos de valor ficam de fora do payload, não viram zero.
+- **`local_destino`/`modalidade_frete` são calculados**, não fixos como no script de teste da F1 (`local_destino`: 1 se UF origem = UF destino, senão 2; `modalidade_frete`: 9 sem frete, 0 com frete). `informacoes_adicionais_contribuinte` **não** carrega mais o aviso "documento simulado" que o script tinha — isso é responsabilidade do próprio `SimulatedFiscalProvider` (que já anota isso no XML/DANFE que gera), não do payload que também vai para o provedor real.
+
+#### Persistência (`src/lib/repositories/fiscalDocumentsRepository.ts`, tabela `fiscal_documents`)
+
+- **Tabela nova, isolada por filial** (dado operacional): `branch_id`, `sale_id`, `model` (`nfe`/`nfce`), `ref` (única), `status` (mesmo vocabulário de `FiscalStatus`, exceto `nao_encontrado` — esse é resultado de consulta, nunca um estado persistido), `chave`/`numero`/`serie`/`protocolo`/`status_sefaz`/`mensagem_sefaz`, `xml_content`/`xml_path`/`pdf_content`/`pdf_path`/`cancel_xml_content`/`cancel_xml_path` (par completo por artefato, espelhando `FiscalArtifact`), `cancel_justificativa`, datas. `unique (sale_id, model)` — uma venda tem no máximo um documento por modelo.
+- **`ref` é `venda-<sale.id>`** (`saleFiscalRef()`) — estável entre tentativas da mesma venda, é o que faz `emit()` ser idempotente por venda de verdade (proteção contra duplo clique/retry, testada no navegador: reemitir a mesma venda atualiza a mesma linha, `fiscal_documents` não ganha uma segunda).
+- **Escrita é direta (insert/update client-side sob RLS), não RPC** — não há lógica atômica multi-tabela aqui (é um upsert de um registro só), mesmo critério já usado em Compras/Financeiro para escrita de registro único. RLS: quatro policies (`select`/`insert`/`update`, sem `delete` — não há ação de excluir) usando `has_permission('notas-emitidas', ...)` + `has_branch_access(branch_id)`. **`update` está mapeado para `can_edit`** (cancelar/reconsultar é escrita sobre um documento existente — mesmo precedente do Financeiro/Controle de Caixa).
+- **Cancelamento recusado não grava nada.** `persistCancelResult` só escreve quando `result.status === "cancelado"`; `erro_cancelamento`/`nao_encontrado` viram uma exceção com a mensagem da SEFAZ, que a tela mostra — o documento continua `autorizado` no banco, porque a recusa é do evento de cancelamento, não uma mudança de status do documento em si.
+- **`sale_items.cfop` é gravado depois de uma emissão autorizada** (`updateSaleItemsCfop`) — precisou de uma policy de `update` nova em `sale_items` (só tinha `select` até aqui; toda escrita anterior passava por `create_sale`, que roda com privilégio elevado). A policy nova é gated por `has_permission('notas-emitidas', 'create')` + `has_branch_access` via join em `sales`.
+- **Limitação conhecida do provedor simulado, documentada e aceita**: o estado do `SimulatedFiscalProvider` mora em memória (decisão da etapa F1). Um F5 na página entre emitir e cancelar faz o provedor "esquecer" a emissão — `cancel()` devolveria `nao_encontrado` mesmo com o documento `autorizado` no banco. Não existe contorno sem furar a interface (seria escrever direto no banco sem passar pelo `FiscalProvider`, o que a etapa F1 proíbe). O provedor real não tem esse problema (a API dele persiste do lado de lá). Reemitir dentro da mesma sessão (sem F5) é idempotente de verdade, testado no navegador.
+
+#### Tela (`InvoicesPage.tsx`) — as seis ações do mock, resolvidas, mais uma nova
+
+A lista mostra **as vendas confirmadas da filial**, não só as que já têm nota — é daqui que a emissão é disparada: selecionar uma venda sem nota e clicar "Emitir Nota" (ação nova, adicionada porque nenhum dos seis botões do mock cobria "emitir"; decisão explícita pedida pela etapa). Coluna "Status fiscal" mostra "Sem nota"/"Autorizado"/"Processando"/"Erro na emissão"/"Denegado"/"Cancelado", com cor.
+
+- **"Visualizar"/"Gerar XML"**: `openFiscalArtifact()` (`invoices.ts`) abre o artefato numa aba nova — serve tanto `content` (simulado, `Blob`/`createObjectURL`) quanto `path` (provedor real, `window.open` direto), exatamente o helper único que a decisão da F1 já antecipava; sem ele a troca de provedor quebraria a tela. "Visualizar" abre o DANFE (`pdf`), "Gerar XML" abre o XML.
+- **"Cancelar"**: `CancelInvoiceModal.tsx` pede a justificativa (15–255 caracteres, regra da SEFAZ que o simulado já valida) e mostra a recusa sem mascarar. Habilitado só quando o documento está `autorizado` e o usuário tem `can_edit`. Cancelar **não mexe em estoque nem em `financial_entries`** — testado no navegador (mesmos valores antes/depois).
+- **"Financeiro"**: só navega para `/financeiro` — a venda já gera o lançamento na confirmação (`create_sale`, etapa de parcelamento), emitir nota não deve gerar lançamento nenhum (duplicaria). **Não há deep-link/filtro por venda** (Financeiro não tem campo de busca hoje); quem for conferir localiza pelo campo "Documento" ("Venda 000X"). Ficou documentado como decisão consciente, não esquecimento — filtrar por origem é uma melhoria de Financeiro, não desta etapa.
+- **"Carta de correção" e "Trocar"**: desabilitados. CC-e é evento que `FiscalProvider` (etapa F1) não cobre — cobrir seria redesenhar a interface, e a instrução desta etapa foi parar e documentar em vez de mexer nela. "Trocar" não tem especificação, mesma situação já registrada em Pedidos de venda/Compras.
+- **De onde se emite**: decisão tomada — **daqui** (Notas Emitidas), não da tela de Realizar Venda. `src/features/pos/fiscalDocument.ts` (gancho do PDV) continua intocado/no-op — é NFC-e, modelo 65, etapa 8.5.
+
+#### Permissões
+
+`role_permissions` de `notas-emitidas` já tinha `can_view` (sobrou de quando a tela era mock). Ganhou `can_create` (emitir) e `can_edit` (cancelar/reconsultar — mesmo mapeamento do Financeiro/Controle de Caixa: escrita sobre registro existente é `edit`). Sem `can_delete` — não há ação de excluir. `modules.data_table` passou de `null` para `fiscal_documents`, `branch_scoped = true`.
+
+#### Testado no navegador
+
+Cadastrada uma regra em Tributações (regime 3, venda, SP→SP, consumidor_final, CFOP 5102, CST ICMS 00, alíquota 18/1,65/7,6) e um NCM em Produtos (Doritos). Venda 0009 (Bruno, PIX, R$45): emissão autorizada, chave de 44 dígitos com cUF real (35, de `branches.uf = 'SP'`, não o fallback), protocolo, XML (2492 caracteres, com `<chNFe>` e a descrição do item) e DANFE abrindo; `sale_items.cfop` gravado como `5102`. Reemissão da mesma venda: mesma chave, `fiscal_documents` continuou com 1 linha (idempotência confirmada por contagem no banco). Venda 0004 (Doritos + Arroz sem NCM): erro acionável citando o item 2, nenhuma linha gravada em `fiscal_documents`. Venda com cliente fora de qualquer regra cadastrada (UF destino sem regra): mensagem de `resolveTaxRule` mostrada na tela, sem exceção. Cancelamento: justificativa curta recusada com a mensagem da SEFAZ; justificativa válida cancelou de verdade (status `cancelado` na lista, XML do evento gravado); estoque do produto e `financial_entries` da venda conferidos idênticos antes/depois. Sem `can_create`/`can_edit`: "Emitir Nota" e "Cancelar" desabilitados na tela (checado via atributo `disabled` dos botões). Clientes e Fornecedores (novos campos de endereço aparecendo na ficha, indicador IE normalizado exibido com a legenda) e Financeiro conferidos sem regressão. `tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos.
+
+#### Fora de escopo
+
+NFC-e (modelo 65, etapa 8.5 — reaproveita a maior parte disto; `src/features/pos/fiscalDocument.ts` continua no-op); Devolução (etapa 9 — cancelar nota não é devolver venda); `FocusNfeProvider` (nenhuma chamada de rede); carta de correção, inutilização de numeração, manifestação do destinatário (eventos que `FiscalProvider` não cobre); deep-link do botão "Financeiro" para os lançamentos exatos da venda (Financeiro não tem esse filtro hoje).
+
+### Correção: CFOP é da operação, CST/alíquota são do produto (grupos tributários) — 19/08/2026
+
+**Isto é uma correção da decisão da etapa 7 (Tributações), não uma etapa nova.** Leia as duas juntas: a seção da etapa 7 acima descreve o que continua valendo, esta descreve o que mudou e por quê.
+
+#### O erro
+
+A etapa 7 modelou `tax_rules` como se CFOP, CST e alíquota dependessem **todos** só da forma da operação (regime × natureza × UF origem/destino × tipo de cliente) — uma regra por combinação, valendo para qualquer produto. Está certo pela metade:
+
+- **CFOP realmente é da operação.** Uma venda interna e uma interestadual têm CFOPs diferentes independente do produto vendido.
+- **CST/CSOSN e alíquota não são.** Dois produtos na *mesma* operação (mesma UF origem/destino, mesmo tipo de cliente, mesmo regime) podem ter tributação diferente: um com substituição tributária, outro isento, outro monofásico, outro com alíquota diferente. Uma regra por combinação de operação **não tem como representar isso** — todos os produtos daquela operação recebem a mesma tributação.
+
+O usuário apontou o erro citando o padrão dos ERPs brasileiros de referência (Bling e afins): **grupo tributário** — um perfil nomeado e reutilizável (CST/CSOSN e alíquotas já definidos), criado uma vez e atrelado ao produto. A operação decide o CFOP; o produto, via seu grupo, decide CST e alíquota. Tributação é assunto sensível o bastante para não inventar desenho próprio quando existe padrão de mercado testado — foi esse que se seguiu, não um terceiro caminho.
+
+#### O sintoma já estava em produção-de-desenvolvimento
+
+A etapa 8 (Notas Emitidas) já tinha sido aplicada quando a correção começou, e `invoiceMapping.ts` já era um consumidor real de `resolveTaxRule` — lendo `rule.cstIcms`/`rule.aliquotaIcms`/etc. **uma vez, fora do laço de itens**, e aplicando igual a todos. Era pior do que "modelagem imprecisa": nem por item a nota diferenciava. A correção ajustou `invoiceMapping.ts` junto, não depois — deixar para depois significaria uma nota estruturalmente errada emitível no intervalo.
+
+#### Schema
+
+- **`tax_groups`** (tabela nova): `code` (único) + `name` (ex.: "Tributado 18%", "Isento") + a saída de tributação que estava em `tax_rules` — `cst_icms`/`csosn`, `aliquota_icms`, `cst_pis`/`aliquota_pis`, `cst_cofins`/`aliquota_cofins`, `cst_ibs_cbs`, `cclasstrib`. **Não isolada por filial** (cadastro de apoio compartilhado, mesmo raciocínio de `tax_rules` e `contacts`). Quatro policies separadas com `has_permission('grupos-tributarios', ...)`, sem `has_branch_access`.
+  - `cst_icms` e `csosn` **convivem no grupo**, pelo mesmo motivo que já convivem em `products`: quem escolhe é o **regime de quem emite** (CRT 1/2 → CSOSN, CRT 3 → CST), não o cadastro do produto — e o mesmo produto pode ser vendido por filiais em regimes diferentes. `resolveIcmsSituacaoTributaria(group, regime)` (`src/lib/fiscal/taxGroups.ts`) resolve isso num lugar só, e **cai no outro código quando o esperado está vazio**: um grupo cadastrado só com CSOSN ainda descreve a tributação, e emitir com o código que existe é melhor do que recusar a nota por causa da coluna vazia. Devolve `null` só quando o grupo não tem nenhum dos dois — aí a emissão recusa com mensagem própria.
+- **`tax_rules` perdeu nove colunas** (`cst_icms`, `csosn`, `aliquota_icms`, `cst_pis`, `aliquota_pis`, `cst_cofins`, `aliquota_cofins`, `cst_ibs_cbs`, `cclasstrib`). Sobrou `cfop` como única saída. **As cinco dimensões de entrada e a constraint `tax_rules_dimensions_unique` não mudaram** — essa parte da modelagem estava certa e não foi tocada. Migração destrutiva (projeto em desenvolvimento): a única linha existente era dado de teste e manteve o CFOP.
+- **`products.tax_group_id`** (FK nulável para `tax_groups`, com índice). Os seis CSTs que a etapa 0 tinha posto direto em `products` (`cst_icms`, `csosn`, `cst_pis`, `cst_cofins`, `cst_ibs_cbs`, `cclasstrib`) **foram removidos**, não mantidos como override: dois lugares guardando a mesma decisão tributária divergem cedo ou tarde, e o padrão de mercado é "produto pertence a um grupo", não "produto com exceções campo a campo".
+  - **Assimetria conhecida e deliberada: `products.cst_ipi` ficou.** `tax_groups` não tem campo de IPI, então `cst_ipi` **não era redundante** — removê-lo apagaria dado sem destino novo, e adicionar IPI ao grupo seria inventar além do que a correção pediu. `invoiceMapping.ts` continua lendo `product.cstIpi`. Se IPI virar assunto de verdade, o lugar dele é no grupo, junto do resto — este parágrafo existe para essa sessão futura não achar que foi descuido.
+  - NCM/CEST/origem da mercadoria/unidade comercial/unidade tributável **também ficaram em `products`**: são propriedades do que o produto fisicamente é, não decisão de tributação.
+
+#### `resolveTaxRule` mudou de forma
+
+`{ found: true, rule, matchedWildcard }` virou **`{ found: true, cfop, ruleId, matchedWildcard }`**. Devolver `cfop` direto (em vez de manter `rule` com a tabela já enxuta) é deliberado: quem chama **não consegue mais** ler CST de lá nem por engano — o contrato passou a dizer sozinho de onde vem cada metade. `ruleId` fica para rastrear/depurar qual linha decidiu. A assinatura de entrada (as cinco dimensões) não mudou, nem o critério de desempate, nem o empate defensivo, nem a normalização de caixa/espaço.
+
+#### `invoiceMapping.ts`: a decisão de CST desceu para dentro do laço
+
+- O bloco que resolvia CSOSN-vs-CST **uma vez para a venda inteira** virou uma chamada de `resolveIcmsSituacaoTributaria(item.product.taxGroup, regime)` **por item**. Alíquotas de ICMS/PIS/COFINS idem: saem de `item.product.taxGroup`, não mais de `rule`.
+- **Produto sem grupo bloqueia a emissão**, com o item identificado, no mesmo array de erros que a checagem de NCM ausente já usava. **Não existe grupo padrão de fallback** — decisão explícita: um fallback silencioso é exatamente o "nota emitida com dado errado sem avisar" que esta correção existe para evitar.
+- Erro novo irmão desse: grupo atrelado mas **sem CST nem CSOSN** cadastrado recusa citando o nome do grupo ("complete o cadastro em Grupos tributários").
+- `SaleForInvoiceProduct` ganhou `taxGroup: TaxGroup | null`, e `fetchSaleForInvoice` (`fiscalDocumentsRepository.ts`) traz o grupo por join aninhado (`products` → `tax_groups`).
+
+#### Tela
+
+- **`tax_groups` roda na `GenericModulePage`, sem componente próprio** — segundo módulo a nascer só de metadados depois de Tributações, e pelo mesmo motivo (CRUD simples de cadastro de apoio). 11 `module_fields`; os 5 primeiros (código, nome, CST ICMS, CSOSN, alíquota ICMS) na lista, o resto só em ficha/formulário. `icon_key` **nulo de propósito** — não existe asset e criar imagem é fora de escopo; o ícone genérico de reserva é caminho suportado e documentado.
+  - **Confirmado de novo o achado da etapa 7**: alíquotas são `numeric(7,4)` de verdade e o motor genérico manda o texto do formulário direto para a coluna — `"18"`, `"1.65"`, `"7.6"` gravaram como `18.0000`/`1.6500`/`7.6000` sem conversão no cliente.
+- **Produtos ganhou o campo "Grupo tributário" via `lookupField`** do `RegistryFormModal` — o mesmo prop de ponte que o Financeiro usa para o contato, agora buscando em `tax_groups` (`taxGroupLookups.ts`). **`module_fields` continua sem um `data_type: 'lookup'`**: criar um generalizaria o motor inteiro por causa de um campo, mesma disciplina já registrada no Financeiro. O nome do grupo aparece na ficha como acessor de leitura (`tax_group_name`, vem de join), nunca gravado pelo formulário.
+- **Pegadinha tratada: o atalho de edição do `ProductPickerPanel`** (o lápis, usado por Realizar Venda/Compras/Ajuste de estoque) mostra só os campos básicos e **não** tem o lookup de grupo. Ele repassa `editingProduct.taxGroupId` explicitamente — sem isso, editar o preço de um produto por ali desatrelaria o grupo dele em silêncio, e a próxima nota daquele produto seria recusada sem ninguém entender por quê.
+
+#### Permissões
+
+Linha nova em `modules` (`grupos-tributarios`, `path: /grupos-tributarios`, `data_table: tax_groups`, `access_gate: permission`, `branch_scoped: false`, `sort_order` 85 — logo depois de Tributações, sem renumerar nada) + `role_permissions` com CRUD completo para Administrador (cadastro de apoio, mesmo padrão de Tributações/Produtos). Operador segue sem acesso.
+
+- **Detalhe de UX que não é bug**: para quem já tem uma ordem de tiles salva no `localStorage`, o tile novo aparece **no fim** da tela inicial, não na posição 9 — `reconcileOrder` acrescenta ids desconhecidos no fim de propósito (comportamento já documentado na decisão do catálogo). `sort_order = 85` é a posição para quem ainda não reordenou nada.
+
+#### Testado
+
+**Isoladamente** (`node scripts/tax-rule-resolution-check.mjs`, adaptado ao novo retorno): **12/12** — as 11 verificações da etapa 7 continuam passando (regra exata × coringa, sem regra, normalização, tipo de cliente, empate defensivo) e uma 12ª nova confere que o resultado **só** expõe `cfop`/`ruleId`/`matchedWildcard`, nenhum CST ou alíquota.
+
+**No navegador**, logado com a conta de testes:
+
+- Criados dois grupos pela `GenericModulePage`: `TRIB18` "Tributado 18%" (CST ICMS 00, alíquota 18, PIS 01/1,65, COFINS 01/7,6) e `ISENTO` "Isento" (CST ICMS 40, sem alíquota, PIS 07, COFINS 07). Conferidos na lista, na ficha e no banco.
+- Atrelados a produtos diferentes pelo formulário de Produtos, via a lupa: Doritos → TRIB18, Arroz → ISENTO.
+- **Bloqueio de produto sem grupo**: emitir a venda 0004 antes de atrelar o Doritos parou com `"Item 1 (001 — Doritos 120g pizza): sem grupo tributário..."` — e o Arroz, que já tinha grupo, **não** foi sinalizado (a mensagem aponta o item certo, não a venda inteira). Nenhuma linha gravada em `fiscal_documents`.
+- **A prova da correção**: com os dois atrelados, a venda 0004 (Doritos + Arroz) foi autorizada e o XML saiu com **CFOP igual e tributação diferente por item** — item 1 `<CFOP>5102</CFOP>` + `<CST>00</CST>` + `<vICMS>2.70</vICMS>` (15,00 × 18%) + PIS/COFINS 01; item 2 `<CFOP>5102</CFOP>` + `<CST>40</CST>` + **sem** `vICMS` + PIS/COFINS 07. Totais coerentes: `vBC` 15,00 (só a base do item tributado), `vICMS` 2,70, `vProd` 43,90 (os dois itens), `vPIS` 0,25, `vCOFINS` 1,14 — o item isento entra no total de produtos e fica fora dos impostos. `sale_items.cfop` gravado `5102` nos dois.
+- **RLS**: com `can_view` de `grupos-tributarios` desligado, `/grupos-tributarios` mostrou a recusa **e** a ficha de Produtos passou a exibir "Grupo tributário" vazio para um produto que tem `tax_group_id` no banco — o join embutido voltou nulo porque a RLS de `tax_groups` bloqueou, sem nenhuma mudança de código. Religado, o nome voltou. É prova de banco, não de UI.
+- Tela inicial com 16 tiles, o novo com o ícone genérico; nenhum erro de console no carregamento. `tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos.
+
+#### Fora de escopo
+
+Categoria de produto / grupo herdado por tipo de produto (não pedido); substituição tributária com MVA e pauta fiscal de verdade (o grupo guarda o CST que sinaliza ST, não calcula base de ST); IPI no grupo (ver a assimetria acima); backfill de grupo nos produtos existentes (dois foram atrelados no teste, o terceiro segue sem grupo de propósito, como caso de recusa).
+
+### Decisão arquitetural: módulo NFC-e — gancho do PDV (19/08/2026)
+
+Etapa 8.5. Implementa `emitFiscalDocumentForSale` (`src/features/pos/fiscalDocument.ts`), até aqui um no-op documentado, chamado depois de toda venda do PDV confirmada. Reaproveita a maior parte da estrutura de Notas Emitidas (mesmo provedor, mesmo `fiscal_documents`, mesma resolução de CFOP/CST/alíquota) — mas **não** a exigência de cliente, que é o ponto onde uma cópia ingênua de `invoiceMapping.ts` teria quebrado.
+
+#### Por que cliente é opcional em NFC-e e obrigatório em NF-e, sem duplicar a lógica de CFOP/CST
+
+NFC-e é o oposto de NF-e neste ponto: a imensa maioria das vendas de balcão não tem CPF do cliente, e isso é normal, não erro de cadastro. Reaproveitar a validação "sem cliente, sem nota" da NF-e bloquearia toda venda anônima do PDV — a maioria.
+
+`src/features/sales/invoiceMapping.ts` foi fatorado para isso sem duplicar a parte que é genuinamente comum: `resolveItemsForSale` (função interna) resolve o CFOP via `resolveTaxRule` e, por item, CST/CSOSN e alíquota via `resolveIcmsSituacaoTributaria(item.product.taxGroup, regime)` — idêntico ao caminho que a correção de CST/grupos tributários já deixou pronto para NF-e, chamado pelas duas funções exportadas. O que diverge fica em cada função:
+
+- **`buildNfePayloadFromSale`** (inalterada) continua exigindo `sale.contact` e a UF do cliente.
+- **`buildNfcePayloadFromSale`** (nova) só exige filial com CNPJ/UF/regime — cliente é parâmetro opcional de verdade, não um valor vazio forçado. Decisões específicas do modelo, todas deliberadas, não derivadas de nada:
+  - `consumidor_final` sempre `1` e `presenca_comprador` sempre `1` — NFC-e é sempre venda presencial a consumidor final, mesmo quando o cliente identificado tem CNPJ.
+  - `uf_destino` da consulta a `resolveTaxRule` é **sempre a UF da própria filial**, identificado ou não o cliente: a operação é interna e presencial por natureza (quem compra está fisicamente na loja), então a UF cadastrada do cliente (que pode morar em outro estado) não deveria mudar CFOP/`local_destino`. `local_destino` é sempre `1` pelo mesmo motivo.
+  - Sem cliente, o grupo inteiro de campos de destinatário sai do payload — não força nenhum vazio. Confirmado contra a documentação pública da Focus NFe (`doc.focusnfe.com.br/reference/emitir_nfce`) que não existe indicador de "operação sem destinatário": a ausência do grupo já significa isso.
+  - Com cliente, manda só nome + CPF/CNPJ (+ telefone se tiver, + IE só se CNPJ) — sem endereço completo, que não se pede num balcão (`buildNfceDestinatarioFields`, mais enxuto que o bloco de destinatário da NF-e de propósito).
+  - `formas_pagamento` (grupo `pag`, documentado como obrigatório na NFC-e desde a etapa F1) é preenchido a partir de `sale_payments` — a NF-e desta etapa não preenche isso (fora do escopo original dela), então `SaleForInvoice` ganhou `payments: SaleForInvoicePayment[]` (de `fetchSaleForInvoice`) só para quem precisa.
+
+#### CSC e QR Code
+
+Pesquisado contra a documentação pública da Focus NFe (`doc.focusnfe.com.br/reference/emitir_nfce`) antes de desenhar, mesmo procedimento já registrado na decisão da F1:
+
+- **O CSC (Código de Segurança do Contribuinte) não é campo de payload nem de resposta.** No provedor real ele é configuração de conta, por CNPJ+UF, direto no painel da Focus — por isso **não** entrou em `NfePayload` nem em nenhuma tabela nova. `FiscalDocument.qrCodeUrl`/`types.ts` documenta isso explicitamente para a próxima sessão não reinventar um campo de CSC por engano.
+- **QR Code é o campo `qrcode_url` da resposta da Focus.** Virou `FiscalDocument.qrCodeUrl` (`string | null`, só preenchido para `model === "nfce"`) e a coluna nova `fiscal_documents.qr_code_url` (nullable — não muda a superfície de RLS, mesma convenção já registrada no roteiro de novo módulo).
+- **`SimulatedFiscalProvider`** ganhou `src/lib/fiscal/nfceQrCode.ts`: monta uma URL no formato do MOC (`?p=<chave>|<versão>|<tpAmb>|<idCSC>|<hash>`) apontando para um host fictício (`*.invalid`, reservado por RFC para domínios que nunca resolvem) — o hash é só estruturalmente plausível (hex de 40 caracteres, determinístico), não SHA-1 de verdade, porque não há CSC nenhum no simulado para assinar de verdade. Mesmo espírito da chave de acesso estruturalmente real da F1: a forma importa, o conteúdo não precisa ser válido. O XML simulado ganhou `<infNFeSupl>` com o QR Code quando o modelo é NFC-e; o "DANFCE" HTML ganhou um link.
+
+#### O que acontece quando a emissão falha depois da venda já confirmada
+
+A venda do PDV já está confirmada e o estoque já baixou **antes** deste gancho rodar (por desenho — decisão do Ponto de Venda). Não existe "desfazer a venda" por causa de uma nota que não saiu. Critério adotado:
+
+- `emitFiscalDocumentForSale` **nunca lança exceção** — devolve `{ ok: true } | { ok: false; errors }`. `usePosSale.ts` guarda isso num estado novo, `fiscalWarning`, **separado de `submitError`** de propósito: `submitError` continua significando "a venda em si falhou"; `fiscalWarning` é "a venda foi, a nota não saiu" — misturar os dois faria uma falha de nota parecer que a venda não aconteceu, quando aconteceu. `PosPage.tsx` mostra os dois como avisos visualmente distintos (vermelho para erro de venda, âmbar não bloqueante para aviso fiscal) — não bloqueia "Confirmar Venda" nem esconde o problema.
+- **Se a validação do payload falhar antes de chamar o provedor** (produto sem grupo tributário, sem NCM, nenhuma regra de CFOP para a operação), **nenhuma linha é gravada em `fiscal_documents`** — não existe "documento" para persistir, só um resultado de validação. Não há tela de "falhas de emissão" pendentes hoje; o aviso que aparece na hora é a única superfície.
+- **Se o provedor recusa** (a SEFAZ, no caminho real), `persistEmitResult` grava a linha com `status: "erro_autorizacao"` — mesma leitura que Notas Emitidas já dá a uma NF-e recusada.
+- **Pegadinha de permissão, mesma categoria já registrada em `create_pos_sale`/PDV**: persistir o documento exige `has_permission('notas-emitidas', 'create')` de quem está logado no caixa (a mesma permissão que Notas Emitidas usa para emitir manualmente) — **além** de `ponto-de-venda`/`create` e `realizar-venda`/`create` que o PDV já exigia. Um papel de operador de caixa vai precisar das três.
+
+#### Tela (Notas Emitidas)
+
+`InvoicesPage.tsx`/`fiscalDocumentsRepository.ts` **não eram agnósticos de modelo** — `fetchInvoiceSales` filtrava `fiscal_documents` por `model = "nfe"` explicitamente, e a coluna "Modelo" da tabela mostrava `"NF-e"` fixo. Os dois foram corrigidos: a busca trouxe os dois modelos juntos (ordenados por `updated_at desc`, o mais recente por venda vence se por acaso a mesma venda tiver documento dos dois modelos — não deveria ser o caminho comum, mas o schema permite via `unique(sale_id, model)`), e a coluna mostra "NFC-e"/"NF-e" a partir do documento de verdade. Não virou tela nova nem filtro por modelo (não pedido — "se fizer sentido", e a lista já é pequena o bastante para não precisar).
+
+#### Testado
+
+Não foi possível testar clicando na tela nesta sessão — o Browser pane não conseguiu alcançar nenhum servidor de dev local neste ambiente (falha consistente em `navigate` mesmo para portas livres recém-abertas, com ou sem a porta fixa de `.claude/launch.json`; `--port 5188` foi removido do `runtimeArgs` e `autoPort: true` foi ligado porque outra sessão já ocupava 5188, mas isso não foi o que bloqueou a navegação — sites externos como `example.com` carregaram normalmente na mesma aba). Em vez disso, `scripts/nfce-emission-check.mjs` (mesmo padrão de `fiscal-cycle-check.mjs`: `ssrLoadModule` do Vite, login com a conta de testes, dados reais do banco) exercitou o caminho de produção ponta a ponta — **23/23 verificações passaram**:
+
+- Venda do PDV sem cliente (Doritos, com grupo tributário) → NFC-e autorizada, chave de 44 dígitos válida, QR Code presente, numeração começando em 1, CFOP gravado nos itens.
+- Venda do PDV com cliente identificado (Arroz, Bruno via `LookupModal`) → payload confirmado com nome/CPF do destinatário, `consumidor_final`/`presenca_comprador` continuam 1, `formas_pagamento` presente com o PIX da venda; segunda NFC-e incrementa a numeração para 2 (mesma série da filial, contador em memória do processo).
+- Venda com produto sem grupo tributário nem NCM (Café) → venda confirmada normalmente (não trava), emissão recusada citando o item, **nenhuma linha gravada em `fiscal_documents`**.
+- NF-e emitida logo depois para a venda que já tinha NFC-e (a de Bruno) → autorizada com numeração própria em 1, **não** contando a partir de 2 (prova de séries independentes por `model`, mesma chave `cnpj:model:serie` que a F1 já implementava — não foi preciso mexer no `SimulatedFiscalProvider` para isto funcionar).
+- `fetchInvoiceSales` (o que alimenta Notas Emitidas) devolve a venda com NFC-e sem escondê-la, e a venda com emissão recusada sem documento nenhum.
+
+`tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos. Migration (`fiscal_documents.qr_code_url`) aplicada e `get_advisors` conferido — nenhum aviso novo (coluna nova nulável, mesma convenção já documentada). **Fica pendente**: confirmar visualmente no navegador (aviso âmbar no PDV, coluna "Modelo" em Notas Emitidas, DANFCE com o link do QR Code) assim que o Browser pane conseguir alcançar um servidor local nesta máquina — o script comprova a lógica de produção, não o CSS/layout.
+
+#### Fora de escopo
+
+Impressão térmica do cupom fiscal (formato de impressora fiscal/não fiscal — nenhum módulo do sistema faz isso hoje); contingência offline do PDV (venda sem internet, emissão depois — não pedido, decisão própria se vier a ser necessário); `FocusNfeProvider` real (continua só o simulado); filtro por modelo na tela de Notas Emitidas (lista já mostra os dois sem esconder nenhum; filtro fica para quando a lista crescer o bastante para precisar).
 
 ## Roteiro para criar um novo módulo
 

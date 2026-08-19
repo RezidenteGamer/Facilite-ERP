@@ -3,7 +3,16 @@ import type { Tables, TablesInsert, TablesUpdate } from "../../types/supabase";
 import type { Product } from "../../features/products/products";
 import type { ModuleDataRepository } from "./types";
 
-type ProductRow = Tables<"products">;
+/**
+ * O nome do grupo tributário vem de join — `products` só guarda o
+ * `tax_group_id`. É acessor de leitura (aparece na ficha via `module_fields`),
+ * nunca gravado: quem escolhe o grupo é o `lookupField` do formulário, que
+ * devolve o id.
+ */
+type ProductRow = Tables<"products"> & { tax_group: { name: string } | null };
+
+/** Colunas + o join do nome do grupo, usado em toda leitura (list/create/update). */
+const PRODUCT_SELECT = "*, tax_group:tax_groups(name)";
 
 function assertSupabase() {
   if (!supabase) {
@@ -33,13 +42,9 @@ function toProduct(row: ProductRow): Product {
     origemMercadoria: row.origem_mercadoria ?? undefined,
     unidadeComercial: row.unidade_comercial ?? undefined,
     unidadeTributavel: row.unidade_tributavel ?? undefined,
-    cstIcms: row.cst_icms ?? undefined,
-    csosn: row.csosn ?? undefined,
     cstIpi: row.cst_ipi ?? undefined,
-    cstPis: row.cst_pis ?? undefined,
-    cstCofins: row.cst_cofins ?? undefined,
-    cstIbsCbs: row.cst_ibs_cbs ?? undefined,
-    cclasstrib: row.cclasstrib ?? undefined,
+    taxGroupId: row.tax_group_id ?? null,
+    taxGroupName: row.tax_group?.name ?? undefined,
     createdAt: row.created_at ?? undefined,
   };
 }
@@ -62,13 +67,10 @@ function toUpdateRow(patch: Partial<Product>): TablesUpdate<"products"> {
     ...(patch.origemMercadoria !== undefined && { origem_mercadoria: patch.origemMercadoria || null }),
     ...(patch.unidadeComercial !== undefined && { unidade_comercial: patch.unidadeComercial || null }),
     ...(patch.unidadeTributavel !== undefined && { unidade_tributavel: patch.unidadeTributavel || null }),
-    ...(patch.cstIcms !== undefined && { cst_icms: patch.cstIcms || null }),
-    ...(patch.csosn !== undefined && { csosn: patch.csosn || null }),
     ...(patch.cstIpi !== undefined && { cst_ipi: patch.cstIpi || null }),
-    ...(patch.cstPis !== undefined && { cst_pis: patch.cstPis || null }),
-    ...(patch.cstCofins !== undefined && { cst_cofins: patch.cstCofins || null }),
-    ...(patch.cstIbsCbs !== undefined && { cst_ibs_cbs: patch.cstIbsCbs || null }),
-    ...(patch.cclasstrib !== undefined && { cclasstrib: patch.cclasstrib || null }),
+    // `null` limpa o grupo de propósito (produto sem grupo é estado válido no
+    // cadastro; quem recusa é a emissão).
+    ...(patch.taxGroupId !== undefined && { tax_group_id: patch.taxGroupId || null }),
   };
 }
 
@@ -98,7 +100,7 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
       const client = assertSupabase();
       const { data, error } = await client
         .from("products")
-        .select("*")
+        .select(PRODUCT_SELECT)
         .eq("branch_id", branchId)
         .order("code", { ascending: true });
       if (error) throw error;
@@ -126,15 +128,10 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
         origem_mercadoria: input.origemMercadoria || null,
         unidade_comercial: input.unidadeComercial || null,
         unidade_tributavel: input.unidadeTributavel || null,
-        cst_icms: input.cstIcms || null,
-        csosn: input.csosn || null,
         cst_ipi: input.cstIpi || null,
-        cst_pis: input.cstPis || null,
-        cst_cofins: input.cstCofins || null,
-        cst_ibs_cbs: input.cstIbsCbs || null,
-        cclasstrib: input.cclasstrib || null,
+        tax_group_id: input.taxGroupId || null,
       };
-      const { data, error } = await client.from("products").insert(row).select().single();
+      const { data, error } = await client.from("products").insert(row).select(PRODUCT_SELECT).single();
       if (error) throw error;
       return toProduct(data);
     },
@@ -145,7 +142,7 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
         .from("products")
         .update(toUpdateRow(patch))
         .eq("id", id)
-        .select()
+        .select(PRODUCT_SELECT)
         .single();
       if (error) throw error;
       return toProduct(data);

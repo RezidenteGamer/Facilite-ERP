@@ -17,7 +17,8 @@ export type Database = {
       branches: {
         Row: {
           active: boolean
-          address: string | null
+          bairro: string | null
+          cep: string | null
           certificado_digital_ref: string | null
           cnae: string | null
           cnpj: string | null
@@ -26,12 +27,17 @@ export type Database = {
           created_at: string
           id: string
           inscricao_estadual: string | null
+          logradouro: string | null
+          municipio: string | null
           name: string
+          numero: string | null
           regime_tributario: string | null
+          uf: string | null
         }
         Insert: {
           active?: boolean
-          address?: string | null
+          bairro?: string | null
+          cep?: string | null
           certificado_digital_ref?: string | null
           cnae?: string | null
           cnpj?: string | null
@@ -40,12 +46,17 @@ export type Database = {
           created_at?: string
           id?: string
           inscricao_estadual?: string | null
+          logradouro?: string | null
+          municipio?: string | null
           name: string
+          numero?: string | null
           regime_tributario?: string | null
+          uf?: string | null
         }
         Update: {
           active?: boolean
-          address?: string | null
+          bairro?: string | null
+          cep?: string | null
           certificado_digital_ref?: string | null
           cnae?: string | null
           cnpj?: string | null
@@ -54,8 +65,12 @@ export type Database = {
           created_at?: string
           id?: string
           inscricao_estadual?: string | null
+          logradouro?: string | null
+          municipio?: string | null
           name?: string
+          numero?: string | null
           regime_tributario?: string | null
+          uf?: string | null
         }
         Relationships: []
       }
@@ -216,8 +231,9 @@ export type Database = {
       contacts: {
         Row: {
           active: boolean
-          address: string | null
+          bairro: string | null
           birth_date: string | null
+          cep: string | null
           code: string
           codigo_ibge_municipio: string | null
           created_at: string
@@ -227,17 +243,22 @@ export type Database = {
           indicador_ie: string | null
           inscricao_estadual: string | null
           kind: Database["public"]["Enums"]["contact_kind"]
+          logradouro: string | null
+          municipio: string | null
           name: string
+          numero: string | null
           phone: string | null
           photo_url: string | null
           rg: string | null
+          uf: string | null
           updated_at: string
           whatsapp: string | null
         }
         Insert: {
           active?: boolean
-          address?: string | null
+          bairro?: string | null
           birth_date?: string | null
+          cep?: string | null
           code: string
           codigo_ibge_municipio?: string | null
           created_at?: string
@@ -247,17 +268,22 @@ export type Database = {
           indicador_ie?: string | null
           inscricao_estadual?: string | null
           kind: Database["public"]["Enums"]["contact_kind"]
+          logradouro?: string | null
+          municipio?: string | null
           name: string
+          numero?: string | null
           phone?: string | null
           photo_url?: string | null
           rg?: string | null
+          uf?: string | null
           updated_at?: string
           whatsapp?: string | null
         }
         Update: {
           active?: boolean
-          address?: string | null
+          bairro?: string | null
           birth_date?: string | null
+          cep?: string | null
           code?: string
           codigo_ibge_municipio?: string | null
           created_at?: string
@@ -267,10 +293,14 @@ export type Database = {
           indicador_ie?: string | null
           inscricao_estadual?: string | null
           kind?: Database["public"]["Enums"]["contact_kind"]
+          logradouro?: string | null
+          municipio?: string | null
           name?: string
+          numero?: string | null
           phone?: string | null
           photo_url?: string | null
           rg?: string | null
+          uf?: string | null
           updated_at?: string
           whatsapp?: string | null
         }
@@ -363,6 +393,106 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fiscal_documents: {
+        Row: {
+          branch_id: string
+          cancel_justificativa: string | null
+          cancel_xml_content: string | null
+          cancel_xml_path: string | null
+          chave: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          mensagem_sefaz: string | null
+          model: Database["public"]["Enums"]["fiscal_document_model"]
+          numero: string | null
+          pdf_content: string | null
+          pdf_path: string | null
+          protocolo: string | null
+          qr_code_url: string | null
+          ref: string
+          sale_id: string
+          serie: string | null
+          status: Database["public"]["Enums"]["fiscal_document_status"]
+          status_sefaz: string | null
+          updated_at: string
+          xml_content: string | null
+          xml_path: string | null
+        }
+        Insert: {
+          branch_id: string
+          cancel_justificativa?: string | null
+          cancel_xml_content?: string | null
+          cancel_xml_path?: string | null
+          chave?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mensagem_sefaz?: string | null
+          model?: Database["public"]["Enums"]["fiscal_document_model"]
+          numero?: string | null
+          pdf_content?: string | null
+          pdf_path?: string | null
+          protocolo?: string | null
+          qr_code_url?: string | null
+          ref: string
+          sale_id: string
+          serie?: string | null
+          status: Database["public"]["Enums"]["fiscal_document_status"]
+          status_sefaz?: string | null
+          updated_at?: string
+          xml_content?: string | null
+          xml_path?: string | null
+        }
+        Update: {
+          branch_id?: string
+          cancel_justificativa?: string | null
+          cancel_xml_content?: string | null
+          cancel_xml_path?: string | null
+          chave?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mensagem_sefaz?: string | null
+          model?: Database["public"]["Enums"]["fiscal_document_model"]
+          numero?: string | null
+          pdf_content?: string | null
+          pdf_path?: string | null
+          protocolo?: string | null
+          qr_code_url?: string | null
+          ref?: string
+          sale_id?: string
+          serie?: string | null
+          status?: Database["public"]["Enums"]["fiscal_document_status"]
+          status_sefaz?: string | null
+          updated_at?: string
+          xml_content?: string | null
+          xml_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_documents_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_documents_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
             referencedColumns: ["id"]
           },
         ]
@@ -501,17 +631,11 @@ export type Database = {
         Row: {
           active: boolean
           branch_id: string
-          cclasstrib: string | null
           cest: string | null
           code: string
           cost_price: number | null
           created_at: string
-          csosn: string | null
-          cst_cofins: string | null
-          cst_ibs_cbs: string | null
-          cst_icms: string | null
           cst_ipi: string | null
-          cst_pis: string | null
           description: string
           id: string
           location: string | null
@@ -520,6 +644,7 @@ export type Database = {
           sale_price: number
           stock: number
           sub_location: string | null
+          tax_group_id: string | null
           taxation: string | null
           type: string | null
           unidade_comercial: string | null
@@ -530,17 +655,11 @@ export type Database = {
         Insert: {
           active?: boolean
           branch_id: string
-          cclasstrib?: string | null
           cest?: string | null
           code: string
           cost_price?: number | null
           created_at?: string
-          csosn?: string | null
-          cst_cofins?: string | null
-          cst_ibs_cbs?: string | null
-          cst_icms?: string | null
           cst_ipi?: string | null
-          cst_pis?: string | null
           description: string
           id?: string
           location?: string | null
@@ -549,6 +668,7 @@ export type Database = {
           sale_price?: number
           stock?: number
           sub_location?: string | null
+          tax_group_id?: string | null
           taxation?: string | null
           type?: string | null
           unidade_comercial?: string | null
@@ -559,17 +679,11 @@ export type Database = {
         Update: {
           active?: boolean
           branch_id?: string
-          cclasstrib?: string | null
           cest?: string | null
           code?: string
           cost_price?: number | null
           created_at?: string
-          csosn?: string | null
-          cst_cofins?: string | null
-          cst_ibs_cbs?: string | null
-          cst_icms?: string | null
           cst_ipi?: string | null
-          cst_pis?: string | null
           description?: string
           id?: string
           location?: string | null
@@ -578,6 +692,7 @@ export type Database = {
           sale_price?: number
           stock?: number
           sub_location?: string | null
+          tax_group_id?: string | null
           taxation?: string | null
           type?: string | null
           unidade_comercial?: string | null
@@ -591,6 +706,13 @@ export type Database = {
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_tax_group_id_fkey"
+            columns: ["tax_group_id"]
+            isOneToOne: false
+            referencedRelation: "tax_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -1264,19 +1386,58 @@ export type Database = {
           },
         ]
       }
-      tax_rules: {
+      tax_groups: {
         Row: {
           aliquota_cofins: number | null
           aliquota_icms: number | null
           aliquota_pis: number | null
           cclasstrib: string | null
-          cfop: string
+          code: string
           created_at: string
           csosn: string | null
           cst_cofins: string | null
           cst_ibs_cbs: string | null
           cst_icms: string | null
           cst_pis: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          aliquota_cofins?: number | null
+          aliquota_icms?: number | null
+          aliquota_pis?: number | null
+          cclasstrib?: string | null
+          code: string
+          created_at?: string
+          csosn?: string | null
+          cst_cofins?: string | null
+          cst_ibs_cbs?: string | null
+          cst_icms?: string | null
+          cst_pis?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          aliquota_cofins?: number | null
+          aliquota_icms?: number | null
+          aliquota_pis?: number | null
+          cclasstrib?: string | null
+          code?: string
+          created_at?: string
+          csosn?: string | null
+          cst_cofins?: string | null
+          cst_ibs_cbs?: string | null
+          cst_icms?: string | null
+          cst_pis?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      tax_rules: {
+        Row: {
+          cfop: string
+          created_at: string
           id: string
           natureza_operacao: string
           regime: string
@@ -1285,17 +1446,8 @@ export type Database = {
           uf_origem: string
         }
         Insert: {
-          aliquota_cofins?: number | null
-          aliquota_icms?: number | null
-          aliquota_pis?: number | null
-          cclasstrib?: string | null
           cfop: string
           created_at?: string
-          csosn?: string | null
-          cst_cofins?: string | null
-          cst_ibs_cbs?: string | null
-          cst_icms?: string | null
-          cst_pis?: string | null
           id?: string
           natureza_operacao: string
           regime: string
@@ -1304,17 +1456,8 @@ export type Database = {
           uf_origem: string
         }
         Update: {
-          aliquota_cofins?: number | null
-          aliquota_icms?: number | null
-          aliquota_pis?: number | null
-          cclasstrib?: string | null
           cfop?: string
           created_at?: string
-          csosn?: string | null
-          cst_cofins?: string | null
-          cst_ibs_cbs?: string | null
-          cst_icms?: string | null
-          cst_pis?: string | null
           id?: string
           natureza_operacao?: string
           regime?: string
@@ -1774,6 +1917,13 @@ export type Database = {
       financial_entry_origin_kind: "manual" | "venda" | "compra"
       financial_entry_status: "aberto" | "baixado" | "cancelado"
       financial_entry_type: "a_pagar" | "a_receber"
+      fiscal_document_model: "nfe" | "nfce"
+      fiscal_document_status:
+        | "processando_autorizacao"
+        | "autorizado"
+        | "cancelado"
+        | "erro_autorizacao"
+        | "denegado"
       purchase_status: "confirmed" | "cancelled"
       sale_order_status: "aberto" | "convertido" | "cancelado"
       sale_payment_method:
@@ -1917,6 +2067,14 @@ export const Constants = {
       financial_entry_origin_kind: ["manual", "venda", "compra"],
       financial_entry_status: ["aberto", "baixado", "cancelado"],
       financial_entry_type: ["a_pagar", "a_receber"],
+      fiscal_document_model: ["nfe", "nfce"],
+      fiscal_document_status: [
+        "processando_autorizacao",
+        "autorizado",
+        "cancelado",
+        "erro_autorizacao",
+        "denegado",
+      ],
       purchase_status: ["confirmed", "cancelled"],
       sale_order_status: ["aberto", "convertido", "cancelado"],
       sale_payment_method: [

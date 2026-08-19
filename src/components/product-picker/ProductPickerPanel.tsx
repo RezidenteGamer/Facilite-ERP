@@ -105,7 +105,11 @@ export default function ProductPickerPanel({
 
   async function handleEditSubmit(values: Record<string, string>) {
     if (!editingProduct) return;
-    await updateProduct(editingProduct.id, buildProductInput(values));
+    // Este é o atalho de edição do painel (lápis), que mostra só os campos
+    // básicos — não tem o `lookupField` de grupo tributário que a tela de
+    // Produtos tem. Repassar o grupo atual é o que impede a edição rápida de
+    // desatrelar o produto do grupo dele sem ninguém pedir.
+    await updateProduct(editingProduct.id, buildProductInput(values, editingProduct.taxGroupId ?? null));
     setEditingProduct(null);
   }
 

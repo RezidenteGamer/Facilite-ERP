@@ -5,6 +5,8 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
+import { fetchTaxGroups } from "../../lib/repositories/taxGroupLookups";
+import type { TaxGroup } from "../../lib/fiscal/taxGroups";
 import { useAuth } from "../auth/AuthContext";
 import { buildDetailFields, buildFormFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
@@ -16,6 +18,9 @@ import { useProductsData } from "./useProductsData";
 const MODULE_ID = "produtos";
 
 type ModalState = "none" | "new" | "edit" | "clone";
+
+/** O que o formulário precisa saber do grupo escolhido: o id que ele grava e o nome que ele mostra. */
+type SelectedTaxGroup = { id: string; name: string };
 
 /** Módulo "Produtos" — segundo módulo sobre o motor genérico de metadados, isolado por filial. */
 export default function ProductsPage() {
@@ -33,6 +38,7 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>("none");
+  const [formTaxGroup, setFormTaxGroup] = useState<SelectedTaxGroup | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
   const {
@@ -90,16 +96,42 @@ export default function ProductsPage() {
     await updateProduct(selected.id, { active: !selected.active });
   }
 
+  /** Abre o formulário já com o grupo do produto selecionado (ou vazio, em "Novo"). */
+  function openModal(next: Exclude<ModalState, "none">) {
+    const source = next === "new" ? null : selected;
+    setFormTaxGroup(
+      source?.taxGroupId ? { id: source.taxGroupId, name: source.taxGroupName ?? "" } : null,
+    );
+    setModal(next);
+  }
+
   async function handleCreateSubmit(values: Record<string, string>) {
-    await createProduct(buildProductInput(values));
+    await createProduct(buildProductInput(values, formTaxGroup?.id ?? null));
     setModal("none");
   }
 
   async function handleEditSubmit(values: Record<string, string>) {
     if (!selected) return;
-    await updateProduct(selected.id, buildProductInput(values));
+    await updateProduct(selected.id, buildProductInput(values, formTaxGroup?.id ?? null));
     setModal("none");
   }
+
+  /**
+   * O grupo tributário entra pelo `lookupField` do `RegistryFormModal` — o
+   * mesmo prop de ponte que o Financeiro usa para o contato. `module_fields`
+   * continua sem um `data_type: 'lookup'`: criar um generalizaria o motor
+   * inteiro por causa de um campo (mesma disciplina já registrada lá).
+   */
+  const taxGroupLookup = {
+    label: "Grupo tributário",
+    value: formTaxGroup?.name ?? "",
+    modalTitle: "Selecionar grupo tributário",
+    searchPlaceholder: "Buscar por código ou nome...",
+    fetchItems: fetchTaxGroups,
+    getKey: (group: TaxGroup) => group.id,
+    renderItem: (group: TaxGroup) => ({ primary: group.name, secondary: group.code }),
+    onSelect: (group: TaxGroup) => setFormTaxGroup({ id: group.id, name: group.name }),
+  };
 
   async function handleConfirmDelete() {
     if (!confirmingDeleteId) return;
@@ -158,9 +190,9 @@ export default function ProductsPage() {
         <RegistryActions
           title="Cadastrar um novo produto"
           actions={[
-            { id: "novo", label: "Novo produto", disabled: !canCreate, onClick: () => setModal("new") },
-            { id: "editar", label: "Editar", disabled: !selected || !canEdit, onClick: () => setModal("edit") },
-            { id: "clonar", label: "Clonar", disabled: !selected || !canCreate, onClick: () => setModal("clone") },
+            { id: "novo", label: "Novo produto", disabled: !canCreate, onClick: () => openModal("new") },
+            { id: "editar", label: "Editar", disabled: !selected || !canEdit, onClick: () => openModal("edit") },
+            { id: "clonar", label: "Clonar", disabled: !selected || !canCreate, onClick: () => openModal("clone") },
             {
               id: "excluir",
               label: "Excluir",
@@ -194,18 +226,20 @@ export default function ProductsPage() {
       </RegistryLayout>
 
       {modal === "new" && (
-        <RegistryFormModal
+        <RegistryFormModal<TaxGroup>
           title="Novo produto"
           fields={formFields}
+          lookupField={taxGroupLookup}
           onSubmit={handleCreateSubmit}
           onCancel={() => setModal("none")}
         />
       )}
 
       {modal === "edit" && selected && (
-        <RegistryFormModal
+        <RegistryFormModal<TaxGroup>
           title="Editar produto"
           fields={formFields}
+          lookupField={taxGroupLookup}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -221,13 +255,7 @@ export default function ProductsPage() {
             origemMercadoria: selected.origemMercadoria ?? "",
             unidadeComercial: selected.unidadeComercial ?? "",
             unidadeTributavel: selected.unidadeTributavel ?? "",
-            cstIcms: selected.cstIcms ?? "",
-            csosn: selected.csosn ?? "",
             cstIpi: selected.cstIpi ?? "",
-            cstPis: selected.cstPis ?? "",
-            cstCofins: selected.cstCofins ?? "",
-            cstIbsCbs: selected.cstIbsCbs ?? "",
-            cclasstrib: selected.cclasstrib ?? "",
           }}
           onSubmit={handleEditSubmit}
           onCancel={() => setModal("none")}
@@ -235,9 +263,10 @@ export default function ProductsPage() {
       )}
 
       {modal === "clone" && selected && (
-        <RegistryFormModal
+        <RegistryFormModal<TaxGroup>
           title="Clonar produto"
           fields={formFields}
+          lookupField={taxGroupLookup}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -253,13 +282,7 @@ export default function ProductsPage() {
             origemMercadoria: selected.origemMercadoria ?? "",
             unidadeComercial: selected.unidadeComercial ?? "",
             unidadeTributavel: selected.unidadeTributavel ?? "",
-            cstIcms: selected.cstIcms ?? "",
-            csosn: selected.csosn ?? "",
             cstIpi: selected.cstIpi ?? "",
-            cstPis: selected.cstPis ?? "",
-            cstCofins: selected.cstCofins ?? "",
-            cstIbsCbs: selected.cstIbsCbs ?? "",
-            cclasstrib: selected.cclasstrib ?? "",
           }}
           submitLabel="Clonar"
           onSubmit={handleCreateSubmit}

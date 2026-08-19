@@ -25,6 +25,7 @@
  */
 
 import { buildAccessKey, isValidAccessKey, onlyDigits, resolveUfCode } from "./accessKey";
+import { buildSimulatedQrCodeUrl } from "./nfceQrCode";
 import {
   buildSimulatedCancelXml,
   buildSimulatedDanfe,
@@ -98,6 +99,7 @@ function notFound(ref: string): FiscalDocument {
     xml: null,
     pdf: null,
     xmlCancelamento: null,
+    qrCodeUrl: null,
   };
 }
 
@@ -154,6 +156,7 @@ export function createSimulatedFiscalProvider(
           xml: null,
           pdf: null,
           xmlCancelamento: null,
+          qrCodeUrl: null,
         };
         documents.set(ref, rejected);
         return { ...rejected };
@@ -182,7 +185,10 @@ export function createSimulatedFiscalProvider(
         String(issuedAt.getFullYear()).slice(-2) +
         String(randomInt(100_000_000_000)).padStart(11, "0");
 
-      const issue = { chave, protocolo, model, serie, numero, authorizedAt: issuedAt, payload };
+      // QR Code só existe para NFC-e — o CSC que assinaria de verdade não
+      // trafega aqui (é config de conta no provedor real, ver types.ts).
+      const qrCodeUrl = model === "nfce" ? buildSimulatedQrCodeUrl({ chave }) : null;
+      const issue = { chave, protocolo, model, serie, numero, authorizedAt: issuedAt, payload, qrCodeUrl };
 
       const authorized: StoredDocument = {
         ref,
@@ -198,6 +204,7 @@ export function createSimulatedFiscalProvider(
         xml: buildSimulatedXml(issue),
         pdf: buildSimulatedDanfe(issue),
         xmlCancelamento: null,
+        qrCodeUrl,
       };
 
       documents.set(ref, authorized);

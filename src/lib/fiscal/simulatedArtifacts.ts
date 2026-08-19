@@ -40,6 +40,8 @@ export type SimulatedIssue = {
   numero: number;
   authorizedAt: Date;
   payload: NfePayload;
+  /** Só para NFC-e — ver `nfceQrCode.ts`. */
+  qrCodeUrl?: string | null;
 };
 
 export function buildSimulatedXml(issue: SimulatedIssue): FiscalArtifact {
@@ -125,6 +127,14 @@ export function buildSimulatedXml(issue: SimulatedIssue): FiscalArtifact {
       </dest>`
           : ""
       }${itens}
+      ${
+        issue.qrCodeUrl
+          ? `<infNFeSupl>
+        ${tag("qrCode", issue.qrCodeUrl)}
+        ${tag("urlChave", issue.qrCodeUrl)}
+      </infNFeSupl>`
+          : ""
+      }
       <total>
         <ICMSTot>
           <vBC>${money(payload.icms_base_calculo)}</vBC>
@@ -199,6 +209,7 @@ export function buildSimulatedDanfe(issue: SimulatedIssue): FiscalArtifact {
   <p>Nº ${issue.numero} · Série ${issue.serie} · Emissão ${escapeXml(payload.data_emissao)}</p>
   <p class="chave">Chave de acesso: ${chaveFormatada}</p>
   <p>Protocolo de autorização: ${escapeXml(issue.protocolo)}</p>
+  ${issue.qrCodeUrl ? `<p>Consulta por QR Code: <a href="${escapeXml(issue.qrCodeUrl)}">${escapeXml(issue.qrCodeUrl)}</a></p>` : ""}
   <h2>Emitente</h2>
   <p>${escapeXml(payload.nome_emitente)} — CNPJ ${escapeXml(payload.cnpj_emitente)}</p>
   <h2>Destinatário</h2>
