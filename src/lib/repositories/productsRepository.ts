@@ -43,6 +43,8 @@ function toProduct(row: ProductRow): Product {
     unidadeComercial: row.unidade_comercial ?? undefined,
     unidadeTributavel: row.unidade_tributavel ?? undefined,
     cstIpi: row.cst_ipi ?? undefined,
+    minimumStock: row.minimum_stock ?? undefined,
+    allowNegativeStock: row.allow_negative_stock,
     taxGroupId: row.tax_group_id ?? null,
     taxGroupName: row.tax_group?.name ?? undefined,
     createdAt: row.created_at ?? undefined,
@@ -68,6 +70,8 @@ function toUpdateRow(patch: Partial<Product>): TablesUpdate<"products"> {
     ...(patch.unidadeComercial !== undefined && { unidade_comercial: patch.unidadeComercial || null }),
     ...(patch.unidadeTributavel !== undefined && { unidade_tributavel: patch.unidadeTributavel || null }),
     ...(patch.cstIpi !== undefined && { cst_ipi: patch.cstIpi || null }),
+    ...(patch.minimumStock !== undefined && { minimum_stock: patch.minimumStock ?? null }),
+    ...(patch.allowNegativeStock !== undefined && { allow_negative_stock: patch.allowNegativeStock }),
     // `null` limpa o grupo de propósito (produto sem grupo é estado válido no
     // cadastro; quem recusa é a emissão).
     ...(patch.taxGroupId !== undefined && { tax_group_id: patch.taxGroupId || null }),
@@ -129,6 +133,8 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
         unidade_comercial: input.unidadeComercial || null,
         unidade_tributavel: input.unidadeTributavel || null,
         cst_ipi: input.cstIpi || null,
+        minimum_stock: input.minimumStock ?? null,
+        allow_negative_stock: input.allowNegativeStock ?? null,
         tax_group_id: input.taxGroupId || null,
       };
       const { data, error } = await client.from("products").insert(row).select(PRODUCT_SELECT).single();

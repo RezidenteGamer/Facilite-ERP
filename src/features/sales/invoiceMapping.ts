@@ -469,3 +469,158 @@ export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow
 
   return { ok: true, payload, cfop };
 }
+
+/* ------------------------------------------------------------------------ */
+/* Nota de devolução (etapa 9)                                               */
+/* ------------------------------------------------------------------------ */
+
+export type SaleReturnForInvoice = {
+  /** Código da devolução (`sale_returns.code`) — vai nas informações adicionais. */
+  code: string;
+  /** Código da venda original — idem. */
+  saleCode: string;
+  issueDate: string;
+  /** Soma dos itens devolvidos, já com o desconto proporcional descontado. */
+  totalAmount: number;
+  discountAmount: number;
+  /**
+   * Chave de acesso da nota da venda original, quando existe e está
+   * autorizada. **Nula é caso legítimo** — uma venda que nunca teve nota
+   * (ou cuja nota foi recusada) pode ser devolvida do mesmo jeito; o que a
+   * ausência impede é *referenciar* a original, e quem decide o que fazer com
+   * isso é a tela, não este mapeamento.
+   */
+  originalChave: string | null;
+  branch: SaleForInvoiceBranch;
+  contact: SaleForInvoiceContact | null;
+  items: SaleForInvoiceItem[];
+};
+
+/**
+ * NF-e de **devolução** (modelo 55, `finalidade_emissao: 4`) — etapa 9.
+ *
+ * Reaproveita `resolveItemsForSale` inteiro (CFOP pela operação, CST/alíquota
+ * por item via grupo tributário do produto), trocando só a dimensão
+ * `natureza_operacao` de `'venda'` para `'devolucao'`: é isso que faz o CFOP
+ * sair da(s) regra(s) de devolução cadastradas em Tributações (CFOP de
+ * **entrada**, 1202/2202 e afins) em vez do CFOP de venda. Sem regra
+ * cadastrada, `resolveTaxRule` devolve `found: false` e a emissão para com a
+ * mensagem acionável de sempre — comportamento esperado, não quebra.
+ *
+ * O que diverge de uma NF-e de venda, e por quê:
+ *
+ * - **`tipo_documento: 0`** (nota de entrada): a mercadoria está voltando para
+ *   a loja. Numa venda é `1` (saída).
+ * - **`finalidade_emissao: 4`** (devolução), contra `1` (normal) da venda.
+ * - **`notas_referenciadas`** com a chave da nota original — é o que liga o
+ *   documento de devolução ao que ele desfaz. Quando a venda não tem nota
+ *   autorizada, o grupo simplesmente não vai (não se inventa uma chave).
+ * - **`presenca_comprador: 0`** ("não se aplica"): quem emite é a loja, o
+ *   comprador não está comprando nada nesta operação.
+ *
+ * Pesquisado contra a documentação da Focus NFe antes de desenhar (mesmo
+ * procedimento das etapas F1/8/8.5) — ver `NfePayloadNotaReferenciada`.
+ */
+export function buildReturnNfePayload(saleReturn: SaleReturnForInvoice, rules: TaxRuleRow[]): BuildPayloadResult {
+  const errors: string[] = [];
+
+  if (!saleReturn.contact) {
+    errors.push(
+      "A venda devolvida não tem cliente identificado — a NF-e de devolução exige destinatário. " +
+        "Se a venda saiu por NFC-e sem cliente, o caminho é cancelar a nota original (dentro do prazo).",
+    );
+  }
+  if (!saleReturn.branch.cnpj) errors.push("Filial sem CNPJ cadastrado.");
+  if (!saleReturn.branch.uf) errors.push("Filial sem UF cadastrada (cadastro de filial é só por SQL, por enquanto).");
+  if (!saleReturn.branch.regimeTributario) errors.push("Filial sem regime tributário cadastrado.");
+  if (saleReturn.contact && !saleReturn.contact.uf) {
+    errors.push("Cliente sem UF cadastrada — edite o endereço do cliente.");
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  const branch = saleReturn.branch;
+  const contact = saleReturn.contact!;
+  const regime = branch.regimeTributario!;
+  const document = onlyDigits(contact.document);
+  const tipoCliente = resolveTipoCliente(contact.document, contact.indicadorIe);
+
+  const query: TaxRuleQuery = {
+    regime,
+    naturezaOperacao: "devolucao",
+    ufOrigem: branch.uf!,
+    ufDestino: contact.uf!,
+    tipoCliente,
+  };
+
+  // O "sale" que `resolveItemsForSale` recebe é a devolução vestida do mesmo
+  // formato: os itens são os devolvidos, com a quantidade devolvida. Nenhuma
+  // linha de tributação é reimplementada aqui.
+  const asSale: SaleForInvoice = {
+    code: saleReturn.code,
+    issueDate: saleReturn.issueDate,
+    subtotalAmount: saleReturn.totalAmount,
+    totalAmount: saleReturn.totalAmount,
+    discountAmount: saleReturn.discountAmount,
+    freightAmount: 0,
+    branch,
+    contact,
+    items: saleReturn.items,
+    payments: [],
+  };
+
+  const resolved = resolveItemsForSale(asSale, rules, query);
+  if (!resolved.ok) return resolved;
+  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, pisValorTotal, cofinsValorTotal } = resolved.data;
+
+  const payload: NfePayload = {
+    natureza_operacao: "Devolução de venda",
+    data_emissao: new Date(`${saleReturn.issueDate}T12:00:00-03:00`).toISOString(),
+    tipo_documento: 0,
+    finalidade_emissao: 4,
+    consumidor_final: tipoCliente === "consumidor_final" ? 1 : 0,
+    presenca_comprador: 0,
+    local_destino: branch.uf === contact.uf ? 1 : 2,
+
+    cnpj_emitente: branch.cnpj!,
+    nome_emitente: branch.name,
+    logradouro_emitente: branch.logradouro ?? undefined,
+    numero_emitente: branch.numero ?? undefined,
+    bairro_emitente: branch.bairro ?? undefined,
+    municipio_emitente: branch.municipio ?? undefined,
+    uf_emitente: branch.uf ?? undefined,
+    cep_emitente: branch.cep ?? undefined,
+    inscricao_estadual_emitente: branch.inscricaoEstadual ?? undefined,
+    regime_tributario_emitente: Number.parseInt(regime, 10),
+
+    nome_destinatario: contact.name,
+    cnpj_destinatario: isCnpj(contact.document) ? document : undefined,
+    cpf_destinatario: !isCnpj(contact.document) ? document : undefined,
+    inscricao_estadual_destinatario: contact.inscricaoEstadual ?? undefined,
+    indicador_inscricao_estadual_destinatario: resolveIndicadorIeCodigo(contact.indicadorIe),
+    logradouro_destinatario: contact.logradouro ?? undefined,
+    numero_destinatario: contact.numero ?? undefined,
+    bairro_destinatario: contact.bairro ?? undefined,
+    municipio_destinatario: contact.municipio ?? undefined,
+    uf_destinatario: contact.uf ?? undefined,
+    cep_destinatario: contact.cep ?? undefined,
+    pais_destinatario: "Brasil",
+    telefone_destinatario: contact.phone ?? undefined,
+
+    valor_produtos: saleReturn.totalAmount,
+    valor_total: saleReturn.totalAmount,
+    valor_desconto: saleReturn.discountAmount || undefined,
+    icms_base_calculo: icmsBaseCalculoTotal,
+    icms_valor_total: icmsValorTotal,
+    valor_pis: pisValorTotal,
+    valor_cofins: cofinsValorTotal,
+    modalidade_frete: 9,
+
+    notas_referenciadas: saleReturn.originalChave ? [{ chave_nfe: saleReturn.originalChave }] : undefined,
+
+    items,
+    informacoes_adicionais_contribuinte: `Devolução ${saleReturn.code} referente à venda ${saleReturn.saleCode}`,
+  };
+
+  return { ok: true, payload, cfop };
+}

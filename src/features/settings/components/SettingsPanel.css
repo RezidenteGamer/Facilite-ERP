@@ -79,6 +79,91 @@
   transform: translateY(-1px);
 }
 
+.settings-panel__section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--blue-panel-edge);
+}
+
+.settings-panel__section-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.settings-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.settings-panel__row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-panel__row-label {
+  font-size: 16px;
+}
+
+.settings-panel__row-hint {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+
+.settings-panel__error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* Mesmo desenho do interruptor de RegistryDetails (trilho verde/vermelho,
+   botão branco deslizante) — replicado aqui em vez de importado porque as
+   duas telas não compartilham CSS module nenhum hoje. */
+.settings-panel__switch {
+  position: relative;
+  width: 58px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--danger);
+  cursor: pointer;
+  transition: background-color 0.18s var(--ease);
+}
+
+.settings-panel__switch--on {
+  background: #a8e063;
+}
+
+.settings-panel__switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-panel__switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: 0 2px 6px rgba(4, 30, 82, 0.3);
+  transition: transform 0.18s var(--ease);
+}
+
+.settings-panel__switch--on .settings-panel__switch-knob {
+  transform: translateX(26px);
+}
+
 @media (max-width: 640px) {
   .settings-panel {
     padding: 24px 24px 32px;
@@ -91,5 +176,11 @@
   .settings-panel__btn {
     height: 54px;
     font-size: 19px;
+  }
+
+  .settings-panel__row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
   }
 }

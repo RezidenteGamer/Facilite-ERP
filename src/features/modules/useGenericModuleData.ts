@@ -2,10 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createGenericModuleRepository,
   type GenericRow,
+  type ModuleStorageKind,
 } from "../../lib/repositories/genericModuleRepository";
 import type { ModuleFieldDefinition } from "../registry-engine/types";
 
 type Options = {
+  moduleId: string;
+  storageKind: ModuleStorageKind;
+  /** Só usada no caminho `table`; nula em módulos de armazenamento genérico. */
   table: string | null;
   fields: ModuleFieldDefinition[];
   branchId: string | null;
@@ -19,15 +23,33 @@ type Options = {
  * `useProductsData`, mas sem conhecer nenhum domínio — o que ele sabe da
  * tabela vem inteiro de `modules.data_table` + `module_fields`.
  */
-export function useGenericModuleData({ table, fields, branchId, branchScoped, enabled }: Options) {
+export function useGenericModuleData({
+  moduleId,
+  storageKind,
+  table,
+  fields,
+  branchId,
+  branchScoped,
+  enabled,
+}: Options) {
   const [rows, setRows] = useState<GenericRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const repository = useMemo(
-    () => (table ? createGenericModuleRepository({ table, fields, branchId, branchScoped }) : null),
-    [table, fields, branchId, branchScoped],
-  );
+  /* Um módulo de armazenamento genérico não tem `table` — quem identifica
+     o dado dele é o próprio `moduleId` dentro de `module_records`. Por isso
+     a condição não é mais "tem tabela?", e sim "tem onde gravar?". */
+  const repository = useMemo(() => {
+    if (storageKind === "table" && !table) return null;
+    return createGenericModuleRepository({
+      moduleId,
+      storageKind,
+      table,
+      fields,
+      branchId,
+      branchScoped,
+    });
+  }, [moduleId, storageKind, table, fields, branchId, branchScoped]);
 
   const reload = useCallback(async () => {
     if (!repository || !enabled) {

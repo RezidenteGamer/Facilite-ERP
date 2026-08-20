@@ -6,7 +6,9 @@ type FormFieldProps = {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "text" | "date" | "email" | "password";
+  type?: "text" | "date" | "email" | "password" | "select";
+  /** Só para `type: "select"`. */
+  options?: { value: string; label: string }[];
   /** Mostra a lupa de consulta à direita (campos que abrem uma busca). */
   lookup?: boolean;
   onLookup?: () => void;
@@ -26,6 +28,7 @@ export default function FormField({
   value,
   onChange,
   type = "text",
+  options,
   lookup = false,
   onLookup,
   disabled = false,
@@ -38,17 +41,33 @@ export default function FormField({
       </label>
 
       <div className={`form-field__control${disabled ? " form-field__control--disabled" : ""}`}>
-        <input
-          id={id}
-          className="form-field__input"
-          type={type}
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          /* iOS Safari não redimensiona a viewport quando o teclado abre —
-             sem isto, um campo perto do rodapé some atrás dele ao focar. */
-          onFocus={(event) => event.target.scrollIntoView({ block: "center", behavior: "smooth" })}
-        />
+        {type === "select" ? (
+          <select
+            id={id}
+            className="form-field__input"
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange(event.target.value)}
+          >
+            {options?.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={id}
+            className="form-field__input"
+            type={type}
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange(event.target.value)}
+            /* iOS Safari não redimensiona a viewport quando o teclado abre —
+               sem isto, um campo perto do rodapé some atrás dele ao focar. */
+            onFocus={(event) => event.target.scrollIntoView({ block: "center", behavior: "smooth" })}
+          />
+        )}
 
         {lookup && (
           <button

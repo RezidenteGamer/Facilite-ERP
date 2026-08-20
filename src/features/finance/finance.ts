@@ -5,7 +5,7 @@ export type FinanceEntryType = "a_pagar" | "a_receber";
 export type FinanceEntryStatus = "aberto" | "baixado" | "cancelado";
 
 /** De onde o lançamento veio — 'manual' é o formulário; os demais são gerados por outro módulo. */
-export type FinanceOriginKind = "manual" | "venda" | "compra";
+export type FinanceOriginKind = "manual" | "venda" | "compra" | "devolucao";
 
 /**
  * Aba da tela. Não é o mesmo que `FinanceEntryType`: "baixados" não é um
@@ -99,6 +99,22 @@ export type InstallmentPreviewItem = {
 /** Formato monetário do sistema (pt-BR, sem símbolo — a coluna já diz "Valor"). */
 export function formatEntryTotal(value: number) {
   return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export type CashFlowTotals = { entrou: number; saiu: number; saldo: number };
+
+/**
+ * Entrou (a_receber) / Saiu (a_pagar) / Saldo de um conjunto de lançamentos —
+ * a mesma conta que a aba "Baixados" do Financeiro já faz. Extraída daqui
+ * (em vez de inline em `FinancePage.tsx`) porque o relatório "Financeiro
+ * (fluxo de caixa)" (etapa 11) precisa do mesmo número e não deve reinventar
+ * a soma — as duas telas chamam esta função sobre o recorte de lançamentos
+ * que cada uma decide mostrar (aba "Baixados" ali, intervalo de datas aqui).
+ */
+export function computeCashFlowTotals(entries: Pick<FinanceEntry, "type" | "total">[]): CashFlowTotals {
+  const entrou = entries.filter((entry) => entry.type === "a_receber").reduce((sum, entry) => sum + entry.total, 0);
+  const saiu = entries.filter((entry) => entry.type === "a_pagar").reduce((sum, entry) => sum + entry.total, 0);
+  return { entrou, saiu, saldo: entrou - saiu };
 }
 
 /**

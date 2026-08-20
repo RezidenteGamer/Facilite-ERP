@@ -17,6 +17,7 @@ export type Database = {
       branches: {
         Row: {
           active: boolean
+          allow_negative_stock: boolean
           bairro: string | null
           cep: string | null
           certificado_digital_ref: string | null
@@ -36,6 +37,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          allow_negative_stock?: boolean
           bairro?: string | null
           cep?: string | null
           certificado_digital_ref?: string | null
@@ -55,6 +57,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          allow_negative_stock?: boolean
           bairro?: string | null
           cep?: string | null
           certificado_digital_ref?: string | null
@@ -224,6 +227,216 @@ export type Database = {
             columns: ["register_id"]
             isOneToOne: false
             referencedRelation: "cash_registers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conditional_item_conversions: {
+        Row: {
+          conditional_item_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          quantity: number
+          sale_id: string
+          sale_item_id: string
+        }
+        Insert: {
+          conditional_item_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          quantity: number
+          sale_id: string
+          sale_item_id: string
+        }
+        Update: {
+          conditional_item_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          quantity?: number
+          sale_id?: string
+          sale_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conditional_item_conversions_conditional_item_id_fkey"
+            columns: ["conditional_item_id"]
+            isOneToOne: false
+            referencedRelation: "conditional_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditional_item_conversions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditional_item_conversions_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditional_item_conversions_sale_item_id_fkey"
+            columns: ["sale_item_id"]
+            isOneToOne: false
+            referencedRelation: "sale_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conditional_item_returns: {
+        Row: {
+          conditional_item_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          quantity: number
+          reason: string
+        }
+        Insert: {
+          conditional_item_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          quantity: number
+          reason?: string
+        }
+        Update: {
+          conditional_item_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          quantity?: number
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conditional_item_returns_conditional_item_id_fkey"
+            columns: ["conditional_item_id"]
+            isOneToOne: false
+            referencedRelation: "conditional_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditional_item_returns_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conditional_items: {
+        Row: {
+          conditional_id: string
+          created_at: string
+          id: string
+          product_id: string
+          quantity: number
+          total_amount: number
+          unit_price: number
+        }
+        Insert: {
+          conditional_id: string
+          created_at?: string
+          id?: string
+          product_id: string
+          quantity: number
+          total_amount: number
+          unit_price: number
+        }
+        Update: {
+          conditional_id?: string
+          created_at?: string
+          id?: string
+          product_id?: string
+          quantity?: number
+          total_amount?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conditional_items_conditional_id_fkey"
+            columns: ["conditional_id"]
+            isOneToOne: false
+            referencedRelation: "conditionals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditional_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conditionals: {
+        Row: {
+          branch_id: string
+          code: string
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          due_date: string
+          id: string
+          issue_date: string
+          status: Database["public"]["Enums"]["conditional_status"]
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          branch_id: string
+          code: string
+          contact_id: string
+          created_at?: string
+          created_by?: string | null
+          due_date: string
+          id?: string
+          issue_date?: string
+          status?: Database["public"]["Enums"]["conditional_status"]
+          total_amount?: number
+          updated_at?: string
+        }
+        Update: {
+          branch_id?: string
+          code?: string
+          contact_id?: string
+          created_at?: string
+          created_by?: string | null
+          due_date?: string
+          id?: string
+          issue_date?: string
+          status?: Database["public"]["Enums"]["conditional_status"]
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conditionals_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditionals_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conditionals_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -415,7 +628,8 @@ export type Database = {
           protocolo: string | null
           qr_code_url: string | null
           ref: string
-          sale_id: string
+          sale_id: string | null
+          sale_return_id: string | null
           serie: string | null
           status: Database["public"]["Enums"]["fiscal_document_status"]
           status_sefaz: string | null
@@ -440,7 +654,8 @@ export type Database = {
           protocolo?: string | null
           qr_code_url?: string | null
           ref: string
-          sale_id: string
+          sale_id?: string | null
+          sale_return_id?: string | null
           serie?: string | null
           status: Database["public"]["Enums"]["fiscal_document_status"]
           status_sefaz?: string | null
@@ -465,7 +680,8 @@ export type Database = {
           protocolo?: string | null
           qr_code_url?: string | null
           ref?: string
-          sale_id?: string
+          sale_id?: string | null
+          sale_return_id?: string | null
           serie?: string | null
           status?: Database["public"]["Enums"]["fiscal_document_status"]
           status_sefaz?: string | null
@@ -495,6 +711,13 @@ export type Database = {
             referencedRelation: "sales"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "fiscal_documents_sale_return_id_fkey"
+            columns: ["sale_return_id"]
+            isOneToOne: false
+            referencedRelation: "sale_returns"
+            referencedColumns: ["id"]
+          },
         ]
       }
       module_fields: {
@@ -505,6 +728,7 @@ export type Database = {
           is_required: boolean
           label: string
           module_id: string
+          reference_module_id: string | null
           show_in_details: boolean
           show_in_form: boolean
           show_in_table: boolean
@@ -519,6 +743,7 @@ export type Database = {
           is_required?: boolean
           label: string
           module_id: string
+          reference_module_id?: string | null
           show_in_details?: boolean
           show_in_form?: boolean
           show_in_table?: boolean
@@ -533,6 +758,7 @@ export type Database = {
           is_required?: boolean
           label?: string
           module_id?: string
+          reference_module_id?: string | null
           show_in_details?: boolean
           show_in_form?: boolean
           show_in_table?: boolean
@@ -543,6 +769,99 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "module_fields_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "module_fields_reference_module_id_fkey"
+            columns: ["reference_module_id"]
+            isOneToOne: false
+            referencedRelation: "modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_records: {
+        Row: {
+          branch_id: string | null
+          created_at: string
+          created_by: string | null
+          data: Json
+          id: string
+          module_id: string
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          branch_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          data?: Json
+          id?: string
+          module_id: string
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          branch_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          data?: Json
+          id?: string
+          module_id?: string
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_records_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "module_records_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_situations: {
+        Row: {
+          code: string
+          created_at: string
+          id: string
+          is_initial: boolean
+          label: string
+          module_id: string
+          sort_order: number
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          id?: string
+          is_initial?: boolean
+          label: string
+          module_id: string
+          sort_order?: number
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          id?: string
+          is_initial?: boolean
+          label?: string
+          module_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_situations_module_id_fkey"
             columns: ["module_id"]
             isOneToOne: false
             referencedRelation: "modules"
@@ -582,6 +901,105 @@ export type Database = {
           },
         ]
       }
+      module_transition_actions: {
+        Row: {
+          created_at: string
+          id: string
+          sort_order: number
+          source_field_key: string | null
+          target_field_key: string
+          target_kind: string
+          transition_id: string
+          value: string | null
+          value_kind: string
+          via_reference_field_key: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          sort_order?: number
+          source_field_key?: string | null
+          target_field_key: string
+          target_kind?: string
+          transition_id: string
+          value?: string | null
+          value_kind: string
+          via_reference_field_key?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          sort_order?: number
+          source_field_key?: string | null
+          target_field_key?: string
+          target_kind?: string
+          transition_id?: string
+          value?: string | null
+          value_kind?: string
+          via_reference_field_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_transition_actions_transition_id_fkey"
+            columns: ["transition_id"]
+            isOneToOne: false
+            referencedRelation: "module_transitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_transitions: {
+        Row: {
+          created_at: string
+          from_situation_id: string
+          id: string
+          label: string
+          module_id: string
+          sort_order: number
+          to_situation_id: string
+        }
+        Insert: {
+          created_at?: string
+          from_situation_id: string
+          id?: string
+          label: string
+          module_id: string
+          sort_order?: number
+          to_situation_id: string
+        }
+        Update: {
+          created_at?: string
+          from_situation_id?: string
+          id?: string
+          label?: string
+          module_id?: string
+          sort_order?: number
+          to_situation_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_transitions_from_situation_id_fkey"
+            columns: ["from_situation_id"]
+            isOneToOne: false
+            referencedRelation: "module_situations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "module_transitions_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "module_transitions_to_situation_id_fkey"
+            columns: ["to_situation_id"]
+            isOneToOne: false
+            referencedRelation: "module_situations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       modules: {
         Row: {
           access_gate: string
@@ -596,6 +1014,7 @@ export type Database = {
           path: string | null
           show_on_home: boolean
           sort_order: number
+          storage_kind: string
         }
         Insert: {
           access_gate?: string
@@ -610,6 +1029,7 @@ export type Database = {
           path?: string | null
           show_on_home?: boolean
           sort_order?: number
+          storage_kind?: string
         }
         Update: {
           access_gate?: string
@@ -624,12 +1044,14 @@ export type Database = {
           path?: string | null
           show_on_home?: boolean
           sort_order?: number
+          storage_kind?: string
         }
         Relationships: []
       }
       products: {
         Row: {
           active: boolean
+          allow_negative_stock: boolean | null
           branch_id: string
           cest: string | null
           code: string
@@ -639,6 +1061,7 @@ export type Database = {
           description: string
           id: string
           location: string | null
+          minimum_stock: number | null
           ncm: string | null
           origem_mercadoria: string | null
           sale_price: number
@@ -654,6 +1077,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          allow_negative_stock?: boolean | null
           branch_id: string
           cest?: string | null
           code: string
@@ -663,6 +1087,7 @@ export type Database = {
           description: string
           id?: string
           location?: string | null
+          minimum_stock?: number | null
           ncm?: string | null
           origem_mercadoria?: string | null
           sale_price?: number
@@ -678,6 +1103,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          allow_negative_stock?: boolean | null
           branch_id?: string
           cest?: string | null
           code?: string
@@ -687,6 +1113,7 @@ export type Database = {
           description?: string
           id?: string
           location?: string | null
+          minimum_stock?: number | null
           ncm?: string | null
           origem_mercadoria?: string | null
           sale_price?: number
@@ -725,6 +1152,7 @@ export type Database = {
           document: string
           email: string
           id: string
+          is_facilite_developer: boolean
           name: string
           operator_code: string
           role_id: string | null
@@ -736,6 +1164,7 @@ export type Database = {
           document?: string
           email?: string
           id: string
+          is_facilite_developer?: boolean
           name: string
           operator_code?: string
           role_id?: string | null
@@ -747,6 +1176,7 @@ export type Database = {
           document?: string
           email?: string
           id?: string
+          is_facilite_developer?: boolean
           name?: string
           operator_code?: string
           role_id?: string | null
@@ -930,6 +1360,7 @@ export type Database = {
       roles: {
         Row: {
           can_manage_branches: boolean
+          can_manage_modules: boolean
           can_manage_permissions: boolean
           can_manage_users: boolean
           created_at: string
@@ -939,6 +1370,7 @@ export type Database = {
         }
         Insert: {
           can_manage_branches?: boolean
+          can_manage_modules?: boolean
           can_manage_permissions?: boolean
           can_manage_users?: boolean
           created_at?: string
@@ -948,6 +1380,7 @@ export type Database = {
         }
         Update: {
           can_manage_branches?: boolean
+          can_manage_modules?: boolean
           can_manage_permissions?: boolean
           can_manage_users?: boolean
           created_at?: string
@@ -1195,6 +1628,131 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "sale_payments_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sale_return_items: {
+        Row: {
+          created_at: string
+          discount_amount: number
+          id: string
+          product_id: string
+          quantity: number
+          sale_item_id: string
+          sale_return_id: string
+          total_amount: number
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string
+          discount_amount?: number
+          id?: string
+          product_id: string
+          quantity: number
+          sale_item_id: string
+          sale_return_id: string
+          total_amount: number
+          unit_price: number
+        }
+        Update: {
+          created_at?: string
+          discount_amount?: number
+          id?: string
+          product_id?: string
+          quantity?: number
+          sale_item_id?: string
+          sale_return_id?: string
+          total_amount?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_return_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_return_items_sale_item_id_fkey"
+            columns: ["sale_item_id"]
+            isOneToOne: false
+            referencedRelation: "sale_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_return_items_sale_return_id_fkey"
+            columns: ["sale_return_id"]
+            isOneToOne: false
+            referencedRelation: "sale_returns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sale_returns: {
+        Row: {
+          branch_id: string
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          issue_date: string
+          reason: string
+          sale_id: string
+          status: Database["public"]["Enums"]["sale_return_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          branch_id: string
+          code: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          issue_date?: string
+          reason?: string
+          sale_id: string
+          status?: Database["public"]["Enums"]["sale_return_status"]
+          subtotal_amount?: number
+          total_amount?: number
+          updated_at?: string
+        }
+        Update: {
+          branch_id?: string
+          code?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          issue_date?: string
+          reason?: string
+          sale_id?: string
+          status?: Database["public"]["Enums"]["sale_return_status"]
+          subtotal_amount?: number
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_returns_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_returns_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_returns_sale_id_fkey"
             columns: ["sale_id"]
             isOneToOne: false
             referencedRelation: "sales"
@@ -1492,7 +2050,130 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      report_purchase_items_by_product_day: {
+        Row: {
+          branch_id: string | null
+          cost_amount: number | null
+          product_code: string | null
+          product_description: string | null
+          product_id: string | null
+          purchase_date: string | null
+          quantity: number | null
+          total_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchases_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_purchases_by_contact_day: {
+        Row: {
+          branch_id: string | null
+          contact_id: string | null
+          contact_name: string | null
+          purchase_count: number | null
+          purchase_date: string | null
+          total_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchases_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchases_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_sale_items_by_product_day: {
+        Row: {
+          branch_id: string | null
+          product_code: string | null
+          product_description: string | null
+          product_id: string | null
+          quantity: number | null
+          sale_date: string | null
+          total_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_sales_by_contact_day: {
+        Row: {
+          branch_id: string | null
+          contact_id: string | null
+          contact_name: string | null
+          sale_count: number | null
+          sale_date: string | null
+          total_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_sales_by_day: {
+        Row: {
+          branch_id: string | null
+          sale_count: number | null
+          sale_date: string | null
+          total_amount: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       adjust_stock_batch: {
@@ -1500,9 +2181,32 @@ export type Database = {
         Returns: undefined
       }
       can_manage_branches: { Args: never; Returns: boolean }
+      can_manage_modules: { Args: never; Returns: boolean }
       can_manage_permissions: { Args: never; Returns: boolean }
       can_manage_users: { Args: never; Returns: boolean }
       can_manage_users_for: { Args: { p_user_id: string }; Returns: boolean }
+      cancel_conditional: {
+        Args: { p_conditional_id: string }
+        Returns: {
+          branch_id: string
+          code: string
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          due_date: string
+          id: string
+          issue_date: string
+          status: Database["public"]["Enums"]["conditional_status"]
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "conditionals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       close_cash_session: {
         Args: { p_counted_amount: number; p_session_id: string }
         Returns: {
@@ -1562,6 +2266,67 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "sales"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      convert_conditional_to_sale: {
+        Args: { payload: Json }
+        Returns: {
+          address: string | null
+          branch_id: string
+          cash_session_id: string | null
+          cbs_total: number | null
+          code: string
+          cofins_total: number | null
+          confirmed_at: string | null
+          contact_id: string | null
+          cost_center: string | null
+          created_at: string
+          created_by: string
+          delivery_address: string | null
+          department: string | null
+          discount_amount: number
+          exit_date: string | null
+          freight_amount: number
+          ibs_total: number | null
+          icms_total: number | null
+          id: string
+          ipi_total: number | null
+          issue_date: string
+          operation_type: string | null
+          pis_total: number | null
+          seller_id: string
+          status: Database["public"]["Enums"]["sale_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "sales"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_conditional: {
+        Args: { payload: Json }
+        Returns: {
+          branch_id: string
+          code: string
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          due_date: string
+          id: string
+          issue_date: string
+          status: Database["public"]["Enums"]["conditional_status"]
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "conditionals"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -1712,6 +2477,29 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_sale_return: {
+        Args: { payload: Json }
+        Returns: {
+          branch_id: string
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          issue_date: string
+          reason: string
+          sale_id: string
+          status: Database["public"]["Enums"]["sale_return_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "sale_returns"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_sale_order: {
         Args: { payload: Json }
         Returns: {
@@ -1826,7 +2614,67 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      create_user_module: {
+        Args: {
+          p_branch_scoped: boolean
+          p_fields: Json
+          p_label: string
+          p_sort_order: number
+        }
+        Returns: string
+      }
+      delete_user_module: { Args: { p_module_id: string }; Returns: undefined }
+      delete_module_situation: { Args: { p_id: string }; Returns: undefined }
+      delete_module_transition: { Args: { p_id: string }; Returns: undefined }
+      delete_module_transition_action: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+      has_facilite_developer_access: { Args: never; Returns: boolean }
+      save_module_situation: {
+        Args: {
+          p_id: string | null
+          p_is_initial: boolean
+          p_label: string
+          p_module_id: string
+          p_sort_order: number
+        }
+        Returns: string
+      }
+      save_module_transition: {
+        Args: {
+          p_from_situation_id: string | null
+          p_id: string | null
+          p_label: string
+          p_module_id: string
+          p_sort_order: number
+          p_to_situation_id: string | null
+        }
+        Returns: string
+      }
+      save_module_transition_action: {
+        Args: {
+          p_id: string | null
+          p_sort_order: number
+          p_source_field_key: string | null
+          p_target_field_key: string
+          p_target_kind: string
+          p_transition_id: string
+          p_value: string | null
+          p_value_kind: string
+          p_via_reference_field_key: string | null
+        }
+        Returns: string
+      }
+      transition_module_record: {
+        Args: { p_record_id: string; p_to_situation_id: string }
+        Returns: string
+      }
       has_branch_access: { Args: { p_branch_id: string }; Returns: boolean }
+      stock_allows_negative: {
+        Args: { p_branch_id: string; p_product_id: string }
+        Returns: boolean
+      }
       has_permission: {
         Args: { p_action: string; p_module_id: string }
         Returns: boolean
@@ -1862,6 +2710,8 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      module_field_key: { Args: { p_label: string }; Returns: string }
+      slugify_text: { Args: { p_text: string }; Returns: string }
       open_cash_session: {
         Args: { p_opening_amount: number; p_register_id: string }
         Returns: {
@@ -1909,12 +2759,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      register_conditional_return: {
+        Args: { payload: Json }
+        Returns: undefined
+      }
     }
     Enums: {
       cash_movement_type: "sangria" | "suprimento"
       cash_session_status: "aberto" | "fechado"
+      conditional_status: "confirmed" | "cancelled"
       contact_kind: "clientes" | "fornecedores"
-      financial_entry_origin_kind: "manual" | "venda" | "compra"
+      financial_entry_origin_kind: "manual" | "venda" | "compra" | "devolucao"
       financial_entry_status: "aberto" | "baixado" | "cancelado"
       financial_entry_type: "a_pagar" | "a_receber"
       fiscal_document_model: "nfe" | "nfce"
@@ -1933,6 +2788,7 @@ export type Database = {
         | "pix"
         | "boleto"
         | "outro"
+      sale_return_status: "confirmed" | "cancelled"
       sale_status: "confirmed" | "cancelled"
     }
     CompositeTypes: {
@@ -2063,8 +2919,9 @@ export const Constants = {
     Enums: {
       cash_movement_type: ["sangria", "suprimento"],
       cash_session_status: ["aberto", "fechado"],
+      conditional_status: ["confirmed", "cancelled"],
       contact_kind: ["clientes", "fornecedores"],
-      financial_entry_origin_kind: ["manual", "venda", "compra"],
+      financial_entry_origin_kind: ["manual", "venda", "compra", "devolucao"],
       financial_entry_status: ["aberto", "baixado", "cancelado"],
       financial_entry_type: ["a_pagar", "a_receber"],
       fiscal_document_model: ["nfe", "nfce"],
@@ -2085,6 +2942,7 @@ export const Constants = {
         "boleto",
         "outro",
       ],
+      sale_return_status: ["confirmed", "cancelled"],
       sale_status: ["confirmed", "cancelled"],
     },
   },

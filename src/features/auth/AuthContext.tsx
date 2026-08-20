@@ -22,6 +22,20 @@ export type Profile = {
   canManagePermissions: boolean;
   canManageUsers: boolean;
   canManageBranches: boolean;
+  /** Cria e gerencia módulos do usuário (`/modulos`) — ver M3 no AGENTS.md. */
+  canManageModules: boolean;
+  /**
+   * Desenvolvedor do Facilite — **não** é papel do cliente. Vem de
+   * `profiles`, não de `roles`, porque é característica da pessoa e não do
+   * cargo que ela ocupa numa empresa cliente; o Administrador do cliente não
+   * tem como conceder isso a ninguém, nem a si mesmo. Liga-se por SQL direto
+   * no banco, sem UI nenhuma — ver M4 no AGENTS.md.
+   *
+   * Habilita só os controles de Camada 2 do construtor de módulos (apontar
+   * um campo para outro módulo, configurar ação que lê/escreve num módulo
+   * relacionado). Não dá acesso a nada mais.
+   */
+  isFaciliteDeveloper: boolean;
 };
 
 export type Branch = {
@@ -42,6 +56,14 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   hasPermission: (moduleId: string, action: PermissionAction) => boolean;
+  /**
+   * Relê `role_permissions` do papel atual. Existe por causa do construtor
+   * de módulos (M3): ao criar um módulo o banco concede as quatro
+   * permissões ao papel de quem criou, e sem isto o cache da sessão
+   * continuaria sem elas — o tile do módulo recém-criado ficaria escondido
+   * por uma permissão que já existe no banco.
+   */
+  refreshPermissions: () => Promise<void>;
   branches: Branch[];
   currentBranchId: string | null;
   setCurrentBranch: (branchId: string) => void;
@@ -73,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
         .select(
-          "id, name, document, operator_code, active, role_id, roles(name, can_manage_permissions, can_manage_users, can_manage_branches)",
+          "id, name, document, operator_code, active, role_id, is_facilite_developer, roles(name, can_manage_permissions, can_manage_users, can_manage_branches, can_manage_modules)",
         )
         .eq("id", userId)
         .single();
@@ -92,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         can_manage_permissions: boolean;
         can_manage_users: boolean;
         can_manage_branches: boolean;
+        can_manage_modules: boolean;
       } | null;
 
       setProfile({
@@ -105,6 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         canManagePermissions: role?.can_manage_permissions ?? false,
         canManageUsers: role?.can_manage_users ?? false,
         canManageBranches: role?.can_manage_branches ?? false,
+        canManageModules: role?.can_manage_modules ?? false,
+        isFaciliteDeveloper: profileRow.is_facilite_developer ?? false,
       });
 
       const { data: branchLinks } = await supabase
@@ -196,6 +221,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const refreshPermissions = useCallback(async () => {
+    if (!supabase || !profile?.roleId) return;
+    const { data } = await supabase
+      .from("role_permissions")
+      .select("module_id, can_view, can_create, can_edit, can_delete")
+      .eq("role_id", profile.roleId);
+
+    const map: Record<string, ModulePermission> = {};
+    for (const perm of data ?? []) {
+      map[perm.module_id] = {
+        canView: perm.can_view,
+        canCreate: perm.can_create,
+        canEdit: perm.can_edit,
+        canDelete: perm.can_delete,
+      };
+    }
+    setPermissions(map);
+  }, [profile?.roleId]);
+
   const hasPermission = useCallback(
     (moduleId: string, action: PermissionAction): boolean => {
       const perm = permissions[moduleId];
@@ -218,11 +262,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       hasPermission,
+      refreshPermissions,
       branches,
       currentBranchId,
       setCurrentBranch,
     }),
-    [session, profile, loading, error, hasPermission, branches, currentBranchId],
+    [
+      session,
+      profile,
+      loading,
+      error,
+      hasPermission,
+      refreshPermissions,
+      branches,
+      currentBranchId,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

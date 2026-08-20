@@ -11,7 +11,8 @@
 
 Sempre que for necessário ver o sistema rodando (mudança visual, verificação de fluxo, teste de módulo novo):
 
-1. **Suba o servidor de dev** usando a configuração já existente em `.claude/launch.json` (nome `facilite-login`) — não rode `npm run dev` direto por Bash; use a ferramenta de preview do Claude Code apontando para esse nome, que já resolve a porta automaticamente (pode não ser 5173/5174 se outra sessão já estiver ocupando a porta padrão).
+1. **Suba o servidor de dev** usando a configuração já existente em `.claude/launch.json` (nome `facilite-login`) — não rode `npm run dev` direto por Bash; use a ferramenta de preview do Claude Code apontando para esse nome.
+   - **Pegadinha da porta, que custou uma sessão inteira (etapa 8.5) e foi diagnosticada na etapa 9**: com `autoPort: true`, a ferramenta de preview **reserva** uma porta livre (ex.: 56183) e espera o servidor subir nela — mas `runtimeArgs` é só `["run", "dev"]`, sem `--port`, então o **Vite ignora essa porta** e sobe na dele (5173, ou 5174 se 5173 estiver ocupada por outra sessão). Navegar para a porta que a ferramenta devolveu falha sempre, e o sintoma parece "o Browser pane não alcança servidor local nenhum" — não é. **Leia `preview_logs` logo depois de subir o servidor e navegue para a URL que o Vite imprimiu** (`➜ Local: http://localhost:XXXX/`), não para a porta do retorno de `preview_start`. Foi assim que o teste de navegador da etapa 9 funcionou.
 2. **Faça login com a conta de testes**, que já existe no Supabase:
    - Email: `claude.testes@facilite.com`
    - Senha: `claude2026`
@@ -59,9 +60,13 @@ O que **não** muda por causa disso:
   - `/ponto-de-venda` — PDV (real: exige sessão de caixa aberta e grava a venda via `create_pos_sale`, que reaproveita `create_sale` — ver decisão abaixo);
   - `/tributacoes` — regras de **CFOP** por natureza da operação × UF origem/destino × tipo de cliente × regime (real: motor genérico puro sobre `tax_rules`, sem componente próprio — ver decisão abaixo e a correção de 19/08/2026);
   - `/grupos-tributarios` — grupos tributários (CST/CSOSN + alíquotas), o perfil de tributação que se atrela ao produto (real: motor genérico puro sobre `tax_groups`, sem componente próprio — ver a correção de 19/08/2026);
+  - `/devolucao-venda` — devolução de venda (real: grava em `sale_returns`/`sale_return_items` via `create_sale_return`, repõe estoque, gera um `a_pagar` novo no Financeiro e oferece as duas ações fiscais — ver decisão abaixo);
+  - `/modulos` — construtor de módulos: cria um módulo do usuário (rota, tile, campos, CRUD) sem deploy, edita os campos de módulos que já rodam no motor genérico, e configura o **workflow** deles (situações, transições e ações automáticas). Gated pela flag global `can_manage_modules` (`access_gate = 'manage_modules'`); os controles de automação **entre** módulos são uma segunda camada, exclusiva de `profiles.is_facilite_developer` — ver as decisões de M3 e M4 abaixo;
+  - `/condicionais` e `/condicionais/nova` — condicionais: peças enviadas ao cliente para experimentar em casa (real: grava em `conditionals`/`conditional_items` via `create_conditional`, que já baixa estoque na hora; devolução e conversão em venda resolvem o saldo aos poucos por item — ver decisão abaixo);
+  - `/relatorios` — relatórios: grade de 12 blocos, cada um com filtro + tabela + resumo, lendo de views/tabelas de outros módulos, sem escrever nada (real: tela própria sobre views com `security_invoker` — ver decisão abaixo);
   - `/configuracoes` — configurações.
 - **As rotas acima não são mais escritas à mão**: desde 18/08/2026 elas vêm do catálogo na tabela `modules` (só `/` e `/inicio` continuam declaradas em `src/App.tsx`). Um módulo novo passa a existir inserindo uma linha nessa tabela — e, se não tiver componente próprio registrado, abre pelo motor genérico assim mesmo. Ver a decisão "catálogo de módulos no banco + roteador dirigido por metadados" abaixo.
-- A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos, Realizar Venda, Ajuste de estoque, Pedidos de venda, Financeiro, Compras, Controle de caixa, Ponto de venda, Tributações e Notas Emitidas, que já são reais.
+- A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos, Realizar Venda, Ajuste de estoque, Pedidos de venda, Financeiro, Compras, Controle de caixa, Ponto de venda, Tributações, Grupos tributários, Notas Emitidas, Devolução de venda, Condicionais e Relatórios, que já são reais.
 - Existe agora um projeto Supabase real (`Facilite-ERP`, id `ifmdedruuetbbqjbnrkd`, região sa-east-1), configurado em `.env.local` (não versionado). `src/lib/supabaseClient.ts` usa `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` de lá. Não crie, exponha ou invente credenciais.
 - **Autenticação é real** (Supabase Auth, email/senha) — ver decisão de RBAC abaixo. Rotas internas são protegidas por `src/components/ProtectedRoute.tsx`.
 
@@ -787,16 +792,535 @@ Não foi possível testar clicando na tela nesta sessão — o Browser pane não
 
 Impressão térmica do cupom fiscal (formato de impressora fiscal/não fiscal — nenhum módulo do sistema faz isso hoje); contingência offline do PDV (venda sem internet, emissão depois — não pedido, decisão própria se vier a ser necessário); `FocusNfeProvider` real (continua só o simulado); filtro por modelo na tela de Notas Emitidas (lista já mostra os dois sem esconder nenhum; filtro fica para quando a lista crescer o bastante para precisar).
 
+### Decisão arquitetural: módulo Devolução de venda (19/08/2026)
+
+Etapa 9, e a primeira que precisa desfazer **proporcionalmente** três coisas que não sabem nada umas das outras: estoque (o item volta), financeiro (o dinheiro daquele item precisa voltar) e nota fiscal (a operação foi documentada para a SEFAZ, a devolução também precisa ser). `SaleReturnPage.tsx`/`saleReturns.ts` eram mock (`SALE_RETURNS` com um item de exemplo, "Devolver venda" sem `onClick`, e o rótulo de busca ainda dizia "Buscar Compra", copiado do mock de Compras — corrigido para "Buscar devolução").
+
+Esta etapa **não constrói quase nada do zero**: orquestra o que quatro etapas anteriores já deixaram pronto — `create_sale`/`sale_items` (a venda original), `resolveTaxRule` com `natureza_operacao` como dimensão, `FiscalProvider.cancel`/`CancelInvoiceModal`/`invoiceMapping.ts`, e `financial_entries_create_installments` com `origin_kind`/`origin_id`.
+
+#### Schema
+
+- **`sale_returns`** (cabeçalho, `branch_id` — dado operacional): `sale_id` (a venda original), `code` sequencial por filial (`unique (branch_id, code)`), `status` (enum `sale_return_status`: `confirmed`/`cancelled`, espelhando `sales`/`purchases` — nada escreve `cancelled` ainda, mesma porta aberta de sempre), `reason` (texto, `default ''` — motivo não é obrigatório, mesma decisão já tomada em Ajuste de estoque), `subtotal_amount`/`total_amount`, `issue_date`, `created_by`.
+- **`sale_return_items`**: referencia **`sale_item_id`, não só `product_id`** — a trava de "não devolver mais do que foi comprado" é por **linha da venda original**, e o mesmo produto pode aparecer em duas linhas da mesma venda com preços diferentes. `product_id` fica junto porque é ele que a reposição de estoque usa, e é **derivado do `sale_item` dentro da RPC**, nunca informado pelo cliente — se viesse do payload, as duas colunas poderiam divergir. Mais `quantity`, `unit_price` (herdado do item original, não digitado de novo), `discount_amount` e `total_amount`.
+- Sem `branch_id` próprio em `sale_return_items` (herda via `sale_return_id`; RLS de leitura usa `exists (select 1 from sale_returns ...)`) — mesmo padrão de `sale_items`/`purchase_items`.
+- **Só policies de `select`** nas duas tabelas (`has_permission('devolucao-venda', 'view')` + `has_branch_access`). Nenhuma de `insert`/`update`/`delete`: só a RPC escreve, mesmo padrão de `sales`/`purchases`/`stock_adjustments`.
+- **`created_by` referencia `profiles(id)`, não `auth.users(id)`** — a primeira migration desta etapa saiu com `auth.users` e o join `profiles(name)` do PostgREST não resolveu (o TypeScript acusou `Property 'name' does not exist on type '{ name: string }[]'`, porque sem FK para `profiles` o PostgREST trata a relação como to-many). Corrigido por migration. **Convenção do projeto**: toda tabela operacional aponta `created_by` para `profiles`.
+
+#### A trava contra devolver mais do que foi vendido
+
+Mora **na RPC, não numa constraint**, e isso é deliberado: a regra é uma soma **entre linhas de outras devoluções** (`sum(quantity)` de todas as devoluções não canceladas daquele `sale_item`), que nenhuma `CHECK` de tabela alcança. O que fecha a corrida é o `select ... from sale_items ... for update` antes de somar — sem ele, duas devoluções simultâneas da mesma linha leriam o mesmo "já devolvido" e as duas passariam. Como existe **uma porta só de escrita** (não há policy de `insert`), validar inline basta; mesmo critério já usado em Compras para a checagem de fornecedor, em vez de duplicar a defesa num gatilho que nenhum outro caminho atravessaria.
+
+**Uma venda pode ser devolvida em mais de uma vez** — devolver 2 de 5 hoje e 3 na semana que vem é o caso normal, não a exceção.
+
+#### RPC `create_sale_return(payload jsonb)`, `security definer`
+
+`has_permission('devolucao-venda', 'create')` + `has_branch_access` antes de qualquer escrita, `pg_advisory_xact_lock` por filial para o código sequencial, tudo numa transação:
+
+- **Estoque**: `update products set stock = stock + quantidade` por item, com `for update`, **sem checagem de saldo** — devolver sempre é permitido, mesma lógica da entrada de estoque em Compras.
+- **Valor de cada linha**: `unit_price` herdado do item original × quantidade devolvida, menos a fatia proporcional do desconto **daquele item** e a fatia proporcional do desconto do **cabeçalho** da venda (`sale.discount_amount × valor_da_linha / sale.subtotal_amount`). **Frete não é devolvido** — o transporte já foi consumido. Ratear o desconto de cabeçalho é o que evita devolver mais do que o cliente pagou de fato; não ratear seria dinheiro a mais saindo em toda venda com desconto no total.
+- **Financeiro** — a decisão central desta etapa, abaixo.
+
+#### A decisão de modelagem: sempre um `a_pagar` novo, nunca editar/dividir o lançamento da venda
+
+Os lançamentos da venda original (`origin_kind = 'venda'`, `origin_id = sale.id`) **não são editados nem divididos**. Em vez disso, a devolução **sempre** cria um lançamento novo pelo núcleo `financial_entries_create_installments` (o mesmo que `create_sale`/`create_purchase` chamam — sexto consumidor): `type = 'a_pagar'`, `contact_id` = o cliente da venda original, `origin_kind = 'devolucao'`, `origin_id` = a devolução, **parcela única, em aberto**, valor = soma dos itens devolvidos.
+
+**Por quê** (é uma decisão de modelagem, não a única possível):
+
+1. **Um lançamento já `baixado` não pode ser editado** — o gatilho `financial_entries_before_write` recusa ("Um lançamento baixado não pode ser editado — exclua a baixa primeiro."). Numa venda à vista, o `a_receber` nasce baixado; não existe "descontar o valor devolvido" dele sem furar a própria regra de imutabilidade que o Financeiro impõe.
+2. **Dividir proporcionalmente entre parcelas numa devolução parcial** (devolveu 1 de 3 itens de uma venda em 4x — qual parcela encolhe?) é complexidade que não paga o preço, e produziria um histórico em que a parcela 2/4 mudou de valor depois de emitida.
+3. Isso vale **independente de o lançamento original estar aberto ou já baixado**, e essa uniformidade é metade do valor: é sempre uma dívida nova, nunca uma edição de histórico. Quem quiser auditar vê a venda e a devolução como dois fatos, não um fato reescrito.
+
+**Custo aceito**: o "quanto essa venda rendeu" não sai de um lançamento só — é a soma do `a_receber` da venda com o `a_pagar` da devolução. Em troca, nenhum lançamento muda depois de criado.
+
+- **Este `a_pagar` se baixa pelo fluxo normal do Financeiro** (botão "Baixar"), no momento em que a loja de fato devolve o dinheiro. **Não existe botão de "estornar"** — o Financeiro já sabe fazer isso, e inventar um segundo caminho para a mesma operação criaria duas verdades sobre quando o dinheiro saiu.
+- **Forma de pagamento**: copiada da venda **só quando ela teve uma forma só**. Com split não há resposta certa, e inventar uma seria pior que deixar em branco.
+
+#### Exceção no gatilho de `financial_entries` (e por que ela é estreita)
+
+`financial_entries_before_write` recusava, desde a etapa do Financeiro, um `a_pagar` cujo contato não fosse `contacts.kind = 'fornecedores'`. A devolução é **o único caso do domínio em que a loja deve dinheiro a um cliente**, então o gatilho ganhou uma exceção nomeada, não um afrouxamento: a regra antiga continua valendo para todo o resto, e a exceção só vale quando `origin_kind = 'devolucao'` — valor que só a RPC `create_sale_return` consegue gravar. E ela é **simétrica**: um `a_pagar` de devolução com contato do tipo `fornecedores` é recusado com mensagem própria.
+
+#### A parte fiscal — as duas opções, oferecidas, não decididas por decreto
+
+**Pesquisado na documentação da Focus NFe antes de desenhar o payload**, mesmo procedimento das etapas F1/8/8.5.
+
+- **Cancelar a nota original não é a mesma coisa que devolver.** Cancelamento de NF-e/NFC-e tem janela legal curta (perto de 24h na maioria dos casos, mas a regra varia por UF e por modelo). Fora dela, a devolução exige **nota fiscal de devolução própria**.
+- **A nota de devolução é uma NF-e de entrada** (`tipo_documento: 0`) com **`finalidade_emissao: 4`** (devolução) e CFOP de entrada (1202/2202 e afins), **referenciando a nota original**.
+- **Campo de nota referenciada — a grafia exata**: `notas_referenciadas`, uma coleção de objetos com **`chave_nfe`** dentro (tag XML `refNFe`, grupo `NFref` do `ide`). Fonte: a **tabela completa de campos** da Focus (<https://campos.focusnfe.com.br/nfe/NotaFiscalXML.html>) — a página de referência do endpoint (`doc.focusnfe.com.br/reference/emitir_nfe`) **não documenta este grupo**, exatamente a mesma divisão de documentação já registrada na etapa F1 para os campos de valor de imposto. Virou `NfePayloadNotaReferenciada` em `src/lib/fiscal/types.ts` e `<NFref><refNFe>` no XML do provedor simulado.
+- **Pendência registrada, não escondida**: fontes públicas indicam que, **a partir de 01/09/2026**, a SEFAZ passa a exigir que a nota de devolução referencie a original **por item** (grupo `DFeReferenciado`), e não só a chave no cabeçalho. A Focus tem um campo `chaves_acesso_dfe_anteriores` (tag `refDFeAnt`), mas ele está documentado no bloco de **Reforma Tributária** e no nível da nota, não do item — não dá para afirmar que é o mesmo campo. Como o desenho por item não está documentado de forma confiável hoje, esta etapa implementa o que **está**: `notas_referenciadas` no cabeçalho. Quem retomar isto depois de setembro precisa reconferir na documentação, não assumir que o payload atual basta.
+- **As duas opções ficam na tela, lado a lado**: "Cancelar nota da venda" (reaproveita `FiscalProvider.cancel` e o **mesmo** `CancelInvoiceModal.tsx`, sem variação — a justificativa de 15–255 caracteres é a mesma regra da SEFAZ) e "Emitir nota de devolução". A primeira só fica habilitada quando a nota original está `autorizado`; a segunda, enquanto não houver nota de devolução autorizada.
+- **Não existe prazo automático de "ainda dá para cancelar".** A regra varia por UF e por modelo, e uma data errada aqui é risco fiscal real nos dois sentidos: errar para o "ainda dá" faz o sistema sugerir um cancelamento que a SEFAZ vai recusar; errar para o outro lado esconde o caminho certo do operador. **A decisão é do operador** — o sistema oferece os dois botões enquanto fizerem sentido tecnicamente e não opina sobre o calendário.
+- **Falha fiscal não bloqueia nem fica silenciosa**, mesma filosofia de `usePosSale.ts`: estoque e financeiro já foram gravados atomicamente **antes** de qualquer chamada ao `FiscalProvider`. Uma falha na emissão/cancelamento não desfaz a devolução (não existe "voltar atrás" de estoque já reposto), mas aparece como mensagem acionável na tela. `emitReturnInvoice`/`cancelOriginalInvoice` (`useSaleReturnsData.ts`) nunca lançam — devolvem `{ ok } | { ok: false, errors }`.
+
+##### `buildReturnNfePayload` reaproveita `resolveItemsForSale` inteiro
+
+Em `invoiceMapping.ts`, ao lado de `buildNfePayloadFromSale`/`buildNfcePayloadFromSale`. A única mudança na resolução tributária é a dimensão `natureza_operacao: 'devolucao'` na consulta a `resolveTaxRule` — é isso que troca o CFOP de saída (5102) pelo de entrada (1202). **CST/CSOSN e alíquota continuam vindo do grupo tributário de cada produto, por item**, exatamente como a correção de 19/08/2026 deixou pronto: uma devolução com dois produtos de tributação diferente sai com CSTs diferentes, sem uma linha de lógica nova.
+
+- Divergências de cabeçalho: `tipo_documento: 0`, `finalidade_emissao: 4`, `presenca_comprador: 0` ("não se aplica" — quem emite é a loja, o comprador não está comprando nada), `natureza_operacao: "Devolução de venda"`, `modalidade_frete: 9`, `notas_referenciadas` quando a venda tem nota autorizada.
+- **Cliente é obrigatório**, como na NF-e (a mensagem de erro diz explicitamente que, para uma venda de balcão sem cliente, o caminho é cancelar a nota original dentro do prazo).
+- **`originalChave` nula é caso legítimo** — uma venda que nunca teve nota pode ser devolvida do mesmo jeito; o que a ausência impede é *referenciar* a original, então o grupo simplesmente não vai no payload. Não se inventa uma chave.
+
+#### `fiscal_documents` ganhou uma segunda origem
+
+`sale_id` virou nulável e entrou `sale_return_id` (FK real), com `CHECK ((sale_id is not null) <> (sale_return_id is not null))` — exatamente uma das duas. A `unique (sale_id, model)` virou **dois índices únicos parciais**, um por origem.
+
+- **Por que duas colunas com FK, e não o par polimórfico `origin_kind`/`origin_id` de `financial_entries`**: lá a lista de origens "só cresce" (venda, compra, devolução, nota emitida...), e perder a FK foi um custo aceito conscientemente. Aqui são **duas, fechadas** — um documento fiscal ou é de uma venda ou é de uma devolução —, e uma FK de verdade é barata. Critérios diferentes porque as situações são diferentes, não por inconsistência.
+- `FiscalDocumentOrigin` (`{ saleId } | { saleReturnId }`) é união, não dois parâmetros opcionais: "nenhuma das duas" nem é representável no TypeScript.
+- `ref` da devolução é `devolucao-<sale_return.id>` (`saleReturnFiscalRef`), espelhando `venda-<sale.id>` — é o que faz `emit()` ser idempotente por devolução.
+- **`fetchInvoiceSales` (Notas Emitidas) pula linhas com `sale_id` nulo** — o documento de uma devolução não pertence a nenhuma venda daquela lista. Sem isso a tela quebraria no `Map` por `sale_id`.
+
+#### Tela
+
+`SaleReturnPage.tsx` lista as devoluções reais da filial. "Devolver venda" abre `SaleReturnModal.tsx` (bespoke): venda de origem pelo `LookupModal` já existente (busca por código **ou** nome do cliente) → linhas da venda com "vendido / já devolvido / devolver / valor", com teto por linha → motivo → confirmar.
+
+- **Modal feito à mão, não o motor genérico nem o de lote.** Não é "um registro com campos" (seria `RegistryFormModal`, e exigiria um terceiro prop de ponte só para este módulo — o sinal de alerta já documentado no Financeiro), e não é "N lançamentos independentes que o operador acumula" (seria `RegistryBatchFormModal`): as linhas **vêm da venda escolhida**, o operador não escolhe *o que* entra na lista, só *quanto* de cada uma volta. Reaproveita o CSS de `RegistryFormModal` e o `LookupModal`.
+- **Prévia de valor ao vivo** (`computeReturnLineTotal` em `saleReturns.ts`) **replica a matemática da RPC** — mesma ordem, mesmo arredondamento —, pelo mesmo motivo de `computeInstallmentPreview` no Financeiro: sem ela o operador só descobriria o rateio de desconto depois de confirmar. As duas funções estão documentadas uma na outra; se divergirem, a tela mente.
+- **Linha já esgotada aparece desabilitada** com placeholder "—"; linha com saldo mostra "até N". A UI é conveniência: quem barra de verdade é a RPC (testado bypassando a tela).
+- **`LookupModal` é renderizado dentro do `Dialog.Content`**, não como irmão do `Dialog.Root` — é assim que o Radix empilha um modal sobre outro sem o de baixo interpretar o clique como "clicou fora". Mesma nota já registrada no `lookupField` do `RegistryFormModal`.
+- **Bug de UI pego no teste**: o campo "Venda de origem" nasceu com `disabled` (para não ser digitável) e isso desabilitou **junto o botão da lupa** — que é o único caminho para escolher a venda. `FormField` aplica `disabled` ao `<input>` **e** ao botão de lookup. A forma correta, que o `RegistryFormModal` já usava, é `onChange={() => {}}` sem `disabled`.
+- **Depois de confirmada a devolução**, a mensagem de sucesso diz o que já aconteceu (estoque + financeiro) e que a parte fiscal é o passo seguinte — o registro já fica selecionado, com os dois botões fiscais à mão.
+- `invoiceStatusLabel`/`invoiceStatusColor` (`invoices.ts`) passaram a receber `{ status }` (`FiscalStatusHolder`) em vez do `InvoiceDocument` inteiro, porque esta tela mostra o status da nota da venda a partir de uma leitura enxuta. Notas Emitidas não mudou.
+
+#### Permissões
+
+`modules.devolucao-venda` (que já existia no catálogo) ganhou `data_table = 'sale_returns'`, `branch_scoped = true` e `layout_variant = 'table-controls'`. `role_permissions` do Administrador passou de só `can_view` para `can_view` + `can_create`. **Sem `can_edit`/`can_delete`**: uma devolução não é editada nem excluída — apagar o registro não desfaz o estoque já reposto (mesmo raciocínio de Ajuste de estoque).
+
+- **Pegadinha de permissão dupla, mesma categoria já registrada no PDV**: a parte fiscal grava em `fiscal_documents`, cuja RLS é gated por **`notas-emitidas`** (emitir = `create`, cancelar = `edit`), não por este módulo. Um papel que vá fazer devolução **com nota** precisa de `devolucao-venda`/`create` **e** de `notas-emitidas`/`create`+`edit`. A tela desabilita os botões fiscais conforme isso.
+
+#### Tributações: a regra de `devolucao` não vem semeada
+
+`natureza_operacao = 'devolucao'` já era valor válido desde a etapa 7, mas **a tabela só tinha regras de `venda`** — esta é a primeira etapa a precisar delas, e **nenhuma migration semeia regra fiscal** (alíquota e CFOP são responsabilidade de quem opera o sistema, decisão já registrada na etapa 7). Cadastrada no teste, pela própria tela de Tributações: regime 3, `devolucao`, SP→SP, `consumidor_final`, CFOP **1202**. Cada combinação de operação precisa da sua linha; sem regra, `resolveTaxRule` devolve `found: false` e a emissão para com mensagem acionável — comportamento esperado, exercitado no teste (ver abaixo).
+
+#### Testado no navegador
+
+Logado com a conta de testes, com o servidor de dev de verdade (ver a pegadinha da porta na seção "Como abrir o sistema e testar no navegador" — foi ela que bloqueou o teste de navegador da etapa 8.5).
+
+- **Regra de devolução cadastrada pela tela de Tributações** (regime 3, devolucao, SP→SP, consumidor_final, CFOP 1202), conferida no banco.
+- **Devolução parcial de venda com mais de um item**: venda 0004 (Doritos + Arroz, R$43,90), devolvido só o Doritos. Prévia mostrou R$15,00 antes de confirmar; devolução 0001 gravada; **estoque do Doritos 162 → 163 e o do Arroz intocado (48)**; `financial_entries` 026 `a_pagar` R$15,00 **em aberto**, `origin_kind = 'devolucao'`, contato **Bruno (kind `clientes`)** — a exceção do gatilho funcionando —, documento "Devolução 0001".
+- **Segunda devolução do mesmo item**: venda 0001 (Doritos ×5). Devolvidos 2 (devolução 0002, R$30,00) e, ao reabrir, **a tela recalculou "já devolvido 2" e o teto "até 3"**; devolvidos os 3 restantes (devolução 0003, R$45,00). Estoque 163 → 165 → 168.
+- **Devolver mais do que resta**: recusado na UI com a mensagem certa ("só restam 1 para devolver (vendidos 1, já devolvidos 0)"), a linha esgotada nasce desabilitada, e — **bypassando a tela**, chamando `create_sale_return` pelo cliente supabase autenticado no console — o **banco** recusou com `23514`: "Devolução maior que a quantidade vendida: já devolvidos 1.000 de 1.000, tentando devolver mais 1.000."
+- **As duas opções fiscais, numa venda com NF-e autorizada**:
+  - **Nota de devolução** (devolução 0001): autorizada, chave de 44 dígitos, e o XML com `<tpNF>0</tpNF>`, `<finNFe>4</finNFe>`, `<CFOP>1202</CFOP>`, `<natOp>Devolução de venda</natOp>`, `<indPres>0</indPres>` e **`<NFref><refNFe>35260800000000000191550010000000011933040332</refNFe></NFref>` — exatamente a chave da NF-e da venda 0004**. `fiscal_documents` com `sale_id` nulo e `sale_return_id` preenchido.
+  - **Tributação por item preservada na devolução**: devolução 0005 (Arroz, grupo ISENTO) saiu com `<CST>40</CST>` e sem ICMS, contra `<CST>00</CST>` + `<vICMS>2.70</vICMS>` da devolução 0001 (Doritos, TRIB18) — mesmo CFOP nas duas.
+  - **Cancelamento da nota da venda** (devolução 0002): justificativa curta recusada **dentro do modal** com a mensagem da SEFAZ ("Justificativa deve ter de 15 a 255 caracteres"), sem fechar; justificativa válida cancelou de verdade e a ficha passou a mostrar "Nota da venda: NF-e — Cancelado". (A NF-e da venda 0001 foi emitida **na mesma sessão do navegador** antes disso — o provedor simulado guarda estado em memória, limitação já documentada na etapa 8.)
+- **Sem regra de `devolucao` cadastrada**: apagada a regra, a emissão parou com "Nenhuma regra cadastrada para regime 3, natureza "devolucao", SP → SP, cliente consumidor_final. Cadastre uma regra em Tributações." — sem exceção e **sem gravar linha nenhuma** em `fiscal_documents`. Regra recolocada, emissão autorizada em seguida.
+- **Produto sem grupo tributário nem NCM** (Café Torrado, venda 0007): **a devolução em si passou normalmente** (devolução 0004, R$19,90; estoque 29 → 30; `a_pagar` 029 criado) e **só a parte fiscal falhou**, com os dois erros citando o item — e nenhuma linha gravada em `fiscal_documents`.
+- **Baixa pelo fluxo normal do Financeiro**: o lançamento 026 aparece na aba "A pagar" com o cliente como contato e valor negativo em vermelho; "Baixar" moveu-o para Baixados e o total da aba caiu de R$296,06 para R$281,06. Nenhum botão de "estornar" foi criado.
+- **Sem `can_create`** (desligado direto no banco para o Administrador): botão "Devolver venda" desabilitado **e** a RPC recusada com `42501` ("Sem permissão para criar devoluções de venda.") chamada direto, bypassando a UI. Permissão religada.
+- **Sem regressão**: Notas Emitidas lista as 16 vendas normalmente, com a venda 0001 agora "Cancelado" e a 0004 "Autorizado", e **sem** a nota de devolução vazando para a lista de vendas; Produtos com os saldos e o grupo tributário certos; tela inicial com os 16 tiles; F5 direto em `/devolucao-venda` sem cair no login.
+- `tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos, com o code splitting por página preservado. `get_advisors` rodado depois das migrations: o único aviso novo era FK sem índice de cobertura em `sale_returns.created_by`, corrigido na hora; o resto é o conjunto pré-existente (`authenticated_security_definer_function_executable` para toda RPC que o cliente chama de propósito, e o "Leaked Password Protection" que só existe no plano Pro).
+- **Não foi possível tirar screenshot** — o Browser pane não estava sendo exibido nesta sessão, então a verificação foi feita por `read_page`/`get_page_text`/`read_network_requests` (estrutura, texto e estado `disabled` dos botões reais), mais conferência no banco. O que não foi conferido visualmente é CSS/layout, não comportamento.
+
+#### Fora de escopo
+
+Devolução de compra (a fornecedores — natureza de operação diferente, não pedida); **troca de produto** (devolver um item e levar outro no lugar — é o botão "Trocar", que segue desabilitado em Pedidos de venda/Notas Emitidas, etapa própria se vier a existir); cálculo automático do prazo legal de cancelamento por UF (ver acima — deixado para o operador de propósito); cancelar/editar uma devolução já registrada (`sale_return_status.cancelled` existe no enum e nada escreve nele — o conserto de uma devolução errada não foi especificado); rateio do frete (não volta); referência por item na nota de devolução (`DFeReferenciado`, ver a pendência de 01/09/2026 acima); `FocusNfeProvider` real (continua só o simulado).
+
+### Decisão arquitetural: construtor de módulos (M3) + armazenamento genérico `module_records` (19/08/2026)
+
+A etapa que responde a pergunta que a M2 deixou explicitamente em aberto — *"ou o M3 gera policies junto com a tabela, ou o armazenamento genérico JSONB nasce com uma policy genérica que resolve o módulo pelo id da própria linha"* — e que absorve a **M1 ("Campos personalizados")**, que nunca chegou a ser construída. As duas precisavam essencialmente da mesma peça (um editor de campos): M1 editaria campos de um módulo existente, M3 cria um módulo novo.
+
+Até aqui um módulo sem componente próprio já abria pela `GenericModulePage` (M2), mas **só se alguém inserisse as linhas por SQL e só se ele pegasse carona na tabela — e na RLS — de outro módulo**. Agora um usuário autorizado cria o módulo pela tela, com rota, tile, campos e CRUD completo, **sem deploy e sem migration**.
+
+#### A resposta: policy genérica, não policy por módulo
+
+`module_records` é **uma tabela só**, compartilhada por todos os módulos criados pelo usuário — não uma tabela nova por módulo. Não existe `CREATE TABLE` disparado por input de usuário: DDL dinâmica a partir de texto que alguém digita numa tela é uma superfície de risco que este projeto não abre.
+
+| Coluna | Papel |
+| --- | --- |
+| `id` | uuid, PK |
+| `module_id` | FK para `modules.id` — é o que a policy resolve |
+| `branch_id` | FK para `branches.id`, **nulável**; só preenchido quando o módulo é `branch_scoped` |
+| `data` | `jsonb not null default '{}'` — o corpo do registro, com as chaves que `module_fields` descreve |
+| `created_at` / `updated_at` | `updated_at` mantido por trigger (`touch_module_records_updated_at`) |
+| `created_by` | `default auth.uid()` — o repositório genérico não sabe (nem deve saber) quem está logado; quem sabe é o banco. Mesmo padrão de `financial_entries`/`fiscal_documents`/`purchases`. |
+
+As quatro policies (`select`/`insert`/`update`/`delete`, nunca `for all`) referenciam **as colunas da própria linha**, não um id fixo:
+
+```sql
+using (
+  has_permission(module_id, 'view')            -- 'create'/'edit'/'delete' nas outras três
+  and (branch_id is null or has_branch_access(branch_id))
+)
+```
+
+É isso que faz um módulo novo **não precisar de policy nova**: `has_permission`/`has_branch_access` são reaproveitadas exatamente como já existiam, nenhuma função nova para isto. **Provado no navegador** (ver "Testado" abaixo): com dois módulos do usuário e `can_view` revogado em um só, um `select` sem filtro nenhum sobre a tabela compartilhada devolveu **apenas as linhas do módulo permitido** — a policy isola por `module_id`, não é tudo-ou-nada.
+
+#### `storage_kind` é coluna — e por que isso não contradiz a M2
+
+`modules.storage_kind` (`'table' | 'generic'`, CHECK) diz onde o dado físico do módulo mora: `'table'` = a tabela real apontada por `data_table` (**todos os módulos que existiam, sem exceção**), `'generic'` = linhas em `module_records`.
+
+A M2 decidiu deliberadamente que **"tem componente próprio" NÃO vira coluna** — e isso continua valendo. As duas decisões não brigam porque as perguntas são diferentes:
+
+- *"qual componente React renderiza este módulo?"* → o banco não teria como validar que o componente existe, e as duas fontes divergiriam no primeiro rename de arquivo. Uma regra, uma fonte: **está em `MODULE_COMPONENTS`, tem tela própria**.
+- *"onde o dado deste módulo está gravado?"* → é um fato sobre o banco, não sobre o bundle. Nenhuma linha de código consegue adivinhar isso olhando para si mesma, e `data_table is null` não serve de sinal (Relatórios, Permissões e Configurações também têm `data_table` nulo e não são genéricos).
+
+Uma segunda constraint impede a combinação incoerente: `storage_kind = 'generic'` exige `data_table is null`.
+
+#### `genericModuleRepository.ts`: dois caminhos por dentro, um contrato por fora
+
+O repositório continua exportando **um** `createGenericModuleRepository` que devolve um `ModuleDataRepository<GenericRow>`; quem consome (`useGenericModuleData`, `GenericModulePage`) não sabe qual caminho está ativo. A escolha é feita por `storage_kind`.
+
+O que é **compartilhado** entre os dois: a normalização de valor (campo opcional vazio vira `null`, não `''`), o filtro por filial, a coluna de ordenação vinda do primeiro campo com `show_in_table`, e a forma externa de `list`/`create`/`update`/`remove`. O que **muda** é só a tradução `accessorKey` ↔ armazenamento físico:
+
+- caminho `table`: `toColumns` / `toGenericRow` (como antes, `from(data_table)`);
+- caminho `generic`: `toDataObject` / `toGenericRowFromRecord` — tudo entra num objeto só que vira o `data`, e a leitura espalha `data` sobre `{ id }`.
+
+Duas decisões concretas nesse caminho:
+
+- **`update` mescla, não sobrescreve.** `data` é uma coluna só: gravar o patch direto apagaria toda chave que não veio no formulário — inclusive as de campos removidos de `module_fields`, que continuam guardadas de propósito. Por isso o update lê o `data` atual e faz merge. Testado: um registro manteve a chave `observacoes` depois de o campo ser removido **e** o registro ser editado.
+- **A ordenação é feita no cliente.** A coluna de ordenação é uma chave dentro do jsonb; depender da sintaxe de ordenação por caminho JSON amarraria o motor a um detalhe da versão do PostgREST. A lista de um módulo desses é um cadastro simples, então ordenar em JS é barato e previsível.
+
+Chaves reservadas (`id`, `module_id`, `branch_id`, `data`, `created_at`, `updated_at`, `created_by`) são recusadas na criação do campo: como a leitura espalha `data` sobre `{ id }`, uma chave `id` dentro do jsonb sobrescreveria o id da linha.
+
+#### O limite explícito: módulo sem tela própria funciona, com tela própria recusa
+
+**É aqui que mora a parte da M1 que não dá para entregar de graça**, e a tela diz isso em voz alta em vez de aceitar em silêncio. `fieldEditingCapabilityFor()` (`src/features/module-builder/moduleBuilder.ts`) devolve três casos:
+
+| Situação | O que o construtor faz |
+| --- | --- |
+| `storage_kind = 'generic'` (módulo do usuário) | **Tudo**: adicionar, editar e remover campo. |
+| `storage_kind = 'table'` **sem** tela própria (Tributações, Grupos tributários) | **Só editar os campos que já existem** (rótulo, tipo, obrigatoriedade, onde aparece). |
+| Tem tela própria (`MODULE_COMPONENTS[id]`) — Produtos, Financeiro, Compras, PDV… | **Recusa**, com a mensagem: *"Este módulo tem tela própria; campos personalizados só funcionam em módulos sem tela própria."* Nenhum botão de campo aparece. |
+
+- **Por que a tela própria recusa**: `ProductsPage.tsx` lê `product.ncm`, não um campo dinâmico — ela não olha para `module_fields`. Uma linha nova ali não apareceria em lugar nenhum. Fazer funcionar de verdade exigiria tocar em cada tela escrita à mão do sistema, escopo muito maior do que M1 ou M3 pediram.
+- **Por que o caso do meio não aceita campo novo** (desvio consciente do plano desta etapa, que dizia "adicionar/editar campo neles funciona de verdade"): editar funciona mesmo — a `GenericModulePage` lê tudo de `module_fields`, e isso foi **verificado no navegador** renomeando um campo de Tributações e vendo a tabela e a ficha acompanharem. Mas **adicionar** um campo a um módulo `table` gravaria uma `field_key` que não existe como coluna em `tax_rules`, e o primeiro `insert` quebraria com erro de coluna inexistente. Criar a coluna seria DDL a partir da tela — exatamente o que `module_records` existe para evitar. Aceitar e quebrar depois seria pior que recusar agora, então a tela explica: *"…criar ou remover campo exigiria mudar a tabela — só módulos de armazenamento genérico aceitam campo novo."*
+
+#### Remover um campo não apaga o dado
+
+Remover uma linha de `module_fields` para de mostrar e de editar o campo; o valor daquela chave **continua** dentro de `module_records.data` nos registros existentes. É deliberado: apagar dado de verdade a partir de "parei de mostrar este campo" seria destrutivo demais para uma ação de dois cliques, e assim a decisão é reversível (recriar o campo com o mesmo rótulo devolve a mesma chave, e o dado antigo reaparece). O `ConfirmDialog` diz isso com todas as letras.
+
+O simétrico também vale: **adicionar** um campo depois de já existirem registros é seguro a qualquer momento — jsonb tolera chave ausente, e os registros antigos aparecem com a célula vazia, não com erro.
+
+`field_key` é derivada do rótulo (slugificada) e **imutável depois de criada** — mesmo raciocínio de nunca renomear uma coluna de banco em produção: mudar a chave depois que já existem registros orfanaria o dado antigo debaixo da chave velha. O rótulo continua editável; a chave aparece como texto, não como campo.
+
+#### `can_manage_modules`: por que uma flag global, e não `has_permission`
+
+No momento de criar um módulo **ainda não existe `module_id`**, então `has_permission('algum-id', ...)` não tem o que resolver. A permissão é uma flag global no papel — `roles.can_manage_modules` —, mesma categoria de `can_manage_users`/`can_manage_permissions`/`can_manage_branches`, com a função `can_manage_modules()` no mesmo padrão das outras três.
+
+- `modules.access_gate` ganhou um **sexto valor**, `manage_modules` (o `CHECK` existente foi estendido — nenhuma segunda forma de portão foi criada), e a própria tela `/modulos` usa esse gate. `ModuleAccessContext`/`canAccessModule` ganharam o caso, no mesmo padrão dos outros.
+- **A grade de `/permissoes` não precisou mudar**: o filtro `access_gate = 'permission'` que a M2 já aplicava cobre o sexto valor sozinho. Confirmado no navegador — "Módulos" não aparece na grade, e os módulos criados pelo usuário aparecem (é assim que outros papéis ganham acesso a eles).
+- **Bootstrap**: `can_manage_modules` foi ligada para quem já tinha `can_manage_permissions` (na prática, Administrador). Como `can_manage_branches`, ela ainda **não tem coluna na grade de `/permissoes`** — conceder a outro papel é `update` em `roles` por SQL. Mesma pendência, mesmo precedente.
+
+#### Bootstrapping da permissão do criador — o motivo de a criação ser RPC
+
+Sem isso quem acabou de criar um módulo ficaria trancado para fora da própria criação: a RLS de `module_records` exige `has_permission(module_id, ...)`, e nada concede isso automaticamente. Por isso `create_user_module(p_label, p_branch_scoped, p_sort_order, p_fields)` (`security definer`) faz tudo numa transação só: cria a linha de `modules`, os `module_fields`, **e concede `can_view`/`can_create`/`can_edit`/`can_delete` ao papel de quem chamou**.
+
+Abrir `role_permissions` para quem tem `can_manage_modules` resolveria o sintoma e criaria uma escalação de privilégio (daria para conceder qualquer permissão de qualquer módulo a qualquer papel). Dentro da RPC a concessão é estreita: só este módulo, só o papel de quem chamou. Outros papéis continuam sem acesso até alguém marcar em `/permissoes` — mesma pendência de todo módulo novo neste projeto, só que agora o dono não fica de fora junto.
+
+A RPC também **fixa no banco** os valores que o construtor não oferece: `access_gate = 'permission'` (os outros cinco são de telas administrativas do sistema), `is_locked = false` (a M2 já reaproveitou esta coluna com este significado exato), `storage_kind = 'generic'`, `data_table = null`, `icon_key = null` (ícone genérico de reserva). Nem um cliente adulterado cria um módulo com portão administrativo.
+
+Para as edições posteriores (rótulo/ordem do módulo, e os campos) as policies existentes foram **alteradas, não duplicadas** (uma policy nova a mais por comando dispararia "multiple permissive policies" no advisor): `modules update` aceita `can_manage_modules()` só em módulos com `is_locked = false`, e o `with check` impede transformar um deles em tela administrativa; `module_fields` aceita `can_manage_modules()` de forma ampla — é o que faz a parte M1 existir para Tributações e Grupos tributários, e é a mesma categoria de poder que `can_manage_permissions` já tinha sobre essas linhas.
+
+#### `delete_user_module`: destrutivo de verdade, e com atrito à altura
+
+Exclui `module_records`, `module_fields`, `module_tabs`, `role_permissions` e a linha de `modules`, e **só** de módulos com `is_locked = false`. As FKs já têm `on delete cascade`, mas as exclusões estão escritas uma a uma de propósito: o que a função apaga precisa estar visível na própria função, não escondido no schema.
+
+Na tela não é o `ConfirmDialog` genérico de "excluir registro": é um diálogo próprio que lista o que vai embora (**com a contagem real de registros**, consultada na hora), mostra a rota que deixa de existir, e **exige digitar o nome do módulo** para habilitar o botão. O atrito é a funcionalidade.
+
+#### O bug de segurança que o teste expôs: `IF NOT <flag>` falha aberto
+
+Ao chamar `create_user_module` sem sessão, esperando a recusa, a função **passou direto pelo portão** e só parou num teste posterior. Causa: `can_manage_modules()` (como as três irmãs) é um `select ... from profiles join roles where p.id = auth.uid()` — sem linha correspondente a consulta devolve **zero linhas**, e o resultado da função é `NULL`; o `coalesce` de dentro do corpo nunca chega a rodar.
+
+Em policy de RLS isso é seguro (`using NULL` nega). Em plpgsql, **não**: `not NULL` = `NULL`, o `IF` não executa, e a checagem de permissão é pulada em silêncio. `delete_user_module` não tinha nenhuma checagem posterior, então lá o furo era completo — um usuário autenticado sem linha em `profiles` apagaria um módulo inteiro.
+
+**Regra que vale para qualquer função nova**: numa checagem imperativa de permissão, escreva `if not coalesce(minha_flag(), false) then raise ...`, nunca `if not minha_flag() then`. O `coalesce` precisa estar do lado de fora da chamada, onde ele de fato fecha o caso.
+
+#### Tela `/modulos` (`src/features/module-builder/`)
+
+Fora do catálogo de módulos comuns, mesma categoria de `/permissoes` e `/usuarios-operadores`; tem tile (gated pela flag, então só quem pode gerenciar módulos o enxerga) e componente próprio registrado em `MODULE_COMPONENTS`. Lista todos os módulos à esquerda (com selo "Sistema"/"Do usuário" e onde o dado mora), campos do selecionado à direita.
+
+O construtor de campos escolhe **só entre os `data_type` que o motor já conhece** (`text`/`date`/`boolean`/`phone`/`email`), num `<select>` feito à mão — esta etapa não inventa tipo novo. Nota honesta sobre o que eles fazem hoje: só `date` muda o `<input>`; `boolean`, `phone` e `email` são texto na tela, como já eram em Clientes e Produtos. Mudar isso seria mexer no motor, não no construtor.
+
+Dois ganchos novos, ambos por um motivo concreto: `ModuleCatalogContext` ganhou `reload()` e `AuthContext` ganhou `refreshPermissions()`. Sem eles, criar um módulo funcionaria no banco mas o tile e a rota só apareceriam depois de um F5 — e o tile ficaria escondido por uma permissão que **já existe no banco** e não no cache da sessão.
+
+#### Testado no navegador
+
+Com a conta de testes (Administrador, `can_manage_modules`): módulo "Fornecedores de frete" criado do zero pela tela (isolado por filial, 4 campos de tipos diferentes, um deles fora da tabela), aparecendo na tela inicial como 18º tile com o ícone de reserva, com rota própria e CRUD completo pela `GenericModulePage` — criar, editar e excluir registro, gravando em `module_records` com o `module_id` certo e `branch_id` preenchido, campo opcional vazio virando `null`. Campo "Observações" adicionado **depois** de já existir registro: o registro antigo apareceu com a célula vazia, sem erro no console. Campo removido: a linha de `module_fields` sumiu, o dado (`"Coleta somente às terças"`) continuou no jsonb, e **sobreviveu inclusive a uma edição posterior do registro** (prova do merge). Produtos recusou o construtor com a mensagem explícita e sem nenhum botão; Tributações ofereceu só "Editar", e uma renomeação real de campo apareceu na tabela e na ficha do módulo (revertida depois). RLS de `module_records` exercitada pelo console com o JWT do usuário: sem `can_view` num módulo o `select` voltou 0 linhas e o `insert` foi recusado com 403, enquanto o outro módulo do mesmo usuário continuou lendo e gravando normalmente. Com `can_manage_modules` desligada: o tile sumiu, `/modulos` recusou, e as duas RPCs recusaram pelo banco (400), não só pela UI. Os dois módulos de teste foram excluídos no fim — `modules`, `module_fields`, `module_records` e `role_permissions` zerados, sem órfãos, e a tela inicial de volta aos 17 tiles. `tsc`, `oxlint` e `vite build` limpos, com o code splitting por página preservado.
+
+#### Fora de escopo
+
+Campos personalizados em módulos com tela própria (recusa explícita, ver acima); upload de ícone próprio para módulo do usuário (usa o genérico de reserva); `data_type` novo no motor (select com opções, número, arquivo); módulo transacional criado pelo usuário (cabeçalho+itens ou lote — o motor genérico simples, um registro por vez, é o único padrão que M3 constrói, e um usuário final não cria o próprio "Realizar Venda"); workflow configurável (situações, transições, ações automáticas), que é M4 e depende de M3 existir; coluna de `can_manage_modules` na grade de `/permissoes` (concedida por SQL, como `can_manage_branches`).
+
+### Decisão arquitetural: módulo Condicionais (20/08/2026)
+
+Etapa 10. Reaproveita dois padrões já estabelecidos, sem reinventar nenhum: a trava contra devolver/converter mais do que existe de Devolução de venda (soma de movimentos anteriores, `for update`, checada na RPC), e o padrão de cabeçalho+itens sem motor genérico nem de lote de Realizar Venda/Pedidos de venda. O ponto que **não** podia copiar de Pedidos de venda: lá o estoque só sai na conversão (`convert_sale_order_to_sale` chama `create_sale`, que baixa estoque); numa condicional o estoque já saiu na criação (a peça saiu fisicamente da loja), então a conversão em venda **não pode** chamar `create_sale` — baixaria o estoque uma segunda vez. `ConditionalsPage.tsx`/`conditionals.ts` eram mock (`CONDITIONALS` com um registro de exemplo, ações sem `onClick`, `ConditionalStatus` com só quatro valores).
+
+#### Schema
+
+- **`conditionals`** (cabeçalho, `branch_id` — dado operacional, o estoque se move): `contact_id` (validado `kind = 'clientes'` dentro da própria RPC de criação — uma porta só de escrita, mesmo critério já usado em Compras para não duplicar a defesa num gatilho que nenhum outro caminho atravessaria), `code` sequencial por filial, `issue_date`/`due_date`, `status` só `confirmed`/`cancelled` (mesmo enum simples de `sales`/`purchases`/`sale_returns`). **Sem `seller_id`**: quem converte é quem vende — a venda criada na conversão grava `seller_id = auth.uid()` direto, mesma decisão já tomada no PDV ("quem está operando é quem vende"), sem pedir isso na criação da condicional (a peça pode nem ter vendedor definido ainda quando sai da loja).
+- **`conditional_items`**: `product_id`, `quantity`, `unit_price` (herdado do preço de venda do produto no momento do envio — o carrinho da tela pré-preenche com `product.salePrice`, igual a um item de venda, mas a RPC grava o que o payload mandar, mesmo padrão de `create_sale`).
+- **Sem cabeçalho próprio para devolução/conversão, diferente de `sale_returns`**: `conditional_item_returns` (linhas de auditoria simples — `conditional_item_id`, `quantity`, `reason`) e `conditional_item_conversions` (ponte `conditional_item_id` → `sale_id`/`sale_item_id`, já que a venda criada na conversão **é** o cabeçalho daquela operação). A diferença para Devolução de venda é deliberada: lá o cabeçalho existe porque a devolução emite nota fiscal própria e precisa de um código para isso; aqui não há emissão fiscal nenhuma (ver "Fora de escopo"), então uma linha por devolução/conversão de item já basta — inventar um cabeçalho só para "ter code" seria estrutura sem uso.
+- **Só policies de `select`** nas quatro tabelas — nenhuma de `insert`/`update`/`delete` para o cliente direto, só as quatro RPCs (`security definer`) escrevem, mesmo padrão de `sales`/`purchases`/`sale_returns`.
+
+#### Status é sempre calculado, nunca gravado — e o quinto (e sexto) rótulo
+
+Mesmo raciocínio já usado para "vencido" em Financeiro: um status gravado poderia divergir do que os movimentos realmente dizem — aqui isso seria pior, porque devolução parcial cria estados que os quatro rótulos do mock (`"Em aberto" | "Vencida" | "Devolvida" | "Convertida em venda"`) não cobriam sozinhos. Caso real, não extremo: 3 itens devolvidos e 2 convertidos da mesma condicional. `computeConditionalStatus` (`src/lib/repositories/conditionalsRepository.ts`) resolve a partir de `totalSent`/`totalReturned`/`totalConverted` (somados dos itens) e `due_date`:
+
+- Tudo resolvido (`remaining = 0`): `"Convertida em venda"` se 100% convertido, `"Devolvida"` se 100% devolvido, **`"Parcialmente resolvida"`** (o quinto rótulo, novo) se foi uma mistura das duas — é o caso do exemplo acima.
+- Ainda falta resolver algo: `"Em aberto"` (nada resolvido ainda) ou `"Parcialmente resolvida"` (mistura, mas ainda sobra saldo), e qualquer um dos dois vira `"Vencida"` se `due_date` já passou — mesmo espírito de "vencido" em Financeiro, **só um alerta visual**, nunca uma condicional totalmente resolvida (mesma lógica de "baixado" nunca ser "vencido").
+- `"Cancelada"` (sexto rótulo, também novo) quando `conditionals.status = 'cancelled'` — o mock não tinha esse caso porque não existia cancelamento nenhum.
+
+Consequência prática: como `"Cancelar"` só é permitido quando nada foi resolvido, o botão da tela habilita/desabilita direto pelo `status` computado da linha selecionada (`"Em aberto"` ou `"Vencida"`) — nenhuma consulta extra precisa rodar só para saber se pode cancelar.
+
+#### `convert_conditional_to_sale` é irmã de `create_sale`, não consumidora dela
+
+O motivo, por extenso: `convert_sale_order_to_sale` funciona chamando `create_sale` porque em Pedidos de venda o estoque **nunca** saiu antes — sai uma vez só, na conversão. Numa condicional o estoque **já saiu** na criação (`create_conditional` baixa estoque na hora, com o mesmo `for update`/checagem de saldo de `create_sale`). Se a conversão chamasse `create_sale` sem mais nada, o estoque desceria uma segunda vez.
+
+A opção descartada foi dar a `create_sale` um parâmetro para "pular a baixa de estoque". Não foi feita: `create_sale` é chamada por Realizar Venda, pelo PDV (via `create_pos_sale`) e pela conversão de Pedidos de venda, e os três precisam continuar baixando estoque normalmente — um parâmetro para desligar isso é superfície de bug esperando para acontecer num desses três caminhos (bastaria um `payload` mal montado num deles). Em vez disso, `convert_conditional_to_sale` grava `sales`/`sale_items`/`sale_payments` com a mesma forma que `create_sale` já usa, e chama `financial_entries_create_installments` (o núcleo, não a porta pública — mesma razão já documentada em `create_sale`/`create_purchase`/`create_sale_return`: quem já validou `has_permission('condicionais', 'create')` não deveria também precisar de permissão de Financeiro) do mesmo jeito, **mas nunca toca em `products.stock`**. Isso duplica um pedaço da lógica de `create_sale` (a regra por forma de pagamento: dinheiro/pix/débito nasce baixado à vista; crédito/boleto parcela com vencimento a 30 dias; outro é tratado como a prazo, conservador) — é o preço de o estoque já ter saído num momento diferente; mais seguro do que arriscar o contrato de uma função usada por três caminhos que funcionam hoje.
+
+`convert_conditional_to_sale` pede forma de pagamento no próprio payload (a condicional não tinha isso — nada tinha sido cobrado ainda), reaproveita o enum `sale_payment_method` e o `origin_kind = 'venda'`/`origin_id = <sale.id>` de sempre: **não existe** um `origin_kind = 'condicional'` — o lançamento financeiro nasce indistinguível de uma venda comum, exatamente o que "reaproveitando o caminho normal de venda" pede.
+
+#### Trava contra devolver/converter mais do que existe
+
+Mora **na RPC, não numa constraint** (mesmo motivo já documentado em Devolução de venda: a regra soma linhas de fora da tabela). `register_conditional_return` e `convert_conditional_to_sale` fazem a mesma checagem: `select ... from conditional_items ... for update`, soma `conditional_item_returns` + `conditional_item_conversions` daquele item, e recusa (`23514`) se ultrapassar `quantity`. `cancel_conditional` faz o inverso — recusa (mensagem própria, não `23514`) se **qualquer** item já tiver soma > 0, com a mesma trava de `for update` nos itens para serializar contra uma devolução/conversão concorrente.
+
+#### Tela
+
+Cabeçalho+itens feito à mão, mesmo critério de Realizar Venda/Pedidos de venda/Devolução — não motor genérico, não motor de lote. `NewConditionalPage.tsx` (rota `/condicionais/nova`, `MODULE_SUBROUTES`) espelha `SaleOrderFormPage.tsx`: `LookupModal` de cliente (`fetchContactsByKind('clientes', ...)`) + `ProductPickerPanel` + prazo de devolução, sem forma de pagamento (nada foi vendido ainda) nem vendedor (ver acima). `ConditionalResolveModal.tsx` é um componente só para as duas ações "Registrar devolução"/"Converter em venda" (`mode: "return" | "convert"`) — a UX das duas é idêntica (por item: enviado/resolvido/quanto resolver agora, com teto por linha, mesmo padrão de `SaleReturnModal`), só o que acontece ao confirmar muda (RPC diferente, e "converter" também pede forma de pagamento); não precisa de `LookupModal` para escolher a condicional porque ela já é a selecionada na lista.
+
+#### Permissões
+
+`modules.condicionais` já existia no catálogo (criado numa etapa anterior, só com `can_view` para Administrador) — esta etapa preencheu `data_table = 'conditionals'`, `branch_scoped = true`, `layout_variant = 'table-controls'`, e marcou `can_create` para Administrador. **As quatro RPCs de escrita (criar, devolver, converter, cancelar) usam todas `has_permission('condicionais', 'create')`** — não há `can_edit`/`can_delete` mapeado nesta rodada (mesma simplificação que o pedido já antecipava).
+
+#### Testado no navegador
+
+Condicional 0001 criada com 2 itens (Doritos + Arroz, R$43,90) — estoque dos dois baixou na hora (168→167, 49→48), nenhum lançamento em Financeiro, nenhum documento fiscal. Devolvido o Doritos (1 de 1): estoque voltou a 168, status calculado passou para "Parcialmente resolvida". Convertido o Arroz (1 de 1) em venda à vista (dinheiro): venda 0017 criada, lançamento financeiro 031 gerado (`a_receber`, já `baixado`, `origin_kind = 'venda'`, documento "Venda 0017") — e **o estoque do Arroz não mudou de novo** (permaneceu 48), confirmando que a conversão não duplica a baixa. Tentativa de devolver mais do que resta (bypass da RPC, itens já 100% resolvidos): recusada com `23514` e a mensagem exata ("já resolvidos 1.000 de 1.000, tentando devolver mais 1.000"). Condicional 0002 criada com 1 item (Café Torrado) e cancelada sem nada resolvido: estoque voltou (29→30), status "Cancelada". Tentativa de cancelar a condicional 0001 (já com itens resolvidos), tanto pelo botão desabilitado quanto por bypass direto da RPC: recusada com a mensagem "Esta condicional já tem itens devolvidos ou convertidos — não pode ser cancelada por inteiro." Sem `can_create` (desligado direto no banco para Administrador): botão "Nova condicional" desabilitado e a RPC `create_conditional` recusada com `42501` chamada direto, bypassando a UI; permissão religada depois. Produtos, tela inicial (17 tiles) e navegação conferidos sem regressão. `tsc -b`, `oxlint` (só os 4 avisos pré-existentes) e `vite build` limpos, code splitting preservado.
+
+#### Fora de escopo
+
+Emissão fiscal de remessa em condicional (Nota Fiscal de Remessa, CFOP 5908/6908) — é uma obrigação legal real no Brasil, mas não foi pedida nesta etapa: **a condicional hoje não emite nenhum documento fiscal, nem de remessa nem de retorno.** Conversão/devolução automática ao vencer o prazo — "Vencida" é só um alerta visual, ninguém age sozinho. Cancelamento parcial de uma condicional já em andamento — recusa, não solução (mesma decisão que Devolução de venda já tomou para "cancelar/editar uma devolução já registrada"). Edição/exclusão de condicional confirmada. `can_edit`/`can_delete` do módulo (não mapeados nesta rodada).
+
+### Decisão arquitetural: estoque negativo configurável (20/08/2026)
+
+Até aqui `create_sale`, `create_conditional` e `adjust_stock_batch` recusavam incondicionalmente qualquer operação que deixasse `products.stock` negativo. Pedido do usuário: dar controle sobre isso, em dois níveis — a filial define o padrão, um produto específico pode sobrescrevê-lo nos dois sentidos (permitir mesmo com a filial bloqueando, ou bloquear mesmo com a filial permitindo).
+
+#### Schema
+
+- `branches.allow_negative_stock boolean not null default false` — padrão da filial, nasce desligado.
+- `products.allow_negative_stock boolean` (nulável, **sem** default) — três estados: `null` = usa o padrão da filial (caso comum, a maioria dos produtos nunca mexe nisso); `true`/`false` sobrescreve a filial nos dois sentidos. A precedência é do produto: só cai para o padrão da filial quando é `null`.
+
+#### `stock_allows_negative`: um núcleo só, chamado dos três lugares
+
+Mesmo raciocínio já registrado para `financial_entries_create_installments` (núcleo chamado por `create_sale`/`create_purchase`/`create_sale_return`): a lógica de precedência produto-sobrescreve-filial não podia ser repetida três vezes, e uma divergência entre as três seria o tipo de bug que só aparece muito depois. `stock_allows_negative(p_branch_id uuid, p_product_id uuid) returns boolean` lê `products.allow_negative_stock`; se não for nulo, devolve ele; senão devolve `branches.allow_negative_stock`. É função **interna, não porta pública** — `revoke execute` de `public`, `anon` **e** `authenticated` (mesmo padrão de `financial_entries_create_installments`, diferente das RPCs públicas como `create_sale`, que mantêm `authenticated`), porque só é chamada de dentro de outras `SECURITY DEFINER`, nunca direto pelo cliente.
+
+Nas três funções (`create_sale`, `create_conditional`, `adjust_stock_batch`) a checagem virou: calcular o saldo resultante (`v_new_stock`) e só recusar se ele for negativo **e** a permissão não cobrir — `if v_new_stock < 0 and not coalesce(stock_allows_negative(v_branch_id, v_product.id), false) then raise exception ...`. O `coalesce` fica do lado de fora da chamada de propósito, mesma regra já documentada no roteiro deste arquivo para checagem imperativa de permissão em plpgsql: se `stock_allows_negative` alguma vez devolver `NULL` (não deveria, mas o produto pode não existir em algum caminho futuro), um `if not stock_allows_negative(...)` sem `coalesce` deixaria a checagem passar em silêncio — `not NULL` é `NULL`, e o `IF` não executa.
+
+#### UI — Filial: primeiro parâmetro real de Configurações
+
+`Filiais` continua sem tela de administração própria (SQL-only, mesma situação de `cash_registers`) — não foi criada uma só por causa deste campo. Em vez disso, o toggle foi para Configurações (`SettingsPanel.tsx`, novo componente `StockPolicySection.tsx`), escopado pela filial ativa (`useAuth().currentBranchId`). É o primeiro parâmetro de verdade na tela — as duas ações "Parâmetros"/"Configurações do sistema" que já existiam continuam decorativas, sem `onClick`. Gated por `can_manage_branches` (a mesma flag que já protege `branches update` na RLS): sem ela o interruptor aparece desabilitado, não escondido — o parâmetro existe, só não pode ser mudado dali. Leitura/escrita via `src/lib/repositories/branchesRepository.ts` (`fetchBranchAllowsNegativeStock`/`updateBranchAllowsNegativeStock`), reaproveitado também por Produtos para mostrar o valor herdado.
+
+#### UI — Produto: `selectField`, a mesma ponte de `lookupField`
+
+`ProductsPage.tsx` ganhou um `<select>` de três opções ("Usar padrão da filial" / "Sempre permitir" / "Sempre bloquear") no formulário. `module_fields` continua sem um `data_type: 'select'` — criar um generalizaria o motor inteiro por causa de um campo (mesma disciplina já registrada para `lookupField`/`mediaField`). Em vez disso, `RegistryFormModal` ganhou `selectField`, uma ponte com a mesma forma de `lookupField`, e `FormField` (`src/components/form/FormField.tsx`) ganhou `type: "select"` com `options` — extensão aditiva, os consumidores existentes (`text`/`date`/`email`/`password`) não mudaram. O atalho de edição rápida do `ProductPickerPanel` (o lápis na lista de produtos de Realizar Venda/Ajuste de estoque/Condicionais) não mostra o campo, mas repassa o valor atual do produto ao salvar — mesmo cuidado já tomado ali com `taxGroupId`, para a edição rápida não resetar um campo que ela não expõe.
+
+A ficha do produto mostra o **valor efetivo**, não só o gravado: quando o produto está em `null`, a linha "Estoque negativo" busca o padrão da filial ativa (mesmo repositório do item acima) e mostra "Bloqueado (padrão da filial)"/"Permitido (padrão da filial)" — sem isso, "usar padrão da filial" ficaria abstrato demais para quem está cadastrando. Com valor explícito, mostra "(sempre permitido neste produto)"/"(sempre bloqueado neste produto)".
+
+#### Aviso não bloqueante: avaliado, não construído nesta rodada
+
+O padrão já existe no PDV para falha de emissão fiscal (`fiscalWarning`, separado do erro que bloqueia a operação — ver a decisão de NFC-e). A ideia foi considerada para "venda aceita porque o produto/filial permite negativo → aviso âmbar não bloqueante", mas **não foi construída**: exigiria mudar a forma de retorno de três RPCs com contratos diferentes hoje (`create_sale`/`create_conditional` devolvem a linha criada, `adjust_stock_batch` devolve `void`) e tocar três telas diferentes (`SalePage.tsx`, `NewConditionalPage.tsx`, `StockAdjustPage.tsx`) — desproporcional a este passo, que era sobre a regra de negócio, não sobre a superfície de aviso. Candidato real para uma rodada futura, não descartado por não fazer sentido.
+
+#### Testado
+
+Como o Browser pane desta sessão não alcança o servidor de outra sessão em paralelo (mesma pegadinha de porta já documentada — `preview_logs` apontou a URL real, `http://localhost:5175`, diferente da porta que a ferramenta reservou), a matriz de precedência (filial ligada/desligada × produto `null`/`true`/`false`, 4 cenários) foi testada direto contra o banco, simulando a sessão do usuário de testes via `request.jwt.claims` (mesmo efeito de `auth.uid()` que uma chamada real via PostgREST teria) — **12/12 cenários corretos** nas três RPCs (`create_sale`, `create_conditional`, `adjust_stock_batch`): filial desligada + produto `null` recusa; filial ligada + produto `null` aceita e o saldo fica negativo; filial ligada + produto `false` recusa (precedência do produto sobre a filial permitindo); filial desligada + produto `true` aceita (precedência do produto sobre a filial bloqueando). Os registros de teste (vendas, condicional, ajustes de estoque) foram apagados depois, e produtos/filial voltaram ao estado anterior. No navegador (login real com a conta de testes): o toggle de Configurações liga/desliga e persiste em `branches` após reload; o `<select>` de Produtos salva e recarrega o valor certo; a ficha mostra "Bloqueado (padrão da filial)" com o produto em `null` e muda para "Permitido (sempre permitido neste produto)" ao trocar para "Sempre permitir", confirmando o valor efetivo. `tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos.
+
+#### Fora de escopo
+
+Tela de administração de Filiais (continua SQL-only). Alerta/notificação centralizada de "produtos com estoque negativo" — candidato a um bloco em Relatórios (etapa 11), não desta etapa. Reverter automaticamente para positivo ou bloquear novas saídas enquanto já está negativo até alguém repor — não pedido; a regra é só permitir ou não permitir ficar negativo.
+
+### Decisão arquitetural: módulo Relatórios (etapa 11) (20/08/2026)
+
+Etapa 11 do plano, e a primeira que não escreve nada em lugar nenhum — os 12 blocos só leem dado que já existe em Vendas, Compras, Financeiro, Notas Emitidas e Produtos. Antes desta etapa `modules.relatorios` era só um tile decorativo (`path: null`, decisão registrada na M2: "o tile existe e não leva a lugar nenhum") — não havia mock, não havia tela, não havia nada para adaptar.
+
+#### Os dois blocos que ficaram de fora, e por quê
+
+O usuário desenhou 14 blocos; dois não entraram nesta rodada por decisão explícita, porque não têm fonte de dado nenhuma no sistema hoje:
+
+- **"Saldo bancário"** — não existe conceito de conta bancária em lugar nenhum do schema. `cash_registers`/`cash_sessions` são caixa físico/PDV, não conta corrente.
+- **"Créditos tributários"** — apuração de crédito/débito de ICMS-PIS-COFINS não existe. `tax_rules`/`tax_groups` só guardam o código que vai para a nota (CFOP/CST/alíquota de saída), não escrituração fiscal (entrada × saída, apuração por período). Construir isso seria inventar um módulo de apuração fiscal inteiro, não um relatório sobre dado existente.
+
+Nenhum dos dois virou dado fake para "preencher a grade" — a grade tem 12 blocos, não 14, e é isso mesmo.
+
+#### Views SQL — e a correção que a instrução original tinha errada
+
+Para os relatórios que agregam de verdade (soma/agrupamento), a leitura é uma **view Postgres**, não uma consulta crua somada no cliente. O motivo declarado desde o início é permissão, não performance: uma view deveria herdar a RLS das tabelas de origem, para que a segunda camada de permissão (ver abaixo) funcionasse sem duplicar `has_permission` em SQL fora de lugar nenhum.
+
+**Isso só é verdade com `security_invoker = true` explícito em cada view — sem essa opção, é o contrário do que se pretende.** Confirmado direto no banco antes de escrever a primeira view:
+
+```sql
+select rolname, rolbypassrls from pg_roles where rolname in ('postgres','anon','authenticated');
+-- postgres | true   (BYPASSRLS)
+-- anon     | false
+-- authenticated | false
+```
+
+`postgres` (dono de toda tabela e de toda view criada por migration) tem `rolbypassrls = true`. No Postgres, uma view sem `security_invoker` roda a checagem de RLS das tabelas de origem com os privilégios do **dono da view**, não de quem consulta — é o mesmo raciocínio de uma função `security definer`, mesmo sem a palavra "definer" em lugar nenhum da sintaxe. Uma view comum aqui devolveria **todas as linhas de todas as filiais para qualquer usuário autenticado**, ignorando `has_permission`/`has_branch_access` por completo — o oposto do que a etapa pede, e um buraco de segurança pior do que nenhuma view existir. `security_invoker = true` (sintaxe de Postgres 15+; o projeto roda Postgres 17) faz a view rodar com os privilégios de quem consulta, herdando a RLS de verdade. Nenhuma view desta etapa usa `security definer` — a instrução original ("view sem security definer herda a RLS automaticamente") estava descrevendo o comportamento certo pelo motivo errado; documentado aqui para a próxima sessão que for criar uma view não repetir o mesmo engano.
+
+Verificado depois de criar: `select relname, reloptions from pg_class where relname like 'report_%'` devolve `security_invoker=true` nas cinco.
+
+#### As cinco views, grão por dia (não só por entidade)
+
+`src/lib/repositories/reportsRepository.ts` / migration `create_reports_views`:
+
+| View | Cobre | Grão |
+| --- | --- | --- |
+| `report_sales_by_day` | Vendas (Total Faturado) **e** Vendas por período | `branch_id, sale_date` |
+| `report_sales_by_contact_day` | Vendas por cliente | `branch_id, contact_id, sale_date` |
+| `report_sale_items_by_product_day` | Vendas por produto **e** Produtos mais vendidos | `branch_id, product_id, sale_date` |
+| `report_purchases_by_contact_day` | Compras por fornecedor | `branch_id, contact_id, purchase_date` |
+| `report_purchase_items_by_product_day` | Produtos comprados **e** Custo médio de compras | `branch_id, product_id, purchase_date` |
+
+Três pares de blocos reaproveitam a mesma view (mesma fonte, ordenação/ênfase diferente no cliente) — não são seis views, são cinco. `sales`/`purchases` filtram `status = 'confirmed'` (venda/compra cancelada não é faturamento).
+
+**Por que o grão é por dia, e não só por entidade final**: uma view não aceita parâmetro (isso seria uma função, e uma função traria de volta a pergunta de que privilégio ela roda). Os relatórios precisam de filtro de intervalo de data arbitrário, escolhido na tela — sem uma coluna de data na própria view, não haveria como aplicar `.gte()/.lte()` antes de agregar por cliente/produto. A solução foi agregar em dois passos: a view agrupa por entidade **e dia** no banco (poucas linhas — um dia inteiro de vendas de um produto vira uma linha, não uma por item), o repositório aplica `.gte()/.lte()` na data e faz o agrupamento final por entidade **em JavaScript, sobre o resultado já agregado e já filtrado pela RLS** — não é "trazer cru e somar", é uma segunda rodada de soma sobre um resultado pequeno que o banco já reduziu. `fetchPurchaseItemsByProduct` calcula o custo médio ponderado (`Σ(unit_cost×quantity) / Σquantity` sobre as linhas do intervalo) em vez de uma média de médias diárias, que seria matematicamente errada.
+
+**Dois relatórios não usam view nenhuma, de propósito**: "Notas fiscais emitidas" (filtro por modelo/status + ordenação, sem soma/agrupamento) e "Estoque abaixo do mínimo" (filtro simples) leem direto de `fiscal_documents`/`products` — a mesma RLS de sempre já basta, e criar uma view sem agregação nenhuma só para "todo relatório tem view" seria a etapa se distorcendo por simetria em vez de por necessidade. Os dois relatórios de Financeiro (ver abaixo) também não usam view — reaproveitam o cálculo client-side que o Financeiro já faz.
+
+#### A permissão em duas camadas, com exemplo concreto de cada uma
+
+**Camada 1 — `has_permission('relatorios', 'view')`**: decide se a pessoa abre `/relatorios` (mesmo portão de sempre, `access_gate = 'permission'`, aplicado pelo `ModuleRoute` — ver a decisão do catálogo). Sem isso, nem o tile aparece na tela inicial nem a rota abre.
+
+**Camada 2 — a permissão do módulo de **origem** de cada bloco**, imposta pela RLS das tabelas por trás da view (herdada de verdade graças ao `security_invoker`, ver acima), não por nenhuma checagem escrita nesta etapa:
+
+- Um Operador com `relatorios/view` mas **sem** `financeiro/view` abre a tela normalmente, todos os 12 blocos aparecem na grade, os blocos de Vendas/Compras/Estoque funcionam — mas "Financeiro (fluxo de caixa)" e "Contas a pagar/receber" vêm **vazios**, porque `useFinancialEntriesData` (a mesma consulta que `/financeiro` já usa) devolve zero linhas sob a RLS de `financial_entries`. `ReportsPage.tsx` checa `hasPermission(sourceModuleId, 'view')` só para mostrar um aviso amigável ("Você não tem permissão de visualização em 'financeiro'...") — quem barra de verdade é a RLS, o aviso é conforto de UX por cima de uma restrição que já existia sem ele.
+- O mesmo vale para os outros módulos de origem: "Vendas por produto"/"Vendas por cliente"/"Vendas (Total Faturado)"/"Vendas por período"/"Produtos mais vendidos" dependem de `realizar-venda/view` (é essa policy que governa `sales`/`sale_items`, não uma permissão "vendas" genérica — nem PDV nem Pedidos de venda são o portão aqui); "Compras por fornecedor"/"Produtos comprados"/"Custo médio de compras" dependem de `compras/view`; "Notas fiscais emitidas" depende de `notas-emitidas/view`; "Estoque abaixo do mínimo" depende de `produtos/view`.
+- **Camada 2 tem uma segunda dobra, mais sutil, dentro de "Vendas por cliente"/"Vendas por produto"**: a linha da venda (de `sales`) é governada por `realizar-venda/view`, mas o **nome** do cliente/produto vem de um `left join` para `contacts`/`products`, cada um com a própria RLS (`clientes-fornecedores/view`, `produtos/view`). Um usuário com `realizar-venda/view` mas sem `clientes-fornecedores/view` vê a linha da venda (ela não desaparece — `left join` para uma tabela sem permissão devolve `null`, não filtra a linha), só que com "Cliente sem permissão de leitura" no lugar do nome. Documentado aqui porque não é óbvio de só olhar a tela: **duas permissões diferentes** decidem o que aparece na mesma linha.
+- **Testado invertendo `financeiro/can_view` do Administrador direto no banco**: com a permissão desligada, "Financeiro (fluxo de caixa)" voltou zerado (Entrou/Saiu/Saldo em R$ 0,00, tabela vazia) com o aviso na tela; "Vendas por produto" continuou respondendo normal (315,00/215,60/79,60, mesmos números de antes) — prova de que as duas camadas são independentes: perder o acesso a um módulo de origem não derruba os outros blocos. Religado depois.
+- **Testado desligando `relatorios/can_view`**: o tile "Relatórios" sumiu da tela inicial (16 → 15 tiles) e `/relatorios` direto na URL devolveu "Você não tem permissão para acessar este módulo." — camada 1 funcionando antes mesmo de chegar em qualquer bloco. Religado depois.
+
+#### Financeiro: reaproveitado, não reinventado
+
+`computeCashFlowTotals` (`src/features/finance/finance.ts`) foi **extraída** do cálculo que já existia inline em `FinancePage.tsx` (aba "Baixados": Entrou/Saiu/Saldo por `type`) — as duas telas chamam a mesma função agora, `FinancePage.tsx` sobre a aba Baixados, `ReportsPage.tsx` sobre o intervalo de data escolhido. "Contas a pagar/receber" reaproveita o mesmo padrão de `.filter().reduce()` que a aba "A pagar"/"A receber" do Financeiro já fazia, sobre os mesmos dados de `useFinancialEntriesData` (a página de Relatórios não reconsulta `financial_entries` por conta própria — usa o hook que o Financeiro já usa). Testado que os dois números batem: "Baixados" no Financeiro e "Financeiro (fluxo de caixa)" em Relatórios mostraram exatamente 449,64 / 52,50 / 397,14 (Entrou/Saiu/Saldo) para o mês corrente.
+
+#### Coluna nova: `products.minimum_stock`
+
+`numeric`, nulável — **produto sem mínimo definido nunca aparece** em "Estoque abaixo do mínimo" (ausência não vira `0`, que dispararia todo produto sem esse campo preenchido). Campo novo em `module_fields` (`field_key: 'minimum_stock'`, `data_type: 'text'`, mesma convenção de todo campo numérico no motor genérico — conversão manual no submit, ver `toOptionalNumber` em `products.ts`) — aparece no formulário de criação/edição de Produtos e na ficha, sem tela nova nem código de formulário novo (o motor genérico já sabia fazer isso; só faltava a coluna e a linha de metadado). `ProductsPage.tsx` precisou de um ajuste manual nos dois blocos de `initialValues` (editar/clonar) — o mesmo padrão já documentado no roteiro item 1, campo numérico não é automático em lugar nenhum dessa tela.
+
+Testado: Café Torrado 500g (saldo 30) recebeu `minimum_stock = 50` pela tela → apareceu em "Estoque abaixo do mínimo" (30/50); os outros dois produtos, sem o campo preenchido, não apareceram.
+
+#### Tela: grade + detalhe, sem motor genérico nem de lote
+
+`src/features/reports/` — `ReportsPage.tsx` (bespoke, como Realizar Venda/Financeiro/Controle de Caixa: não é CRUD de uma tabela, é apresentação com filtro e drill-down), `reports.ts` (`ReportDefinition[]` — id/rótulo/ícone/`filterKind`/`sourceModuleId`, os 12 blocos descritos como dado, não como 12 componentes quase idênticos), `reportIcons.tsx` (4 ícones novos que não existiam em `home/icons.tsx`), `ReportsPage.css`.
+
+- **Nível 1** (grade): reaproveita `ModuleTile`/`ModuleTile.css` de `src/features/home/components/` **sem** passar pelo `HomeModule`/`useModuleOrder`/catálogo — os 12 blocos não são módulos do catálogo (sem linha em `modules`, sem rota própria, sem reordenação por arraste), são estado local da página (`activeId`). O grid CSS (`.reports-grid`) foi **copiado**, não importado, de `OriginalLayout.css` — importar traria regras da tela inicial que não se aplicam aqui.
+- **Nível 2** (detalhe): `RegistryLayout variant="single"` + `RegistryTable` com o slot `summary` já existente (mesmo usado por Financeiro/Controle de Caixa) — nenhum componente novo no motor de registro, só reaproveitamento.
+- **Intervalo padrão de data, por `filterKind`** (`defaultRangeFor` em `reports.ts`):
+  - `"period"` (Vendas Total Faturado, Vendas por período, Financeiro fluxo de caixa): **mês corrente até hoje** — histórico inteiro sem filtro ficaria pesado e ilegível, e "este mês" é a pergunta mais comum para um relatório de período.
+  - `"entity"` (por cliente/produto/fornecedor: Vendas por cliente/produto, Compras por fornecedor, Produtos comprados, Custo médio de compras, Produtos mais vendidos): **últimos 90 dias** — mais largo que "period" de propósito (ranking de clientes/produtos costuma querer uma janela maior que um mês), mas ainda um intervalo real, não "todo o histórico" só porque o ambiente de teste tem poucas linhas hoje.
+  - `"status"` (Notas fiscais emitidas): sem filtro de data — filtra por modelo/status, não por período.
+  - `"none"` (Contas a pagar/receber, Estoque abaixo do mínimo): sem filtro nenhum — são fotografias do estado atual (o que está em aberto agora, o que está abaixo do mínimo agora), não uma série no tempo.
+- Ícones novos (`reportIcons.tsx`): `CalendarIcon` (Vendas por período), `AverageCostIcon` (Custo médio de compras), `TopSellerIcon` (Produtos mais vendidos), `LowStockIcon` (Estoque abaixo do mínimo) — os outros 8 blocos reaproveitam ícones já existentes em `home/icons.tsx` (`SaleHandIcon`, `ClientsIcon`, `ProductsIcon`, `PurchasesIcon`, `FinanceIcon`, `InvoicesIcon`), do mesmo jeito que módulos oficiais já compartilham ícone quando o conceito é próximo.
+
+#### Testado no navegador
+
+Logado com a conta de testes: os 12 blocos abrindo, cada um com filtro (data ou modelo/status, ou nenhum, conforme `filterKind`) + tabela + resumo. **Oito dos doze conferidos contra consulta manual no banco** (mais que os 3 mínimos pedidos, porque as views novas eram o risco real da etapa): Vendas por produto (610,20 em 27 itens — Doritos 315,00/18, Arroz 215,60/5, Café 79,60/4, `SUM(sale_items.total_amount) GROUP BY product_id` batendo linha a linha), Vendas por cliente (331,60 + 148,60 + 130,00 = 610,20, mesma soma da venda por produto, provando que as duas views nunca divergem no total), Vendas Total Faturado (610,20 em 17 vendas do mês corrente, batendo `SELECT SUM(total_amount) FROM sales WHERE issue_date >= date_trunc('month', ...)`), Produtos mais vendidos (mesma fonte de Vendas por produto, ordenação por quantidade confirmada: 18 > 5 > 4), Compras por fornecedor (117,00 em 3 compras da Distribuidora Alfa), Custo médio de compras (14,00/15,00/22,50 — média ponderada por produto batendo `SUM(unit_cost*quantity)/SUM(quantity)`, não a média ingênua das linhas), Financeiro fluxo de caixa (449,64/52,50/397,14, batendo `SUM` direto em `financial_entries` por tipo/status), Contas a pagar/receber (309,96/86,56, idem), Notas fiscais emitidas (8 notas, 6 autorizadas, batendo `COUNT(*) GROUP BY status`). Estoque abaixo do mínimo testado ponta a ponta (ver seção da coluna nova). Prova da camada 2 e da camada 1 descritas acima, cada uma revertida depois do teste. Regressão: Financeiro (aba Baixados) e Produtos (lista, ficha, formulário de edição) conferidos sem mudança de comportamento — só o número de "Estoque mínimo" novo na ficha/formulário de Produtos, que antes não existia. `tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos.
+
+#### Fora de escopo
+
+"Saldo bancário" e "Créditos tributários" (decisão explícita do usuário, sem fonte de dado — ver acima); exportar relatório em PDF/Excel/CSV (não pedido, nenhum módulo do sistema faz isso hoje); gráficos/visualização (a referência do usuário mostrava só os blocos de entrada, tabela é suficiente para esta etapa); alerta/notificação centralizada e proativa de estoque abaixo do mínimo (o relatório é sob consulta, não um aviso que aparece sozinho — diferente do candidato "alerta de estoque negativo" já citado na etapa de estoque negativo configurável, que é sobre `allow_negative_stock`, um conceito diferente de `minimum_stock`); drill-down de um bloco para dentro de outro módulo (clicar numa linha de "Vendas por cliente" e cair na ficha do cliente, por exemplo — nenhum bloco faz isso, cada um é uma tabela autocontida); filtro de filial (todo relatório usa a filial ativa do usuário, mesmo padrão de todo módulo `branch_scoped`, sem seletor de "ver todas as filiais").
+
+### Decisão arquitetural: workflow de módulos (M4) — duas camadas e `is_facilite_developer` (20/08/2026)
+
+A etapa que M3 deixou nomeada no "fora de escopo": *workflow configurável (situações, transições, ações automáticas), que é M4 e depende de M3 existir*. Um módulo criado pelo usuário passa a ter **estado**, não só campos: cada registro carrega uma situação, e muda de situação por botões que a própria configuração cria na ficha.
+
+#### Por que a atomicidade aqui é mais simples que Devolução/Condicionais
+
+Todo módulo criado pelo usuário guarda os registros na **mesma tabela física** (`module_records`, distinguida por `module_id`). Então "escrever num módulo diferente" não é escrita entre tabelas diferentes: é um `update` em outra linha da mesma tabela, filtrada por outro `module_id`. Isso **não** elimina o risco de negócio (dado errado indo para o lugar errado — é justamente o que a Camada 2 protege), mas elimina o risco de atomicidade multi-tabela que tornou Devolução de venda e Condicionais difíceis. Aqui a transação sempre mexe numa tabela só.
+
+#### As duas camadas — capacidade e permissão são eixos diferentes
+
+| | Camada 1 | Camada 2 |
+| --- | --- | --- |
+| O que é | Situações, transições, e ação que escreve **no próprio registro** | Ação que **lê de** ou **escreve em** um registro de outro módulo genérico |
+| Quem configura | Qualquer `can_manage_modules` (a mesma flag de M3) | Só `profiles.is_facilite_developer` |
+| Onde vale | Só `storage_kind = 'generic'` (mesma fronteira que M3 traçou para campos) | idem |
+
+O pedido do usuário foi explícito sobre o risco: alguém que sabe montar um módulo **não** deveria conseguir configurar uma transição que lê ou escreve noutro módulo — é fácil quebrar o sistema de um jeito irreversível (escrever no registro errado, apontar para o módulo errado) sem entender o alcance. Camada 1 continua completa para essa pessoa; Camada 2 **nem aparece como opção** na tela, não aparece desabilitada com um cadeado (não se anuncia uma capacidade que a pessoa nunca vai poder usar).
+
+#### O modelo de confiança: configurar ≠ executar
+
+**A permissão que importa em tempo de execução é a de quem configurou a automação, não a de quem aciona a transição.** Um usuário comum, sem nenhum acesso ao módulo B, pode disparar uma transição no módulo A que escreve no módulo B — porque foi um desenvolvedor do Facilite, com o julgamento e o contexto para isso, quem decidiu que essa automação deveria existir.
+
+Mesmo princípio já usado em `create_pos_sale` chamando o núcleo de `create_sale` sem exigir a permissão de quem só opera o caixa: a confiança foi depositada uma vez, na configuração, não repetida a cada disparo. Por isso `transition_module_record` valida `has_permission(módulo A, 'edit')` + `has_branch_access` de quem chama, e **não** checa `has_facilite_developer_access()` — essa checagem mora só nas RPCs/triggers que gravam a configuração.
+
+**Provado no navegador**: a automação foi configurada com a flag ligada, a flag foi desligada, e a transição continuou funcionando — mudando os registros dos dois módulos com o **mesmo `updated_at` ao microssegundo** (prova da transação única).
+
+#### `is_facilite_developer` não é RBAC do cliente
+
+`profiles.is_facilite_developer boolean not null default false` — **não** `roles`. É característica da **pessoa**, não do papel que ela ocupa numa empresa cliente: um papel é, por natureza, algo que o Administrador do cliente configura, e isto não deveria estar ao alcance dele. Mesmo espírito de atrito deliberado já usado em Filiais e `cash_registers`: **SQL-only, sem UI, de propósito**.
+
+- `has_facilite_developer_access()` — mesmo formato de `can_manage_modules()` (e a mesma armadilha: devolve `NULL` sem perfil, então toda checagem imperativa usa `coalesce(..., false)` **por fora**).
+- **A trava contra auto-promoção**: a policy de `update` de `profiles` já permitia editar a própria linha, então sem trava qualquer um ligaria a flag em si mesmo. O trigger `prevent_role_escalation` foi estendido: se `is_facilite_developer` muda **e `auth.role()` não é nulo**, recusa. `auth.role()` só é nulo numa conexão SQL direta ao banco — nem o Administrador, nem a Edge Function com `service_role`, passam. Testado pelo console: `is_facilite_developer só pode ser alterado por SQL direto no banco.`
+
+#### Schema
+
+- **`module_records.status text null`** — guarda o **`code`** da situação, não o id (o code é estável; o rótulo muda livremente). Atribuído pelo trigger `module_records_set_initial_status` **incondicionalmente** na criação: o cliente não escolhe em que situação um registro nasce. Módulo sem workflow fica com `status` nulo e nada muda para ele.
+  - **Sem FK composta** `(module_id, status) → module_situations(module_id, code)`, de propósito: ela teria que ser `NO ACTION` (um cascade apagaria o registro inteiro por causa de uma situação removida), e aí excluir um módulo quebraria — o cascade de `modules` atinge `module_records` e `module_situations` sem ordem garantida. A trava real está na RPC de excluir situação, com mensagem clara, mesmo padrão de `delete_user_module`.
+- **`module_situations`** (`module_id`, `code` imutável, `label`, `sort_order`, `is_initial`) — `unique (module_id, code)` e um índice único parcial garantindo **uma só inicial por módulo**. A primeira situação criada vira a inicial automaticamente (workflow sem ponto de partida não conseguiria carimbar um registro novo), e a inicial não pode ser desmarcada — só substituída.
+- **`module_transitions`** (`module_id`, `from_situation_id`, `to_situation_id`, `label`, `sort_order`) — `unique (from, to)` e `check (from <> to)`. Depois de criada, só `label`/`sort_order` mudam: trocar o par viraria o sentido das ações penduradas nela sem que elas soubessem.
+- **`module_transition_actions`** — **uma tabela com colunas nulas conforme o tipo**, não uma satélite por forma de ação (a escolha era livre; esta é a justificativa). As três formas compartilham quase tudo, e o que uma satélite compraria — tornar a combinação ilegal irrepresentável — os CHECK compram sem custar três joins na RPC de execução nem três conjuntos de policies:
+
+  | Forma | `target_kind` | `value_kind` | Camada |
+  | --- | --- | --- | --- |
+  | Escreve no próprio registro | `self` | `literal`/`now`/`current_user` | 1 |
+  | Lê do relacionado, grava no próprio | `self` | `related_field` | 2 |
+  | Escreve no relacionado | `related_record` | `literal`/`now`/`current_user` | 2 |
+
+  Os CHECK são declarativos e simétricos: `via_reference_field_key` existe **exatamente quando** a ação atravessa uma referência; `source_field_key` **exatamente quando** `value_kind = 'related_field'`; `value` **exatamente quando** `literal`. Mais um: **`related_record` + `related_field` na mesma linha é proibido** — exigiria duas colunas `via` (o campo de leitura e o de escrita podem ser diferentes) e é vizinho de referência multi-hop, que está fora de escopo. Uma coluna `via` só pode significar uma coisa.
+
+- **`module_fields.reference_module_id`** — quando preenchido, o valor do campo (dentro de `data`) é um `module_records.id` de outro módulo genérico.
+  - **É `text`, não `uuid`** como o pedido dizia: `modules.id` é o slug do módulo (`'produtos'`, `'chamados'`), então a coluna acompanha o tipo da chave que referencia.
+  - **A checagem mora num trigger (`module_fields_guard_reference`), não numa RPC nova.** Motivo: a policy de `module_fields` já aceita `can_manage_modules()` gravando direto pelo PostgREST desde M3, e é esse o caminho que o construtor usa. Uma RPC protegeria só o caminho novo e deixaria o antigo aberto — o trigger cobre os dois, que é o ponto de a checagem não ser "só uma sugestão de UI". O trigger também valida que os dois módulos são genéricos e que o campo não referencia o próprio módulo.
+  - **Ponto em que o pedido se contradizia, e como foi resolvido**: o item 2 dizia que definir um campo de referência é Camada 1 ("é só uma relação de apontamento, não executa nada sozinha"), mas os itens 4 e 5 diziam que `reference_module_id` é gated por `has_facilite_developer_access()` e que o controle de apontar um campo para outro módulo só aparece para desenvolvedor. Foi implementada a **leitura de maioria (itens 4 e 5): gravar `reference_module_id` exige desenvolvedor**, porque é a única que mantém UI e banco coerentes. Se a intenção for a outra, é uma linha: tirar a checagem do trigger e passar `referenceChoices` no `ModuleBuilderPage` sem depender da flag.
+
+- **RLS**: só policy de `select` nas três tabelas de workflow (`has_permission(module_id, 'view')`; a de ações resolve o módulo via `module_transitions`). **Nenhuma policy de escrita** — quem grava é sempre uma RPC `security definer`, que é onde moram as checagens que uma policy não expressa. Consequência aceita e documentada: quem tem `can_manage_modules` mas não `view` no módulo não consegue configurar o workflow dele (na prática não acontece — `create_user_module` concede as quatro permissões a quem cria).
+
+#### `transition_module_record(p_record_id, p_to_situation_id)`
+
+`security definer`. Valida permissão de quem aciona (só no módulo da transição), confirma que a transição é permitida **a partir da situação atual**, atualiza `status`, e roda as ações em ordem. Detalhes que valem lembrar:
+
+- **`status` nulo = situação inicial.** Registro criado antes de o módulo ganhar workflow é tratado como estando na inicial — e a mesma regra vale no front (`useModuleWorkflow.resolveCode`), senão o botão apareceria na tela e o banco recusaria.
+- **A escrita é merge não-destrutivo** (`data = data || jsonb_build_object(...)`), o mesmo que `genericModuleRepository.ts` já fazia: nunca sobrescreve `data` inteiro, para não apagar chaves de campos removidos que continuam guardadas de propósito.
+- **`for update` só quando vai escrever** no registro relacionado; leitura não segura a linha do outro módulo.
+- **Uma ação que falha derruba a transição inteira** — decisão tomada e confirmada no navegador. "Meio migrado" é pior que "não migrado", mesmo raciocínio de toda RPC atômica deste projeto. Testado: com o registro relacionado excluído, a transição falhou com *"A referência de "cliente" aponta para um registro que não existe mais em "clientes-teste-m4"."* e **nem as ações de Camada 1 que rodariam antes dela persistiram** — o registro continuou em "Aberto", com `resolvido_em` e `resolvido_por` vazios.
+- **`now` respeita o fuso de quem usa o sistema**: o banco roda em UTC, e uma transição às 22h em São Paulo carimbaria o dia seguinte. Usa `timezone('America/Sao_Paulo', now())`, e formata `YYYY-MM-DD` quando o campo de destino é `date` (o motor usa `<input type="date">`, que só entende esse formato) ou carimbo completo nos demais.
+- **`current_user` grava o nome, não o uuid**: o campo é texto e aparece na ficha; um uuid a deixaria ilegível. Se um dia existir `data_type` de referência a usuário, isto passa a gravar o id.
+- **Campo de referência não é destino de escrita** — gravar por cima dele quebraria o apontamento que outras ações usam. Recusado na RPC de configuração e escondido da lista de destinos na tela.
+
+#### A trava que faz a máquina de estados ser real
+
+Sem ela, a policy de `update` de `module_records` (que permite qualquer coluna a quem tem `edit`) deixaria um cliente adulterado escrever `status` direto, e a checagem de "essa transição é permitida a partir da situação atual" viraria decoração. O trigger `module_records_guard_status` recusa qualquer mudança de `status` que não venha com o sinal `facilite.workflow_transition` ligado — e `transition_module_record` liga esse sinal pelo tempo exato do seu próprio `update`. Testado pelo console: `A situação do registro só muda por uma transição do módulo.`
+
+#### Tela
+
+- **`/modulos`**: seção "Situações e transições" abaixo da tabela de campos, só quando `fieldEditingCapabilityFor()` devolve `full` (ou seja, só módulo genérico — mesma fronteira de M3, e a mesma que `assert_module_workflow_editable` impõe no banco). Cada ação aparece **descrita em português** ("Preenche "Cidade do cliente" com "Cidade" de Clientes teste M4 (via "Cliente")"), com selo `OUTRO MÓDULO` nas de Camada 2: um `target_kind` e um `value_kind` lado a lado numa tabela não dizem nada a quem vai conferir se a automação está certa — e conferir é justamente o que a Camada 2 exige.
+- **Camada 2 escondida, não desabilitada**: sem a flag, `referenceChoices`/`references` chegam vazios aos formulários e as opções simplesmente não existem. Confirmado no navegador: sem a flag, "O que a ação faz" tem **uma** opção e "Valor" tem **três**; com a flag, duas e quatro.
+- **Remover uma ação exige só `can_manage_modules`**, inclusive as de Camada 2. Remover uma automação nunca escreve dado em lugar nenhum — o risco que a flag protege é configurar uma escrita cruzada, não desfazê-la —, e `delete_module_transition` já leva as ações junto de qualquer forma; exigir desenvolvedor só ali criaria assimetria sem ganho.
+- **`GenericModulePage`**: a ficha ganha "Situação" como primeiro item, e os botões de transição disponíveis a partir dela entram entre "Editar" e "Excluir". **A existência de ação de Camada 2 por trás de uma transição é invisível para quem apenas usa o módulo** — ela vê "Marcar como resolvido", não sabe nem precisa saber que aquilo também mexeu no módulo B.
+- **Campo de referência vira `<select>` de registros do módulo apontado** (`useModuleReferences`), e a tabela/ficha mostram o rótulo do registro no lugar do uuid. Sem isso o formulário estaria pedindo que alguém colasse um uuid à mão. O rótulo de cada opção é o primeiro campo com `show_in_table` do módulo referenciado — tudo sai de metadados. Quem decide o que entra na lista continua sendo a RLS: quem não pode ver o módulo referenciado recebe lista vazia.
+- **`STATUS_KEY = "__status"`** no repositório genérico: o prefixo de dois underscores não é enfeite — `module_field_key` nunca deixa underscore na ponta, então nenhum campo do usuário (nem um chamado "Status") consegue gerar essa chave e disputar o lugar dela.
+
+#### `delete_user_module` mudou junto
+
+Passa a apagar `module_transition_actions`, `module_transitions` e `module_situations` (escritas uma a uma, mesmo motivo de sempre: o que a função apaga precisa estar visível na função), e **recusa** excluir um módulo que ainda é destino de um campo de referência, dizendo **qual** módulo aponta para ele — em vez de deixar vazar o erro cru da FK `restrict`. Testado: `Não dá para excluir: o módulo Chamados teste M4 tem campo(s) apontando para este. Remova a referência antes.`
+
+#### Testado no navegador
+
+Dois módulos de teste relacionados ("Clientes teste M4" e "Chamados teste M4", com campo de referência de um para o outro). **Camada 1 isolada, sem tocar na flag**: situações "Aberto" (inicial automática) e "Resolvido", transição "Marcar como resolvido", ações de `now` e `current_user` — registro nasceu em "Aberto", o botão apareceu na ficha, e a transição gravou `2026-08-20` e `Claude Testes`. **Sem a flag**, o controle de referência não aparecia na edição de campo e o formulário de ação não oferecia nenhuma opção de Camada 2; pelo console, o banco recusou tanto apontar o campo (`Só um desenvolvedor do Facilite pode apontar um campo para outro módulo.`) quanto a auto-promoção. **Com a flag ligada por SQL**, o controle apareceu e as duas ações de Camada 2 foram configuradas. **Com a flag desligada de novo**, um chamado passou de Aberto para Resolvido e os dois módulos mudaram juntos — `cidade_do_cliente` = "Campinas" lido do cliente, e `ultimo_chamado` = "Resolvido pelo suporte" gravado no cliente, com `updated_at` idêntico nas duas linhas. Referência quebrada: rollback completo. Produtos recusou o construtor com a mensagem de M3 e **sem** seção de workflow; Tributações ofereceu só "Editar" campo, coluna Referência em "—" e **sem** seção de workflow; Financeiro e PDV idem. Os dois módulos de teste foram excluídos no fim, sem órfãos em nenhuma das sete tabelas, e `is_facilite_developer` voltou a `false` para todo mundo. `tsc`, `oxlint` e `vite build` limpos, com o code splitting por página preservado.
+
+#### Fora de escopo
+
+Ações que mexem em tabelas que não são `module_records` (criar lançamento financeiro de verdade, ajustar estoque de produto) — mesmo com `is_facilite_developer`, esta etapa é só sobre módulos genéricos escrevendo em módulos genéricos; automação envolvendo módulos oficiais é uma etapa própria. Referência multi-hop (seguir uma referência que leva a outra, em cadeia) — só um salto. Condição além de "de qual situação para qual" nas transições. Histórico/auditoria de transições. **UI para o cliente final habilitar `is_facilite_developer`** em si mesmo ou em qualquer papel — não existe de propósito, e não deveria ser criada "para facilitar" sem essa decisão voltar a ser conversada.
+
 ## Roteiro para criar um novo módulo
 
 Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer módulo novo (Vendas, Compras, Financeiro etc.) deve seguir o mesmo, para não divergir do motor genérico nem do RBAC.
 
-1. **Metadados primeiro**: inserir em `modules`/`module_fields` (e `module_tabs` se tiver abas) antes de qualquer código — `layout_variant`, `data_table`, quais campos aparecem em tabela/ficha/formulário. **A linha de `modules` também é o que cria a rota e o tile**: preencha `path`, `icon_key`, `sort_order`, `show_on_home`, `access_gate` e `branch_scoped` (ver a decisão do catálogo abaixo). Um módulo sobre o motor genérico simples pode parar aqui — sem componente no registro, ele já abre pela `GenericModulePage`; os passos 4 e 5 só são necessários quando a tela precisa de regra própria. Campos numéricos usam `data_type: 'text'` mesmo assim (a engine não converte tipos ainda); a conversão pra número é manual no handler de submit da página, como em `ProductsPage.tsx`.
-2. **Tabela de dados dedicada e tipada** (não JSONB) — com FKs reais, `unique`, índices. Decidir **branch_id ou não**: dado operacional (estoque, preço, movimentação) é isolado por filial; dado cadastral compartilhado (como contatos) não é. Confirme com o usuário se não for óbvio.
+1. **Metadados primeiro**: inserir em `modules`/`module_fields` (e `module_tabs` se tiver abas) antes de qualquer código. **Se o módulo for um cadastro simples sem regra de negócio, considere primeiro criá-lo por `/modulos`** — a tela faz os passos 1 a 3 sozinha (inclusive a permissão de quem criou), e o dado vai para `module_records`; o roteiro abaixo continua valendo para módulos oficiais, que precisam de tabela tipada — `layout_variant`, `data_table`, quais campos aparecem em tabela/ficha/formulário. **A linha de `modules` também é o que cria a rota e o tile**: preencha `path`, `icon_key`, `sort_order`, `show_on_home`, `access_gate` e `branch_scoped` (ver a decisão do catálogo abaixo). Um módulo sobre o motor genérico simples pode parar aqui — sem componente no registro, ele já abre pela `GenericModulePage`; os passos 4 e 5 só são necessários quando a tela precisa de regra própria. Campos numéricos usam `data_type: 'text'` mesmo assim (a engine não converte tipos ainda); a conversão pra número é manual no handler de submit da página, como em `ProductsPage.tsx`.
+2. **Tabela de dados dedicada e tipada** (não JSONB), com `storage_kind = 'table'` — com FKs reais, `unique`, índices. O caminho JSONB (`storage_kind = 'generic'`, dado em `module_records`) é **só** para módulos criados pelo usuário pela tela `/modulos`; um módulo oficial nasce com tabela própria, como sempre. Decidir **branch_id ou não**: dado operacional (estoque, preço, movimentação) é isolado por filial; dado cadastral compartilhado (como contatos) não é. Confirme com o usuário se não for óbvio.
 3. **RLS desde o início, já correta**:
    - Policies de `select`/`insert`/`update`/`delete` **separadas** (nunca `for all`) — `for all` duplica a cobertura do `select` e dispara o aviso "multiple permissive policies" no advisor.
    - `using (has_permission('modulo-id', 'view') and has_branch_access(branch_id))` — só inclua `has_branch_access` se o módulo tiver `branch_id`.
-   - Qualquer função SQL nova precisa de `revoke execute ... from anon` explícito — o Supabase regrante EXECUTE a `anon`/`authenticated`/`service_role` por padrão ao criar a função, e `revoke ... from public` sozinho não basta.
+   - Qualquer função SQL nova precisa de `revoke execute ... from public, anon` — os **dois**: o Supabase regrante EXECUTE a `anon`/`authenticated`/`service_role` por padrão ao criar a função, e nenhum dos dois `revoke` sozinho tira o grant do outro (o advisor `anon_security_definer_function_executable` acusa se faltar).
+   - **Checagem imperativa de permissão dentro de plpgsql precisa de `coalesce` por fora**: `if not coalesce(can_manage_x(), false) then raise ...`. As funções de flag devolvem `NULL` (não `false`) quando não existe perfil correspondente, e `not NULL` faz o `IF` não executar — a permissão passa em silêncio. Em policy de RLS o `NULL` nega e o risco não aparece; em plpgsql ele **falha aberto**. Ver a decisão de M3 abaixo, onde isso foi descoberto num teste.
 4. **Repositório**: implementar `ModuleDataRepository<T>` (`src/lib/repositories/types.ts`), no padrão de `productsRepository.ts` (fábrica recebe `branchId` se o módulo for isolado por filial) ou `contactsRepository.ts` (sem filial). **Se o módulo for de lançamento em lote** (vários itens confirmados juntos, sem editar/excluir depois), use o contrato irmão `ModuleBatchRepository` e o padrão de `stockAdjustmentsRepository.ts` — ver a decisão do motor de lote acima.
 5. **Hook + página** — **só se a tela precisar de regra própria**; sem isso o módulo já funciona pela `GenericModulePage`. Espelhar `useProductsData.ts`/`ProductsPage.tsx` — `useModuleDefinition(moduleId)`, `useAuth().hasPermission`, `RegistryFormModal` para criar/editar, `ConfirmDialog` para excluir. Módulo de lote troca o `RegistryFormModal` pelo `RegistryBatchFormModal` (`layout_variant: 'batch'`), espelhando `StockAdjustPage.tsx`. Depois **registre o componente em `MODULE_COMPONENTS`** (`src/features/modules/moduleComponents.ts`) — é isso, e só isso, que faz o roteador preferir a tela própria ao motor genérico; não há coluna no banco dizendo isso. Registrar a janela com `openWindow({ id, label, path })` — **não precisa passar `icon`**: `openWindow` resolve `modules.icon_key` no registro de ícones sozinho, então o dock fica sincronizado com o tile da tela inicial automaticamente (ver `src/components/openWindows.tsx`). Para o módulo ter ícone próprio, adicione o asset em `src/assets/icons/modules/` e uma entrada em `MODULE_ICONS` (`src/features/modules/moduleIcons.ts`) com a mesma chave de `modules.icon_key` — sem isso ele cai no ícone genérico de reserva, que funciona mas é neutro.
 6. **Se o módulo precisar de imagem** (produto, item etc.), reaproveite `PhotoDropzone` (`src/features/registry-engine/PhotoDropzone.tsx`) — já é genérico, só falta: criar bucket próprio no Storage (não reaproveite `contact-photos`), coluna `*_url` na tabela, policies de `storage.objects` no mesmo padrão de `has_permission`, e ligar via prop `media`/`mediaField`. Sem redimensionamento/limite de tamanho client-side ainda — replicar esse débito técnico é aceitável, mas documente se mudar.

@@ -9,9 +9,11 @@ import { useAuth } from "../auth/AuthContext";
 import { buildDetailFields, buildFormFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
-import type { GenericRow } from "../../lib/repositories/genericModuleRepository";
+import { STATUS_KEY, type GenericRow } from "../../lib/repositories/genericModuleRepository";
 import type { CatalogModule } from "./catalog";
 import { extractErrorMessage, useGenericModuleData } from "./useGenericModuleData";
+import { useModuleReferences } from "./useModuleReferences";
+import { useModuleWorkflow } from "./useModuleWorkflow";
 
 type ModalState = "none" | "new" | "edit";
 
@@ -51,16 +53,26 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
   const {
     rows,
     error: dataError,
+    reload,
     createRow,
     updateRow,
     removeRow,
   } = useGenericModuleData({
+    moduleId: module.id,
+    storageKind: module.storageKind,
     table: definition?.dataTable ?? null,
     fields,
     branchId: currentBranchId,
     branchScoped: module.branchScoped,
-    enabled: canView && Boolean(definition?.dataTable),
+    enabled: canView && (module.storageKind === "generic" || Boolean(definition?.dataTable)),
   });
+
+  /* Workflow e campos de referência só existem no armazenamento genérico:
+     um módulo `table` guarda o dado numa tabela dedicada, que não tem coluna
+     `status` nem chave de referência para `module_records`. */
+  const isGeneric = module.storageKind === "generic";
+  const workflow = useModuleWorkflow(module.id, canView && isGeneric);
+  const references = useModuleReferences(fields, canView && isGeneric);
 
   useEffect(() => {
     if (!module.path) return;
@@ -87,9 +99,51 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
 
   const selected: GenericRow | null = visibleRows.find((row) => row.id === selectedId) ?? null;
 
-  const columns = useMemo(() => buildTableColumns<GenericRow>(fields), [fields]);
-  const detailFields = useMemo(() => buildDetailFields<GenericRow>(fields, selected), [fields, selected]);
+  const columns = useMemo(
+    () => buildTableColumns<GenericRow>(fields, references.labels),
+    [fields, references.labels],
+  );
+
+  /* A situação entra como o primeiro item da ficha, antes dos campos do
+     módulo: é o estado do registro, não mais um dado dele. */
+  const detailFields = useMemo(() => {
+    const base = buildDetailFields<GenericRow>(fields, selected, references.labels);
+    if (!workflow.hasWorkflow) return base;
+    return [
+      {
+        label: "Situação",
+        value: selected
+          ? (workflow.labelForStatus(selected[STATUS_KEY] as string | null) ?? "")
+          : undefined,
+      },
+      ...base,
+    ];
+  }, [fields, selected, references.labels, workflow]);
+
   const formFields = useMemo(() => buildFormFields(fields), [fields]);
+
+  /**
+   * Botões de transição a partir da situação do registro selecionado.
+   *
+   * O que está por trás de cada botão é invisível aqui de propósito: quem usa
+   * o módulo vê "Marcar como resolvido" e mais nada — que aquela transição
+   * também escreva noutro módulo é assunto de quem a configurou.
+   */
+  const transitionActions = useMemo(() => {
+    if (!workflow.hasWorkflow || !selected) return [];
+    return workflow
+      .transitionsFrom(selected[STATUS_KEY] as string | null)
+      .map((transition) => ({
+        id: `transicao-${transition.id}`,
+        label: transition.label,
+        disabled: !canEdit,
+        onClick: () =>
+          run(async () => {
+            await workflow.run(selected.id, transition.toSituationId);
+            await reload();
+          }),
+      }));
+  }, [workflow, selected, canEdit, reload]);
 
   const editInitialValues = useMemo(() => {
     if (!selected) return undefined;
@@ -135,10 +189,12 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
   if (!definition) return message("Carregando módulo...");
   if (!canView) return message("Você não tem permissão para acessar este módulo.");
 
-  /* Um módulo de catálogo sem `data_table` é uma entrada de navegação sem
-     dados próprios (tela mock, tela administrativa). Sem componente e sem
-     tabela não há o que montar — dizer isso é melhor que uma tela vazia. */
-  if (!definition.dataTable) {
+  /* Um módulo `table` sem `data_table` é uma entrada de navegação sem dados
+     próprios (tela mock, tela administrativa). Sem componente e sem tabela
+     não há o que montar — dizer isso é melhor que uma tela vazia. Módulos
+     `generic` nunca caem aqui: o dado deles é resolvido pelo `module_id`
+     em `module_records`, não por um nome de tabela. */
+  if (module.storageKind === "table" && !definition.dataTable) {
     return message(
       "Este módulo ainda não tem tabela de dados configurada (modules.data_table).",
     );
@@ -167,6 +223,7 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
               disabled: !selected || !canEdit,
               onClick: () => setModal("edit"),
             },
+            ...transitionActions,
             {
               id: "excluir",
               label: "Excluir",
@@ -197,6 +254,7 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
         <RegistryFormModal
           title={`Novo registro — ${title}`}
           fields={formFields}
+          referenceOptions={references.options}
           onSubmit={(values) =>
             run(async () => {
               await createRow(values);
@@ -212,6 +270,7 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
           title={`Editar registro — ${title}`}
           fields={formFields}
           initialValues={editInitialValues}
+          referenceOptions={references.options}
           onSubmit={(values) =>
             run(async () => {
               await updateRow(selected.id, values);

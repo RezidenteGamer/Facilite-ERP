@@ -36,6 +36,21 @@ type RegistryFormModalLookupField<TItem> = {
   onSelect: (item: TItem) => void;
 };
 
+/**
+ * Ponte para um `<select>` de opções fixas dentro do formulário genérico —
+ * mesmo papel de `lookupField`/`mediaField`: `module_fields` não tem
+ * `dataType: 'select'` (a engine só distingue `text`/`date` no `<input>`,
+ * ver AGENTS.md), e criar um generalizaria o motor inteiro por causa de um
+ * campo. Usado hoje só pelo estoque negativo do produto (três estados).
+ */
+type RegistryFormModalSelectField = {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  hint?: string;
+  onChange: (value: string) => void;
+};
+
 type RegistryFormModalProps<TItem> = {
   title: string;
   fields: ModuleFieldDefinition[];
@@ -43,6 +58,14 @@ type RegistryFormModalProps<TItem> = {
   submitLabel?: string;
   mediaField?: RegistryFormModalMediaField;
   lookupField?: RegistryFormModalLookupField<TItem>;
+  selectField?: RegistryFormModalSelectField;
+  /**
+   * Opções dos campos de referência (`module_fields.reference_module_id`),
+   * por `accessorKey`. Quando um campo tem lista aqui, ele deixa de ser
+   * `<input>` de texto e vira `<select>` de registros do módulo apontado —
+   * senão o formulário estaria pedindo que alguém colasse um uuid à mão.
+   */
+  referenceOptions?: Record<string, { value: string; label: string }[]>;
   /**
    * Validação além de "preenchido/vazio" — mesmo papel do `validateRow` do
    * motor de lote (`RegistryBatchFormModal`). Devolve mensagens de erro
@@ -66,6 +89,8 @@ export default function RegistryFormModal<TItem = unknown>({
   submitLabel = "Salvar",
   mediaField,
   lookupField,
+  selectField,
+  referenceOptions,
   validate,
   onSubmit,
   onCancel,
@@ -143,18 +168,41 @@ export default function RegistryFormModal<TItem = unknown>({
                 />
               )}
 
-              {fields.map((field) => (
+              {selectField && (
                 <FormField
-                  key={field.accessorKey}
-                  id={`registry-form-${field.accessorKey}`}
-                  label={field.isRequired ? `${field.label} *` : field.label}
-                  type={field.dataType === "date" ? "date" : "text"}
-                  value={values[field.accessorKey] ?? ""}
-                  onChange={(value) =>
-                    setValues((current) => ({ ...current, [field.accessorKey]: value }))
-                  }
+                  id="registry-form-select"
+                  label={selectField.label}
+                  type="select"
+                  options={selectField.options}
+                  value={selectField.value}
+                  onChange={selectField.onChange}
+                  hint={selectField.hint}
                 />
-              ))}
+              )}
+
+              {fields.map((field) => {
+                const options = field.referenceModuleId
+                  ? referenceOptions?.[field.accessorKey]
+                  : undefined;
+
+                return (
+                  <FormField
+                    key={field.accessorKey}
+                    id={`registry-form-${field.accessorKey}`}
+                    label={field.isRequired ? `${field.label} *` : field.label}
+                    type={options ? "select" : field.dataType === "date" ? "date" : "text"}
+                    options={
+                      options
+                        ? [{ value: "", label: "— nenhum —" }, ...options]
+                        : undefined
+                    }
+                    value={values[field.accessorKey] ?? ""}
+                    onChange={(value) =>
+                      setValues((current) => ({ ...current, [field.accessorKey]: value }))
+                    }
+                  />
+                );
+              })}
             </div>
 
             <div className="registry-form-modal__actions">

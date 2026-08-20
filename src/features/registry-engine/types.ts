@@ -1,3 +1,8 @@
+import type { ModuleStorageKind } from "../../lib/repositories/genericModuleRepository";
+
+/** Reexportado para quem já importa os tipos do motor não precisar de dois caminhos. */
+export type { ModuleStorageKind };
+
 export type ModuleFieldDefinition = {
   id: string;
   /** Nome da coluna física na tabela de dados (snake_case). */
@@ -13,6 +18,14 @@ export type ModuleFieldDefinition = {
   tableAlign: "left" | "center" | "right";
   showInDetails: boolean;
   showInForm: boolean;
+  /**
+   * Quando preenchido, o valor deste campo (dentro de `module_records.data`)
+   * é o `id` de um registro de outro módulo genérico — a base tanto para
+   * mostrar dado relacionado quanto para uma ação de transição alcançar "em
+   * qual registro do outro módulo" escrever. Só desenvolvedor do Facilite
+   * define (trigger `module_fields_guard_reference` no banco).
+   */
+  referenceModuleId: string | null;
 };
 
 export type ModuleTabDefinition = {
@@ -26,6 +39,13 @@ export type ModuleDefinition = {
   label: string;
   /** Nulo em módulos de navegação sem dados próprios (telas mock/administrativas). */
   dataTable: string | null;
+  /**
+   * Onde o dado deste módulo mora fisicamente (a coluna
+   * `modules.storage_kind`): `table` = a tabela dedicada de `dataTable`;
+   * `generic` = linhas em `module_records`, com o corpo do registro em jsonb
+   * (o caminho dos módulos criados pelo usuário).
+   */
+  storageKind: ModuleStorageKind;
   /**
    * `three`/`table-controls`/`single` são variações da tela de registro único
    * (criar/editar um por vez, via `RegistryFormModal`). `batch` é a tela de

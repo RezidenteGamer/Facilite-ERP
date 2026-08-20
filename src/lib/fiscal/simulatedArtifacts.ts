@@ -90,7 +90,10 @@ export function buildSimulatedXml(issue: SimulatedIssue): FiscalArtifact {
     <infNFe versao="4.00" Id="NFe${chave}">
       <ide>
         <cUF>${chave.slice(0, 2)}</cUF>
-        <natOp>${escapeXml(payload.natureza_operacao)}</natOp>
+        <natOp>${escapeXml(payload.natureza_operacao)}</natOp>${(payload.notas_referenciadas ?? [])
+          .map((nota) => `
+        <NFref><refNFe>${escapeXml(onlyDigits(nota.chave_nfe))}</refNFe></NFref>`)
+          .join("")}
         <mod>${MODEL_CODES[issue.model]}</mod>
         <serie>${issue.serie}</serie>
         <nNF>${issue.numero}</nNF>

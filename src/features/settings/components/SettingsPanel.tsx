@@ -1,4 +1,5 @@
 import { SearchIcon } from "../../../components/icons";
+import StockPolicySection from "./StockPolicySection";
 import "./SettingsPanel.css";
 
 const ACTIONS = [
@@ -27,6 +28,8 @@ export default function SettingsPanel() {
           </button>
         ))}
       </div>
+
+      <StockPolicySection />
     </div>
   );
 }

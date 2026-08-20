@@ -229,6 +229,23 @@ export type NfePayloadItem = {
   cofins_valor?: number;
 };
 
+/**
+ * Nota referenciada (grupo `ide`/`NFref`, tag XML `refNFe`) — obrigatória na
+ * **nota de devolução**: a NF-e de entrada com `finalidade_emissao: 4` precisa
+ * apontar a chave de acesso da nota original que está sendo devolvida.
+ *
+ * O nome do campo (`notas_referenciadas`, com `chave_nfe` dentro) veio da
+ * tabela completa de campos da Focus NFe
+ * (https://campos.focusnfe.com.br/nfe/NotaFiscalXML.html) — a página de
+ * referência do endpoint (`doc.focusnfe.com.br/reference/emitir_nfe`) **não**
+ * documenta este grupo, exatamente a mesma divisão de documentação já
+ * registrada na etapa F1 para os campos de valor de imposto.
+ */
+export type NfePayloadNotaReferenciada = {
+  /** Chave de acesso de 44 dígitos da nota referenciada (Focus: `chave_nfe`, XML: `refNFe`). */
+  chave_nfe: string;
+};
+
 /** Forma de pagamento (grupo `pag`). Obrigatória na NFC-e. */
 export type NfePayloadPagamento = {
   /** Código da SEFAZ: 01 = dinheiro, 03 = cartão de crédito, 17 = PIX, 90 = sem pagamento. */
@@ -304,6 +321,12 @@ export type NfePayload = {
   valor_cofins?: number;
   /** 0 = por conta do emitente ... 9 = sem frete. */
   modalidade_frete?: number;
+
+  /**
+   * Notas referenciadas (grupo `NFref`). Preenchido só pela nota de devolução
+   * (`finalidade_emissao: 4`), com a chave da nota original.
+   */
+  notas_referenciadas?: NfePayloadNotaReferenciada[];
 
   items: NfePayloadItem[];
   formas_pagamento?: NfePayloadPagamento[];

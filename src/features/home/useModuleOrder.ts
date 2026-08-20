@@ -53,6 +53,7 @@ export function useModuleOrder() {
       canManageUsers: Boolean(profile?.canManageUsers),
       canManagePermissions: Boolean(profile?.canManagePermissions),
       canManageBranches: Boolean(profile?.canManageBranches),
+      canManageModules: Boolean(profile?.canManageModules),
     };
 
     return catalog

@@ -20,6 +20,7 @@ import { FinanceIcon } from "../home/icons";
 import FinanceEntryPlanModal from "./FinanceEntryPlanModal";
 import {
   buildFinanceEntryEditInput,
+  computeCashFlowTotals,
   formatEntryTotal,
   todayIso,
   validateFinanceEntryEditValues,
@@ -154,13 +155,7 @@ export default function FinancePage() {
 
   const summary = useMemo((): RegistrySummaryItem[] => {
     if (isBaixados) {
-      const entrou = visibleEntries
-        .filter((entry) => entry.type === "a_receber")
-        .reduce((sum, entry) => sum + entry.total, 0);
-      const saiu = visibleEntries
-        .filter((entry) => entry.type === "a_pagar")
-        .reduce((sum, entry) => sum + entry.total, 0);
-      const saldo = entrou - saiu;
+      const { entrou, saiu, saldo } = computeCashFlowTotals(visibleEntries);
       return [
         { label: "Entrou", value: formatEntryTotal(entrou), tone: "positive" },
         { label: "Saiu", value: formatEntryTotal(saiu), tone: "negative" },

@@ -24,12 +24,16 @@ export const MODULE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType
   "controle-caixa": lazy(() => import("../cashcontrol/CashControlPage")),
   "devolucao-venda": lazy(() => import("../sales/SaleReturnPage")),
   financeiro: lazy(() => import("../finance/FinancePage")),
+  // O construtor de módulos é ele próprio um módulo do catálogo (gated por
+  // `access_gate = 'manage_modules'`), com tela própria — como /permissoes.
+  modulos: lazy(() => import("../module-builder/ModuleBuilderPage")),
   "notas-emitidas": lazy(() => import("../sales/InvoicesPage")),
   "pedidos-venda": lazy(() => import("../sales/SaleOrdersPage")),
   permissoes: lazy(() => import("../permissions/PermissionsPage")),
   "ponto-de-venda": lazy(() => import("../pos/PosPage")),
   produtos: lazy(() => import("../products/ProductsPage")),
   "realizar-venda": lazy(() => import("../sales/SalePage")),
+  relatorios: lazy(() => import("../reports/ReportsPage")),
   "usuarios-operadores": lazy(() => import("../users/UsersPage")),
 };
 
@@ -57,5 +61,10 @@ export const MODULE_SUBROUTES: ModuleSubroute[] = [
     moduleId: "compras",
     path: "/compras/nova",
     component: lazy(() => import("../purchases/PurchaseFormPage")),
+  },
+  {
+    moduleId: "condicionais",
+    path: "/condicionais/nova",
+    component: lazy(() => import("../conditionals/NewConditionalPage")),
   },
 ];

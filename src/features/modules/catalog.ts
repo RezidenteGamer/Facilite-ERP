@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabaseClient";
+import type { ModuleStorageKind } from "../../lib/repositories/genericModuleRepository";
 
 /**
  * Qual portão decide quem entra num módulo. As telas administrativas
@@ -13,6 +14,7 @@ export type ModuleAccessGate =
   | "manage_users"
   | "manage_permissions"
   | "manage_branches"
+  | "manage_modules"
   | "authenticated";
 
 /** Uma linha do catálogo de navegação (tabela `modules`). */
@@ -26,8 +28,15 @@ export type CatalogModule = {
   sortOrder: number;
   showOnHome: boolean;
   accessGate: ModuleAccessGate;
-  /** Tabela de dados — só o motor genérico precisa dela. */
+  /** Tabela de dados — só o motor genérico precisa dela, e só no caminho `table`. */
   dataTable: string | null;
+  /**
+   * Onde o dado do módulo mora: `table` (a tabela dedicada de `dataTable`) ou
+   * `generic` (linhas em `module_records`). É coluna no banco, e não
+   * convenção de código, porque é uma pergunta sobre onde o dado físico
+   * está — nada no bundle poderia responder por ela.
+   */
+  storageKind: ModuleStorageKind;
   layoutVariant: string;
   /** True = módulo de sistema; false = módulo criado pelo usuário (M3). */
   isLocked: boolean;
@@ -40,12 +49,13 @@ const VALID_GATES: ModuleAccessGate[] = [
   "manage_users",
   "manage_permissions",
   "manage_branches",
+  "manage_modules",
   "authenticated",
 ];
 
 /**
  * Um valor de portão desconhecido vira `permission` — o portão mais restritivo
- * dos cinco (exige uma linha marcada em `role_permissions`). Falhar fechado
+ * dos seis (exige uma linha marcada em `role_permissions`). Falhar fechado
  * aqui é de propósito: o contrário abriria uma tela administrativa por causa
  * de um erro de digitação. Na prática o CHECK da coluna torna isso inalcançável.
  */
@@ -69,7 +79,7 @@ export async function fetchModuleCatalog(): Promise<CatalogModule[]> {
   const { data, error } = await supabase
     .from("modules")
     .select(
-      "id, label, path, icon_key, sort_order, show_on_home, access_gate, data_table, layout_variant, is_locked, branch_scoped",
+      "id, label, path, icon_key, sort_order, show_on_home, access_gate, data_table, storage_kind, layout_variant, is_locked, branch_scoped",
     )
     .order("sort_order", { ascending: true });
 
@@ -84,6 +94,7 @@ export async function fetchModuleCatalog(): Promise<CatalogModule[]> {
     showOnHome: row.show_on_home,
     accessGate: toGate(row.access_gate),
     dataTable: row.data_table,
+    storageKind: row.storage_kind === "generic" ? "generic" : "table",
     layoutVariant: row.layout_variant,
     isLocked: row.is_locked,
     branchScoped: row.branch_scoped,

@@ -1,0 +1,76 @@
+/* Grade de blocos (nível 1) — mesmo arranjo da tela inicial (`.module-grid`
+   em OriginalLayout.css), copiado em vez de importado: Relatórios não é um
+   HomeModule de verdade (não reordena, não vem do catálogo), então puxar o
+   CSS da tela inicial traria regras que não se aplicam aqui. */
+.reports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 30px 16px;
+  max-width: 830px;
+  padding: 24px;
+}
+
+.reports-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+}
+
+.reports-detail__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.reports-detail__back {
+  border: 0;
+  background: none;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.reports-detail__back:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.reports-detail__title {
+  color: var(--white);
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.reports-detail__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  max-width: 480px;
+}
+
+.reports-detail__warning {
+  color: var(--amber, #e0a800);
+  background: rgba(224, 168, 0, 0.12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.reports-detail__error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.reports-detail__loading {
+  color: var(--white);
+  opacity: 0.8;
+  margin: 0;
+}

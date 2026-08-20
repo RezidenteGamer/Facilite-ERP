@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAuth } from "../auth/AuthContext";
 import { fetchModuleCatalog, type CatalogModule } from "./catalog";
 
@@ -9,6 +17,12 @@ type ModuleCatalogValue = {
   status: CatalogStatus;
   error: string | null;
   byId: (id: string) => CatalogModule | undefined;
+  /**
+   * Relê o catálogo. Existe por causa do construtor de módulos (M3):
+   * criar ou excluir um módulo muda a lista de rotas e de tiles na hora, e
+   * sem isto a mudança só apareceria depois de um F5.
+   */
+  reload: () => Promise<void>;
 };
 
 const ModuleCatalogContext = createContext<ModuleCatalogValue | null>(null);
@@ -70,14 +84,30 @@ export function ModuleCatalogProvider({ children }: { children: ReactNode }) {
     };
   }, [session, authLoading]);
 
+  /* Recarrega sem passar por `loading`: quem chama já está numa tela
+     montada, e voltar para a tela de carregamento do roteador no meio de um
+     "Criar módulo" desmontaria a própria tela que disparou a ação. */
+  const reload = useCallback(async () => {
+    if (!session) return;
+    try {
+      setModules(await fetchModuleCatalog());
+      setError(null);
+      setStatus("ready");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao carregar o catálogo de módulos.");
+      setStatus("error");
+    }
+  }, [session]);
+
   const value = useMemo<ModuleCatalogValue>(
     () => ({
       modules,
       status,
       error,
       byId: (id: string) => modules.find((module) => module.id === id),
+      reload,
     }),
-    [modules, status, error],
+    [modules, status, error, reload],
   );
 
   return <ModuleCatalogContext.Provider value={value}>{children}</ModuleCatalogContext.Provider>;

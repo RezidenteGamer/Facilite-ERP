@@ -60,7 +60,7 @@ export function useInvoicesData(branchId: string | null) {
 
     const provider = getFiscalProvider();
     const document = await provider.emit({ ref: saleFiscalRef(saleId), model: "nfe", payload: built.payload });
-    await persistEmitResult(branchId, saleId, document);
+    await persistEmitResult(branchId, { saleId }, document);
 
     if (document.status === "autorizado") {
       await updateSaleItemsCfop(saleId, built.cfop);

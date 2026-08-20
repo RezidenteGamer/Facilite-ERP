@@ -46,7 +46,7 @@ export async function emitFiscalDocumentForSale(saleId: string, branchId: string
 
     const provider = getFiscalProvider();
     const document = await provider.emit({ ref: saleFiscalRef(saleId), model: "nfce", payload: built.payload });
-    await persistEmitResult(branchId, saleId, document);
+    await persistEmitResult(branchId, { saleId }, document);
 
     if (document.status !== "autorizado") {
       return { ok: false, errors: [document.mensagemSefaz ?? "A SEFAZ recusou a emissão da NFC-e."] };

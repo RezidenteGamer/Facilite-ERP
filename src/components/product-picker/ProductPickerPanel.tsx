@@ -5,7 +5,7 @@ import { useAuth } from "../../features/auth/AuthContext";
 import { buildFormFields } from "../../features/registry-engine/moduleView";
 import RegistryFormModal from "../../features/registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../../features/registry-engine/useModuleDefinition";
-import { buildProductInput, type Product } from "../../features/products/products";
+import { allowNegativeStockToOption, buildProductInput, type Product } from "../../features/products/products";
 import { useProductsData } from "../../features/products/useProductsData";
 import "./ProductPickerPanel.css";
 
@@ -106,10 +106,14 @@ export default function ProductPickerPanel({
   async function handleEditSubmit(values: Record<string, string>) {
     if (!editingProduct) return;
     // Este é o atalho de edição do painel (lápis), que mostra só os campos
-    // básicos — não tem o `lookupField` de grupo tributário que a tela de
-    // Produtos tem. Repassar o grupo atual é o que impede a edição rápida de
-    // desatrelar o produto do grupo dele sem ninguém pedir.
-    await updateProduct(editingProduct.id, buildProductInput(values, editingProduct.taxGroupId ?? null));
+    // básicos — não tem o `lookupField` de grupo tributário nem o
+    // `selectField` de estoque negativo que a tela de Produtos tem. Repassar
+    // os dois valores atuais é o que impede a edição rápida de desatrelar o
+    // produto do grupo ou resetar o estoque negativo sem ninguém pedir.
+    await updateProduct(
+      editingProduct.id,
+      buildProductInput(values, editingProduct.taxGroupId ?? null, allowNegativeStockToOption(editingProduct.allowNegativeStock)),
+    );
     setEditingProduct(null);
   }
 

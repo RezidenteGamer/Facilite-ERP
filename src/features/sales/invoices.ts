@@ -14,12 +14,20 @@ const FISCAL_STATUS_LABEL: Record<InvoiceDocument["status"], string> = {
   cancelado: "Cancelado",
 };
 
-export function invoiceStatusLabel(document: InvoiceDocument | null): string {
+/**
+ * Só o `status` importa para o rótulo — o parâmetro é a fatia mínima, e não o
+ * `InvoiceDocument` inteiro, porque Devolução de venda mostra o status da nota
+ * da venda original a partir de uma leitura enxuta (id/modelo/status/chave),
+ * não do documento completo.
+ */
+export type FiscalStatusHolder = { status: InvoiceDocument["status"] };
+
+export function invoiceStatusLabel(document: FiscalStatusHolder | null): string {
   if (!document) return "Sem nota";
   return FISCAL_STATUS_LABEL[document.status];
 }
 
-export function invoiceStatusColor(document: InvoiceDocument | null): string {
+export function invoiceStatusColor(document: FiscalStatusHolder | null): string {
   if (!document) return "var(--muted, #8a8a8a)";
   if (document.status === "autorizado") return "var(--positive)";
   if (document.status === "erro_autorizacao" || document.status === "denegado") return "var(--danger)";

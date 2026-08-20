@@ -6,6 +6,7 @@ export type ModuleAccessContext = {
   canManageUsers: boolean;
   canManagePermissions: boolean;
   canManageBranches: boolean;
+  canManageModules: boolean;
 };
 
 /**
@@ -27,6 +28,8 @@ export function canAccessModule(module: CatalogModule, ctx: ModuleAccessContext)
       return ctx.canManagePermissions;
     case "manage_branches":
       return ctx.canManageBranches;
+    case "manage_modules":
+      return ctx.canManageModules;
     case "authenticated":
       return true;
     case "permission":

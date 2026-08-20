@@ -38,7 +38,13 @@ function toArtifact(content: string | null, path: string | null, contentType: st
 
 export type InvoiceDocument = {
   id: string;
-  saleId: string;
+  /**
+   * Nulo quando o documento é a nota de uma **devolução** (etapa 9) em vez de
+   * uma venda — `fiscal_documents` tem duas origens mutuamente exclusivas
+   * (`sale_id` / `sale_return_id`), garantidas por CHECK no banco.
+   */
+  saleId: string | null;
+  saleReturnId: string | null;
   branchId: string;
   model: "nfe" | "nfce";
   ref: string;
@@ -58,10 +64,11 @@ export type InvoiceDocument = {
   updatedAt: string;
 };
 
-function toInvoiceDocument(row: FiscalDocumentRow): InvoiceDocument {
+export function toInvoiceDocument(row: FiscalDocumentRow): InvoiceDocument {
   return {
     id: row.id,
     saleId: row.sale_id,
+    saleReturnId: row.sale_return_id,
     branchId: row.branch_id,
     model: row.model,
     ref: row.ref,
@@ -122,6 +129,9 @@ export async function fetchInvoiceSales(branchId: string): Promise<InvoiceSaleRo
   // encontrado é o mais recente.
   const documentBySaleId = new Map<string, InvoiceDocument>();
   for (const row of documents ?? []) {
+    // Documento de devolução (`sale_id` nulo) não pertence a nenhuma venda
+    // desta lista — quem o mostra é o módulo Devolução de venda.
+    if (!row.sale_id) continue;
     if (!documentBySaleId.has(row.sale_id)) documentBySaleId.set(row.sale_id, toInvoiceDocument(row));
   }
 
@@ -239,10 +249,18 @@ export async function updateSaleItemsCfop(saleId: string, cfop: string): Promise
   if (error) throw error;
 }
 
+/**
+ * A origem do documento — venda ou devolução, nunca as duas (o CHECK
+ * `fiscal_documents_one_origin_check` impõe isso no banco). Modelado como
+ * união em vez de dois parâmetros opcionais para que "nenhuma das duas" nem
+ * seja representável no TypeScript.
+ */
+export type FiscalDocumentOrigin = { saleId: string } | { saleReturnId: string };
+
 /** Persiste o resultado de `FiscalProvider.emit()` — upsert por `ref` (idempotente, mesma garantia do provedor). */
 export async function persistEmitResult(
   branchId: string,
-  saleId: string,
+  origin: FiscalDocumentOrigin,
   document: FiscalDocument,
 ): Promise<InvoiceDocument> {
   // `nao_encontrado` é resultado de consulta (ref desconhecida), nunca algo que
@@ -253,7 +271,8 @@ export async function persistEmitResult(
   const client = assertSupabase();
   const row: TablesInsert<"fiscal_documents"> = {
     branch_id: branchId,
-    sale_id: saleId,
+    sale_id: "saleId" in origin ? origin.saleId : null,
+    sale_return_id: "saleReturnId" in origin ? origin.saleReturnId : null,
     model: document.model,
     ref: document.ref,
     status: document.status,

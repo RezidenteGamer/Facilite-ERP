@@ -6,14 +6,27 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
 import { fetchTaxGroups } from "../../lib/repositories/taxGroupLookups";
+import { fetchBranchAllowsNegativeStock } from "../../lib/repositories/branchesRepository";
 import type { TaxGroup } from "../../lib/fiscal/taxGroups";
 import { useAuth } from "../auth/AuthContext";
 import { buildDetailFields, buildFormFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { ProductsIcon } from "../home/icons";
-import { buildProductInput, formatPrice, type Product } from "./products";
+import {
+  allowNegativeStockToOption,
+  buildProductInput,
+  formatPrice,
+  type AllowNegativeStockOption,
+  type Product,
+} from "./products";
 import { useProductsData } from "./useProductsData";
+
+const ALLOW_NEGATIVE_STOCK_OPTIONS: { value: AllowNegativeStockOption; label: string }[] = [
+  { value: "", label: "Usar padrão da filial" },
+  { value: "true", label: "Sempre permitir" },
+  { value: "false", label: "Sempre bloquear" },
+];
 
 const MODULE_ID = "produtos";
 
@@ -39,7 +52,10 @@ export default function ProductsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>("none");
   const [formTaxGroup, setFormTaxGroup] = useState<SelectedTaxGroup | null>(null);
+  const [formAllowNegativeStock, setFormAllowNegativeStock] = useState<AllowNegativeStockOption>("");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  /** Padrão da filial ativa — só para mostrar o valor efetivo na ficha quando o produto está em "null". */
+  const [branchAllowsNegativeStock, setBranchAllowsNegativeStock] = useState<boolean | null>(null);
 
   const {
     products,
@@ -65,6 +81,24 @@ export default function ProductsPage() {
     });
   }, [products]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentBranchId) {
+      setBranchAllowsNegativeStock(null);
+      return;
+    }
+    fetchBranchAllowsNegativeStock(currentBranchId)
+      .then((value) => {
+        if (!cancelled) setBranchAllowsNegativeStock(value);
+      })
+      .catch(() => {
+        if (!cancelled) setBranchAllowsNegativeStock(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentBranchId]);
+
   const visibleProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return products;
@@ -83,12 +117,34 @@ export default function ProductsPage() {
   const detailFields = useMemo(() => {
     if (!definition) return [];
     const fields = buildDetailFields<Product>(definition.fields, selected);
-    return fields.map((field) =>
+    const priced = fields.map((field) =>
       (field.label === "Preço custo" || field.label === "Preço Atacado") && field.value
         ? { ...field, value: formatPrice(Number(field.value)) }
         : field,
     );
-  }, [definition, selected]);
+    if (!selected) return priced;
+
+    /**
+     * Valor efetivo, não só o que está gravado — "usar padrão da filial"
+     * fica abstrato demais sem mostrar o que isso significa agora. Ver a
+     * decisão de estoque negativo em AGENTS.md.
+     */
+    const productValue = selected.allowNegativeStock;
+    const effective = productValue ?? branchAllowsNegativeStock ?? false;
+    const source =
+      productValue === true
+        ? "sempre permitido neste produto"
+        : productValue === false
+          ? "sempre bloqueado neste produto"
+          : "padrão da filial";
+    return [
+      ...priced,
+      {
+        label: "Estoque negativo",
+        value: `${effective ? "Permitido" : "Bloqueado"} (${source})`,
+      },
+    ];
+  }, [definition, selected, branchAllowsNegativeStock]);
   const formFields = useMemo(() => (definition ? buildFormFields(definition.fields) : []), [definition]);
 
   async function toggleActive() {
@@ -96,23 +152,24 @@ export default function ProductsPage() {
     await updateProduct(selected.id, { active: !selected.active });
   }
 
-  /** Abre o formulário já com o grupo do produto selecionado (ou vazio, em "Novo"). */
+  /** Abre o formulário já com o grupo e o estoque negativo do produto selecionado (ou vazio, em "Novo"). */
   function openModal(next: Exclude<ModalState, "none">) {
     const source = next === "new" ? null : selected;
     setFormTaxGroup(
       source?.taxGroupId ? { id: source.taxGroupId, name: source.taxGroupName ?? "" } : null,
     );
+    setFormAllowNegativeStock(allowNegativeStockToOption(source?.allowNegativeStock));
     setModal(next);
   }
 
   async function handleCreateSubmit(values: Record<string, string>) {
-    await createProduct(buildProductInput(values, formTaxGroup?.id ?? null));
+    await createProduct(buildProductInput(values, formTaxGroup?.id ?? null, formAllowNegativeStock));
     setModal("none");
   }
 
   async function handleEditSubmit(values: Record<string, string>) {
     if (!selected) return;
-    await updateProduct(selected.id, buildProductInput(values, formTaxGroup?.id ?? null));
+    await updateProduct(selected.id, buildProductInput(values, formTaxGroup?.id ?? null, formAllowNegativeStock));
     setModal("none");
   }
 
@@ -131,6 +188,15 @@ export default function ProductsPage() {
     getKey: (group: TaxGroup) => group.id,
     renderItem: (group: TaxGroup) => ({ primary: group.name, secondary: group.code }),
     onSelect: (group: TaxGroup) => setFormTaxGroup({ id: group.id, name: group.name }),
+  };
+
+  /** Mesmo papel de `taxGroupLookup`, via `selectField` — três estados, ver `AllowNegativeStockOption`. */
+  const allowNegativeStockSelect = {
+    label: "Estoque negativo",
+    value: formAllowNegativeStock,
+    options: ALLOW_NEGATIVE_STOCK_OPTIONS,
+    hint: "\"Usar padrão da filial\" segue o que está em Configurações para a filial ativa.",
+    onChange: (value: string) => setFormAllowNegativeStock(value as AllowNegativeStockOption),
   };
 
   async function handleConfirmDelete() {
@@ -230,6 +296,7 @@ export default function ProductsPage() {
           title="Novo produto"
           fields={formFields}
           lookupField={taxGroupLookup}
+          selectField={allowNegativeStockSelect}
           onSubmit={handleCreateSubmit}
           onCancel={() => setModal("none")}
         />
@@ -240,6 +307,7 @@ export default function ProductsPage() {
           title="Editar produto"
           fields={formFields}
           lookupField={taxGroupLookup}
+          selectField={allowNegativeStockSelect}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -256,6 +324,7 @@ export default function ProductsPage() {
             unidadeComercial: selected.unidadeComercial ?? "",
             unidadeTributavel: selected.unidadeTributavel ?? "",
             cstIpi: selected.cstIpi ?? "",
+            minimumStock: selected.minimumStock !== undefined ? String(selected.minimumStock) : "",
           }}
           onSubmit={handleEditSubmit}
           onCancel={() => setModal("none")}
@@ -267,6 +336,7 @@ export default function ProductsPage() {
           title="Clonar produto"
           fields={formFields}
           lookupField={taxGroupLookup}
+          selectField={allowNegativeStockSelect}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -283,6 +353,7 @@ export default function ProductsPage() {
             unidadeComercial: selected.unidadeComercial ?? "",
             unidadeTributavel: selected.unidadeTributavel ?? "",
             cstIpi: selected.cstIpi ?? "",
+            minimumStock: selected.minimumStock !== undefined ? String(selected.minimumStock) : "",
           }}
           submitLabel="Clonar"
           onSubmit={handleCreateSubmit}

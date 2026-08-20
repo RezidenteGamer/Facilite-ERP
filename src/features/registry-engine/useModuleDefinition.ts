@@ -65,12 +65,15 @@ export function useModuleDefinition(moduleId: string) {
         tableAlign: (field.table_align as ModuleFieldDefinition["tableAlign"]) ?? "left",
         showInDetails: field.show_in_details,
         showInForm: field.show_in_form,
+        referenceModuleId: field.reference_module_id,
       }));
 
       setDefinition({
         id: moduleResult.data.id,
         label: moduleResult.data.label,
         dataTable: moduleResult.data.data_table,
+        storageKind:
+          moduleResult.data.storage_kind === "generic" ? "generic" : "table",
         layoutVariant: moduleResult.data.layout_variant as ModuleDefinition["layoutVariant"],
         isLocked: moduleResult.data.is_locked,
         tabs,

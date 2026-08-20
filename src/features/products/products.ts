@@ -18,6 +18,19 @@ export type Product = {
   unidadeTributavel?: string;
   cstIpi?: string;
   /**
+   * Saldo mínimo desejado — nulável de propósito, ver `toOptionalNumber`.
+   * Produto sem mínimo definido nunca aparece no relatório "Estoque abaixo
+   * do mínimo" (etapa 11): ausência não vira 0, que dispararia todo produto
+   * sem esse campo preenchido.
+   */
+  minimumStock?: number;
+  /**
+   * Três estados: `undefined`/`null` = usa o padrão da filial (caso
+   * comum); `true`/`false` sobrescreve a filial nos dois sentidos. Ver
+   * `stock_allows_negative` no banco e a decisão em AGENTS.md.
+   */
+  allowNegativeStock?: boolean | null;
+  /**
    * Grupo tributário do produto (`tax_groups`) — de onde saem CST/CSOSN e
    * alíquotas na emissão. Desde a correção de 19/08/2026 é a **única** fonte
    * de tributação do produto: os CSTs que a etapa 0 tinha posto direto em
@@ -53,9 +66,25 @@ export function toOptionalNumber(value: string | undefined): number | undefined 
  * `lookupField` (um id, não um campo de texto do formulário) — mesmo formato
  * do contato no Financeiro.
  */
+/** Valores do `<select>` de três estados — texto porque o formulário genérico só lida com strings. */
+export type AllowNegativeStockOption = "" | "true" | "false";
+
+export function parseAllowNegativeStockOption(value: string): boolean | null {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
+export function allowNegativeStockToOption(value: boolean | null | undefined): AllowNegativeStockOption {
+  if (value === true) return "true";
+  if (value === false) return "false";
+  return "";
+}
+
 export function buildProductInput(
   values: Record<string, string>,
   taxGroupId: string | null,
+  allowNegativeStockOption: AllowNegativeStockOption,
 ): Omit<Product, "id" | "code" | "createdAt"> {
   return {
     description: values.description ?? "",
@@ -74,6 +103,8 @@ export function buildProductInput(
     unidadeComercial: values.unidadeComercial || undefined,
     unidadeTributavel: values.unidadeTributavel || undefined,
     cstIpi: values.cstIpi || undefined,
+    minimumStock: toOptionalNumber(values.minimumStock),
     taxGroupId,
+    allowNegativeStock: parseAllowNegativeStockOption(allowNegativeStockOption),
   };
 }

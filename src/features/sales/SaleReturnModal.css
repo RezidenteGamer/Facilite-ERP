@@ -1,0 +1,98 @@
+/* Complemento ao RegistryFormModal.css (a moldura, a cor e a animação vêm de
+   lá — aqui só a grade das linhas devolvidas, que nenhum outro modal tem). */
+
+.sale-return-modal {
+  width: min(720px, 100%);
+}
+
+.sale-return-modal__hint {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.sale-return-modal__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* A venda pode ter muitos itens; a lista rola por dentro em vez de empurrar
+     os botões de confirmar para fora da viewport. */
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sale-return-modal__line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 100px 116px 110px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sale-return-modal__line--head {
+  background: none;
+  font-weight: 700;
+  opacity: 0.8;
+  padding-bottom: 0;
+}
+
+.sale-return-modal__line--exhausted {
+  opacity: 0.5;
+}
+
+.sale-return-modal__product {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sale-return-modal__qty {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 10px);
+  background: var(--white);
+  color: var(--ink, #10233f);
+  font: inherit;
+  text-align: right;
+}
+
+.sale-return-modal__qty--error {
+  border-color: var(--danger);
+}
+
+.sale-return-modal__qty:disabled {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.sale-return-modal__total {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  /* O cabeçalho de colunas não descreve mais o layout: cada linha vira um
+     cartãozinho de duas fileiras (produto em cima; vendido/devolvido/campo/
+     valor embaixo, fluindo). */
+  .sale-return-modal__line {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    row-gap: 6px;
+    text-align: right;
+  }
+
+  .sale-return-modal__line--head {
+    display: none;
+  }
+
+  .sale-return-modal__product {
+    grid-column: 1 / -1;
+    white-space: normal;
+    text-align: left;
+  }
+}
