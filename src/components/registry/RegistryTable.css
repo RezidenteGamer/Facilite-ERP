@@ -8,13 +8,16 @@
   min-height: 0;
 }
 
+/* Fica sobre o canvas neutro (não mais sobre o azul de marca — ver
+   .app-content--blue em AppShell.css), então texto branco quase sumia no
+   tema claro. --accent lê bem nos dois temas e ainda reforça a marca. */
 .registry-table__title {
   margin: 0 0 12px;
   text-align: center;
   font-family: var(--font-brand);
   font-size: 32px;
   font-weight: 400;
-  color: var(--white);
+  color: var(--accent);
 }
 
 .registry-table__title--plain {
