@@ -98,6 +98,18 @@ export function ArrowRightIcon(props: IconProps) {
   );
 }
 
+/* Seta sólida (não traço) do botão "Voltar geral" — vetor próprio, então
+   fica nítida em qualquer tamanho/tela, sem os problemas de borrão de
+   raster. `fill="currentColor"` (não usa `base`, que é fill:none) —
+   herda a cor do botão via CSS, como os outros ícones do sistema. */
+export function BackArrowIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 42 42" fill="currentColor" {...props}>
+      <polygon fillRule="evenodd" points="31,38.32 13.391,21 31,3.68 28.279,1 8,21.01 28.279,41" />
+    </svg>
+  );
+}
+
 export function CloseIcon(props: IconProps) {
   return (
     <svg {...base} {...props} strokeWidth={2.4}>

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { BackArrowIcon } from "./icons";
 import "./FloatingTabs.css";
 
 type BackTabProps = {
@@ -16,6 +17,8 @@ export default function BackTab({ onClick }: BackTabProps) {
       type="button"
       aria-label="Voltar"
       onClick={onClick ?? (() => navigate(-1))}
-    />
+    >
+      <BackArrowIcon />
+    </button>
   );
 }

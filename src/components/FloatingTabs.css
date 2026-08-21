@@ -29,6 +29,12 @@
   width: 72px;
   height: 60px;
   padding: 0;
+  color: var(--yellow);
+}
+
+.floating-tab--back svg {
+  width: 30px;
+  height: 30px;
 }
 
 /* A aba do Suporte herda o mesmo "peek" (bottom: -16px) das outras abas —
@@ -59,5 +65,10 @@
     left: 12px;
     width: 60px;
     height: 50px;
+  }
+
+  .floating-tab--back svg {
+    width: 24px;
+    height: 24px;
   }
 }
