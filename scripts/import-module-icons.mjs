@@ -13,6 +13,9 @@ const OUT_DIR = "src/assets/icons/modules";
 const MAP = {
   "condicionais.png": "condicionais",
   "devolucao-de-venda.png": "devolucao-venda",
+  "compras.png": "compras",
+  "grupos-tributario.png": "grupos-tributarios",
+  "modulos.png": "modulos",
 };
 
 // Exibido em ~64px CSS dentro do círculo de 84px (ver ModuleTile.css) — 256px

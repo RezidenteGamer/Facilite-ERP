@@ -13,6 +13,10 @@ import devolucaoVendaIcon from "../../assets/icons/modules/devolucao-venda.webp"
 import { DEVOLUCAO_VENDA_PLACEHOLDER } from "../../assets/icons/modules/devolucao-venda.placeholder";
 import financeiroIcon from "../../assets/icons/modules/financeiro.webp";
 import { FINANCEIRO_PLACEHOLDER } from "../../assets/icons/modules/financeiro.placeholder";
+import gruposTributariosIcon from "../../assets/icons/modules/grupos-tributarios.webp";
+import { GRUPOS_TRIBUTARIOS_PLACEHOLDER } from "../../assets/icons/modules/grupos-tributarios.placeholder";
+import modulosIcon from "../../assets/icons/modules/modulos.webp";
+import { MODULOS_PLACEHOLDER } from "../../assets/icons/modules/modulos.placeholder";
 import notasEmitidasIcon from "../../assets/icons/modules/notas-emitidas.webp";
 import { NOTAS_EMITIDAS_PLACEHOLDER } from "../../assets/icons/modules/notas-emitidas.placeholder";
 import pedidosVendaIcon from "../../assets/icons/modules/pedidos-venda.webp";
@@ -44,6 +48,7 @@ import {
   SaleOrdersIcon,
   SaleReturnIcon,
   StockAdjustIcon,
+  TaxGroupIcon,
   TaxIcon,
   UsersIcon,
 } from "../home/icons";
@@ -83,7 +88,6 @@ export const MODULE_ICONS: Record<string, ModuleIcon> = {
     icon: PurchasesIcon,
     image: comprasIcon,
     imagePlaceholder: COMPRAS_PLACEHOLDER,
-    scale: 1.5625,
   },
   condicionais: {
     icon: RefreshIcon,
@@ -139,6 +143,16 @@ export const MODULE_ICONS: Record<string, ModuleIcon> = {
     icon: TaxIcon,
     image: tributacoesIcon,
     imagePlaceholder: TRIBUTACOES_PLACEHOLDER,
+  },
+  "grupos-tributarios": {
+    icon: TaxGroupIcon,
+    image: gruposTributariosIcon,
+    imagePlaceholder: GRUPOS_TRIBUTARIOS_PLACEHOLDER,
+  },
+  modulos: {
+    icon: GenericModuleIcon,
+    image: modulosIcon,
+    imagePlaceholder: MODULOS_PLACEHOLDER,
   },
   "usuarios-operadores": {
     icon: UsersIcon,
