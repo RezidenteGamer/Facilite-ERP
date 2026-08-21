@@ -1068,7 +1068,6 @@ export type Database = {
           stock: number
           sub_location: string | null
           tax_group_id: string | null
-          taxation: string | null
           type: string | null
           unidade_comercial: string | null
           unidade_tributavel: string | null
@@ -1094,7 +1093,6 @@ export type Database = {
           stock?: number
           sub_location?: string | null
           tax_group_id?: string | null
-          taxation?: string | null
           type?: string | null
           unidade_comercial?: string | null
           unidade_tributavel?: string | null
@@ -1120,7 +1118,6 @@ export type Database = {
           stock?: number
           sub_location?: string | null
           tax_group_id?: string | null
-          taxation?: string | null
           type?: string | null
           unidade_comercial?: string | null
           unidade_tributavel?: string | null

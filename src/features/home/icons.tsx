@@ -111,6 +111,18 @@ export function TaxIcon(props: IconProps) {
   );
 }
 
+export function TaxGroupIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3.5" y="4.5" width="9.5" height="12.5" rx="1.3" />
+      <path d="M9 8.5h9.5v12.5a1.3 1.3 0 0 1-1.3 1.3H10.3A1.3 1.3 0 0 1 9 21V8.5z" />
+      <line x1="11.7" y1="12.2" x2="15.8" y2="12.2" />
+      <line x1="11.7" y1="14.8" x2="14.3" y2="14.8" />
+      <circle cx="15.5" cy="18.2" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function PurchasesIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>

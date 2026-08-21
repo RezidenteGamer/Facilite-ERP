@@ -159,7 +159,6 @@ export default function ProductPickerPanel({
             description: editingProduct.description,
             stock: String(editingProduct.stock),
             salePrice: String(editingProduct.salePrice),
-            taxation: editingProduct.taxation ?? "",
             type: editingProduct.type ?? "",
             costPrice: editingProduct.costPrice !== undefined ? String(editingProduct.costPrice) : "",
             wholesalePrice:

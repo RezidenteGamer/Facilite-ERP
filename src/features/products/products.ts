@@ -5,7 +5,6 @@ export type Product = {
   stock: number;
   salePrice: number;
   active: boolean;
-  taxation?: string;
   type?: string;
   costPrice?: number;
   wholesalePrice?: number;
@@ -91,7 +90,6 @@ export function buildProductInput(
     stock: toNumber(values.stock),
     salePrice: toNumber(values.salePrice),
     active: true,
-    taxation: values.taxation || undefined,
     type: values.type || undefined,
     costPrice: toOptionalNumber(values.costPrice),
     wholesalePrice: toOptionalNumber(values.wholesalePrice),

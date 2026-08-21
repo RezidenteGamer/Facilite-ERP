@@ -1334,3 +1334,4 @@ Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer m�
 - O repositório contém `legacy-static/` somente como referência do protótipo anterior; a aplicação ativa está em `src/`.
 - Há um `.claude/launch.json` legado que apenas define o comando de inicialização do projeto. Ele não é uma fonte de preferências nem de contexto.
 - Mantenha mudanças focadas e não altere arquivos não relacionados sem necessidade.
+- `products.taxation` foi removido (21/08/2026, campo do protótipo original que nenhuma lógica fiscal lia); `MODULE_ICONS['grupos-tributarios']` agora tem ícone próprio (`TaxGroupIcon`) para não colidir com `modulos`, que segue com o ícone genérico de propósito.
