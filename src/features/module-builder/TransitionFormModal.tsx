@@ -10,9 +10,10 @@ type TransitionFormModalProps = {
   situations: ModuleSituation[];
   initial?: TransitionInput;
   /**
-   * Numa transição já criada o par de situações fica travado: mudá-lo
-   * viraria o sentido das ações penduradas nela sem que elas soubessem. Para
-   * mudar o caminho, exclua e recrie.
+   * O par de situações não se escolhe por `<select>`: numa transição já criada
+   * ele é imutável (mudá-lo viraria o sentido das ações penduradas nela sem
+   * que elas soubessem), e numa transição nova ele é o que os dois cliques no
+   * diagrama acabaram de dizer.
    */
   lockPair?: boolean;
   submitLabel?: string;
@@ -116,8 +117,9 @@ export default function TransitionFormModal({
 
               {lockPair && (
                 <p className="module-builder__hint">
-                  O caminho de uma transição não muda depois de criada — as ações configuradas
-                  nela mudariam de sentido em silêncio. Para mudar, exclua e recrie.
+                  {initial?.id
+                    ? "O caminho de uma transição não muda depois de criada — as ações configuradas nela mudariam de sentido em silêncio. Para mudar, exclua e recrie."
+                    : "O caminho veio do diagrama: é a ligação que você acabou de desenhar. Cancele e ligue de novo se quiser outro sentido."}
                 </p>
               )}
             </div>

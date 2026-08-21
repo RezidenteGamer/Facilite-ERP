@@ -4,6 +4,7 @@ import FormField from "../../components/form/FormField";
 import type { ModuleFieldDefinition } from "../registry-engine/types";
 import "../registry-engine/RegistryFormModal.css";
 import FieldFormModal from "./FieldFormModal";
+import FieldTypeIcon from "./FieldTypeIcon";
 import {
   FIELD_TYPES,
   previewFieldKey,
@@ -150,7 +151,15 @@ export default function NewModuleModal({
                         {field.isRequired && " *"}
                       </span>
                       <span className="module-builder__field-meta">
-                        {typeLabel(field.dataType)} · {previewFieldKey(field.label)}
+                        {/* Ícone no lugar do nome do tipo, como no canvas — o
+                            nome continua legível pelo `title`/`aria-label`. */}
+                        <FieldTypeIcon
+                          dataType={field.dataType}
+                          className="module-builder__field-glyph"
+                          role="img"
+                          aria-label={typeLabel(field.dataType)}
+                        />
+                        {previewFieldKey(field.label)}
                       </span>
                       <div className="module-builder__field-actions">
                         <button

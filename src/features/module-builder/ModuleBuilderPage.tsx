@@ -9,14 +9,10 @@ import { useAuth } from "../auth/AuthContext";
 import { extractErrorMessage } from "../modules/useGenericModuleData";
 import type { ModuleFieldDefinition } from "../registry-engine/types";
 import DeleteModuleDialog from "./DeleteModuleDialog";
+import FieldCanvas from "./FieldCanvas";
 import FieldFormModal from "./FieldFormModal";
 import NewModuleModal from "./NewModuleModal";
-import {
-  FIELD_TYPES,
-  fieldEditingCapabilityFor,
-  type NewModuleField,
-  type NewModuleInput,
-} from "./moduleBuilder";
+import { fieldEditingCapabilityFor, type NewModuleField, type NewModuleInput } from "./moduleBuilder";
 import { useModuleBuilderData } from "./useModuleBuilderData";
 import WorkflowSection from "./WorkflowSection";
 import "./ModuleBuilderPage.css";
@@ -25,22 +21,20 @@ type ModalState =
   | { kind: "none" }
   | { kind: "new-module" }
   | { kind: "new-field" }
-  | { kind: "edit-field"; field: ModuleFieldDefinition }
   | { kind: "remove-field"; field: ModuleFieldDefinition }
   | { kind: "delete-module" };
 
-function typeLabel(value: ModuleFieldDefinition["dataType"]): string {
-  return FIELD_TYPES.find((type) => type.value === value)?.label ?? value;
-}
-
 /**
- * `referenceModuleId` entra aqui mesmo quando o controle de referência não
- * é exibido: o patch de edição sempre manda a coluna, e sem carregar o valor
- * atual editar o rótulo de um campo de referência a apagaria — o que o
- * trigger do banco recusaria, deixando um erro inexplicável para quem só
- * queria trocar um rótulo.
+ * O cartão do canvas edita um pedaço de cada vez (o rótulo, o tipo, uma
+ * flag), mas `updateModuleField` continua mandando o patch inteiro — inclusive
+ * `referenceModuleId`. Sem levar o valor atual junto, mexer no rótulo de um
+ * campo de referência apagaria a referência, e o trigger do banco recusaria a
+ * edição com um erro inexplicável para quem só queria trocar uma palavra.
  */
-function toFormValues(field: ModuleFieldDefinition): NewModuleField {
+function toFormValues(
+  field: ModuleFieldDefinition,
+  patch: Partial<NewModuleField> = {},
+): NewModuleField {
   return {
     label: field.label,
     dataType: field.dataType,
@@ -49,6 +43,7 @@ function toFormValues(field: ModuleFieldDefinition): NewModuleField {
     showInDetails: field.showInDetails,
     showInForm: field.showInForm,
     referenceModuleId: field.referenceModuleId,
+    ...patch,
   };
 }
 
@@ -78,6 +73,7 @@ export default function ModuleBuilderPage() {
     deleteModule,
     addField,
     editField,
+    reorderFields,
     dropField,
   } = useModuleBuilderData();
 
@@ -221,15 +217,6 @@ export default function ModuleBuilderPage() {
                   </div>
 
                   <div className="module-builder__detail-actions">
-                    {canAddField && (
-                      <button
-                        className="module-builder__btn module-builder__btn--small"
-                        type="button"
-                        onClick={() => setModal({ kind: "new-field" })}
-                      >
-                        Novo campo
-                      </button>
-                    )}
                     {!selected.isLocked && (
                       <button
                         className="module-builder__btn module-builder__btn--small module-builder__btn--danger"
@@ -246,66 +233,27 @@ export default function ModuleBuilderPage() {
                   <p className="module-builder__notice">{capability.reason}</p>
                 )}
 
-                {fields.length === 0 ? (
-                  <p className="module-builder__empty">Este módulo não tem campos cadastrados.</p>
-                ) : (
-                  <div className="module-builder__table-wrap">
-                    <table className="module-builder__table">
-                      <thead>
-                        <tr>
-                          <th>Rótulo</th>
-                          <th>Chave</th>
-                          <th>Tipo</th>
-                          <th>Obrig.</th>
-                          <th>Tabela</th>
-                          <th>Ficha</th>
-                          <th>Formulário</th>
-                          <th>Referência</th>
-                          <th aria-label="Ações" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fields.map((field) => (
-                          <tr key={field.id}>
-                            <td className="module-builder__cell-label">{field.label}</td>
-                            <td>
-                              <code>{field.fieldKey}</code>
-                            </td>
-                            <td>{typeLabel(field.dataType)}</td>
-                            <td>{field.isRequired ? "Sim" : "—"}</td>
-                            <td>{field.showInTable ? "Sim" : "—"}</td>
-                            <td>{field.showInDetails ? "Sim" : "—"}</td>
-                            <td>{field.showInForm ? "Sim" : "—"}</td>
-                            <td>
-                              {field.referenceModuleId
-                                ? (moduleLabels[field.referenceModuleId] ?? field.referenceModuleId)
-                                : "—"}
-                            </td>
-                            <td className="module-builder__cell-actions">
-                              {canEditField && (
-                                <button
-                                  className="module-builder__link"
-                                  type="button"
-                                  onClick={() => setModal({ kind: "edit-field", field })}
-                                >
-                                  Editar
-                                </button>
-                              )}
-                              {canAddField && (
-                                <button
-                                  className="module-builder__link module-builder__link--danger"
-                                  type="button"
-                                  onClick={() => setModal({ kind: "remove-field", field })}
-                                >
-                                  Remover
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                {/* O canvas de campos no lugar da tabela técnica. A fronteira
+                    de quem pode editar o quê é a mesma de M3 — só a superfície
+                    mudou: `canAdd` (só `generic`) libera adicionar e remover;
+                    `canEdit` (também `table` sem tela própria) libera rótulo,
+                    tipo, flags e ordem; módulo com tela própria não recebe
+                    nenhum dos dois e fica só com a mensagem de recusa. */}
+                {capability?.kind !== "none" && (
+                  <FieldCanvas
+                    fields={fields}
+                    moduleLabel={selected.label}
+                    moduleLabels={moduleLabels}
+                    canAdd={canAddField}
+                    canEdit={canEditField}
+                    referenceChoices={referenceChoices}
+                    onAdd={() => setModal({ kind: "new-field" })}
+                    onRemove={(field) => setModal({ kind: "remove-field", field })}
+                    onPatch={(field, patch) =>
+                      run(() => editField(field.id, toFormValues(field, patch)))
+                    }
+                    onReorder={(orderedIds) => reorderFields(orderedIds)}
+                  />
                 )}
 
                 {/* Workflow só existe em módulo de armazenamento genérico — a
@@ -341,17 +289,6 @@ export default function ModuleBuilderPage() {
           submitLabel="Adicionar"
           referenceChoices={referenceChoices}
           onSubmit={(field) => run(() => addField(selected.id, field))}
-          onCancel={() => setModal({ kind: "none" })}
-        />
-      )}
-
-      {modal.kind === "edit-field" && (
-        <FieldFormModal
-          title={`Editar campo — ${modal.field.label}`}
-          initial={toFormValues(modal.field)}
-          lockedKey={modal.field.fieldKey}
-          referenceChoices={referenceChoices}
-          onSubmit={(field) => run(() => editField(modal.field.id, field))}
           onCancel={() => setModal({ kind: "none" })}
         />
       )}

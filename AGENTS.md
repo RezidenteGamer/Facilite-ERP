@@ -1344,6 +1344,64 @@ Dois módulos de teste relacionados ("Clientes teste M4" e "Chamados teste M4", 
 
 Ações que mexem em tabelas que não são `module_records` (criar lançamento financeiro de verdade, ajustar estoque de produto) — mesmo com `is_facilite_developer`, esta etapa é só sobre módulos genéricos escrevendo em módulos genéricos; automação envolvendo módulos oficiais é uma etapa própria. Referência multi-hop (seguir uma referência que leva a outra, em cadeia) — só um salto. Condição além de "de qual situação para qual" nas transições. Histórico/auditoria de transições. **UI para o cliente final habilitar `is_facilite_developer`** em si mesmo ou em qualquer papel — não existe de propósito, e não deveria ser criada "para facilitar" sem essa decisão voltar a ser conversada.
 
+### Redesenho do construtor de módulos: canvas de campos e diagrama de workflow (21/08/2026)
+
+Etapa de **superfície**, não de capacidade. A auditoria de 20/08/2026 testou `/modulos` de ponta a ponta e achou o motor certo e a experiência errada: criar módulo, adicionar campo e criar situação gravavam tudo direito, mas construir um módulo era indistinguível de preencher um formulário de administração — um modal, um `<select>` de tipo, uma tabela técnica de campos (Rótulo/Chave/Tipo/Obrig./Tabela/Ficha/Formulário) e uma lista de "situações e transições" **sem nenhum diagrama**, apesar de "transição entre situações" ser literalmente um conceito de fluxo.
+
+**Nenhuma regra de M3 ou M4 mudou.** Vale reafirmar item a item, porque é fácil supor o contrário ao ver a tela nova:
+
+- `fieldEditingCapabilityFor()` continua com os mesmos três casos e as mesmas mensagens: `generic` = CRUD completo de campo; `table` sem tela própria (Tributações, Grupos tributários) = só editar o que já existe; tela própria (Produtos, Financeiro, PDV…) = recusa. A fronteira agora vira duas props do canvas (`canAdd`/`canEdit`), e o caso de recusa não renderiza canvas nenhum.
+- Camada 2 de M4 (ler/escrever em módulo relacionado) continua **só** para `is_facilite_developer`, continua **escondida e não desabilitada**, e o portão continua sendo o banco: `referenceChoices`/`references` chegam vazios aos controles novos exatamente como chegavam aos antigos. `is_facilite_developer` não mudou de significado nem ganhou UI para ser ligada.
+- Situação inicial continua não podendo ser desmarcada, só substituída; `code` e `field_key` continuam imutáveis; o par de uma transição continua travado depois de criada; `module_records`, `module_transitions`, `module_transition_actions` e `has_facilite_developer_access()` não foram tocados.
+- Nenhuma ação cruzada nova entre módulos nasceu aqui.
+
+#### `canvas_x`/`canvas_y`, e por que nulo não é erro
+
+Única mudança de schema: `module_situations` ganhou `canvas_x numeric null` e `canvas_y numeric null`. **Nulável de propósito** — toda situação criada antes desta etapa tem nulo, e um diagrama que recusasse desenhar por causa disso ficaria vazio justamente para quem já tem workflow montado.
+
+Quando é nulo, `positionOf()` (`WorkflowCanvas.tsx`) calcula uma posição em linha pela ordem de `sort_order`, quebrando a cada quatro nós para não sair da tela — que é exatamente a leitura que a lista antiga dava. O primeiro arraste substitui o cálculo por um valor gravado, e os dois convivem na mesma tela sem transição de estado: **verificado no navegador** com três situações, uma arrastada e duas em nulo.
+
+#### `save_module_situation_position` — a única RPC de escrita nova, e por que ela existe
+
+`save_module_situation` **não aceita patch parcial** (confirmado lendo o corpo da função antes de decidir): ela exige rótulo, ordem e `is_initial`, revalida o rótulo e mexe em qual situação é a inicial. Arrastar uma caixa não deveria poder tocar em nada disso — um arraste que reescreve `is_initial` seria um efeito colateral invisível, e o gesto mais barato da tela seria o mais perigoso.
+
+Então nasceu `save_module_situation_position(p_id, p_canvas_x, p_canvas_y)`, `security definer`, que resolve o `module_id` pela própria linha e chama **a mesma** `assert_module_workflow_editable` das outras RPCs de workflow. Nenhuma fronteira nova: mesmo portão (`can_manage_modules` + módulo genérico), mesmo padrão de `revoke execute ... from public, anon` + `grant to authenticated`, e o `coalesce` por fora da flag continua morando dentro de `assert_module_workflow_editable`, onde já estava.
+
+**Reordenar campo não precisou de RPC nenhuma**: `module_fields` já aceita `update` direto pelo PostgREST de quem tem `can_manage_modules` (policy de M3), e `sort_order` é coluna comum dessa tabela. `reorderModuleFields` reescreve a escala do zero (10, 20, 30…) e grava **só as linhas que mudaram** de posição.
+
+#### A decisão de interação: clicar em um nó e depois no outro, não arrastar de um até o outro
+
+Não havia precedente no projeto para copiar — os nove usos de `@dnd-kit` são todos "mover um item", nenhum é "ligar dois itens" —, então é julgamento de UI, e fica registrado com o porquê. Criar uma transição é: apertar **"Ligar situações"**, clicar na origem, clicar no destino; aí abre o formulário só para o texto do botão, com o par já travado.
+
+- **O arraste do nó já está ocupado**: é como se move a caixa, e é o gesto que esta etapa acabou de gravar no banco. Um segundo modo de arraste no mesmo elemento precisaria de uma alça pequena dedicada — e alça pequena com dnd-kit é exatamente o caso que obrigou a trocar `rectIntersection` por `pointerWithin` em Ajuste de estoque (colisão imprecisa perto de alvo pequeno). Trocar um risco conhecido por outro conhecido não é progresso.
+- **O modo armado deixa o estado visível** ("Clique na situação de origem." → "Agora clique na situação de destino."), o que um arraste não deixa; e é cancelável com `Esc`, clicando no fundo, ou clicando de novo no mesmo nó.
+- **Funciona igual no toque**, sem depender de precisão de arraste.
+
+O preço é um clique a mais para armar o modo — preço certo para uma ação que cria uma linha no banco. Se um dia isso incomodar, o caminho é adicionar o arraste **por cima** deste, não no lugar dele.
+
+#### Detalhes de implementação que valem lembrar
+
+- **`FieldCanvas` espelha `ModuleGrid`** (`@dnd-kit/sortable` + `rectSortingStrategy`) — é o mesmo problema, blocos numa grade que se reorganizam ao arrastar. Duas diferenças deliberadas: a ordem nova vai **para o banco** (`sort_order` é o que a tabela, a ficha e o formulário do módulo leem, não uma preferência de navegador como em `ModuleGrid`), e **não há `DragOverlay`**. O cartão segue o cursor pelo `transform` do próprio `useSortable`; `.module-builder__detail` tem `backdrop-filter`, que cria *containing block* para `position: fixed`, então um overlay ali precisaria do `createPortal` explícito documentado em Ajuste de estoque. Não usar overlay resolve o mesmo problema sem a peça extra.
+- **Só a alça carrega os listeners do dnd-kit**, nunca o cartão inteiro. É o que deixa o cartão ser cartão e formulário ao mesmo tempo: sem isso o sensor engoliria o clique de cada chip e de cada ícone de tipo.
+- **O clique depois do arraste, no diagrama**: o `click` nativo dispara depois do `mouseup` mesmo quando houve arraste, e o dnd-kit **não** o cancela. Sem uma janela de guarda, largar um nó o selecionaria — ou, no modo "ligar", criaria uma transição que ninguém pediu. O `onDragEnd` do contexto carimba a hora (roda no `mouseup`, antes do `click`) e o nó ignora cliques dentro de 200 ms. **Vale para qualquer elemento que seja arrastável e clicável ao mesmo tempo.**
+- **Objetos de opção dos sensores fora do componente**, como sempre (pegadinha de Realizar Venda).
+- **Ícone por tipo, desenhado em código** (`FieldTypeIcon.tsx`, cinco traços no padrão de `src/components/icons.tsx`) — mesma lição do ícone de Grupos tributários: um componente de traço resolve, sem asset externo. O nome do tipo **continua legível** (`title`/`aria-label`, e escrito por extenso no tamanho normal do `FieldTypePicker`): trocar "formulário burocrático" por "adivinhação" não seria ganho. `FIELD_TYPES` continua a única fonte de quais tipos existem — nenhum `data_type` novo nasceu aqui.
+- **A prévia ao vivo é o que faz o canvas ser canvas.** Abaixo dos cartões, o cabeçalho da lista do módulo com os rótulos marcados como "Tabela", na ordem atual. Sem ela seriam cartões no lugar de linhas, cosmético; com ela, arrastar um cartão muda a coisa que se está montando na hora.
+- **As quatro flags viraram chips no cartão**, gravando na hora, e a regra "o campo precisa aparecer em pelo menos um lugar" desceu do submit do modal para o clique do chip — desligar o terceiro é recusado com a mesma mensagem, em vez de deixar gravar um campo invisível.
+- **`FieldFormModal` virou só "campo novo"**: depois de criado, o campo é editado no próprio cartão. O controle de referência (Camada 2) mora nos dois lugares, e some nos dois quando `referenceChoices` chega vazio; quando o campo já aponta para outro módulo, o apontamento continua **legível** para todo mundo (é informação, não controle).
+- **As ações de uma transição ficam no painel lateral, não no desenho.** Uma aresta com três frases penduradas viraria emaranhado, e conferir a automação — que é o que a Camada 2 exige — pede texto corrido. `describeAction` e o selo `OUTRO MÓDULO` continuam iguais.
+- **Arestas são curvas, não retas**, com a barriga sempre para o mesmo lado da direção: assim A→B e B→A (que o banco permite, o `unique` é por par ordenado) não se sobrepõem. A ponta da seta é recortada na borda do nó, senão o sentido — a única informação que uma transição carrega — ficaria escondido debaixo da caixa.
+
+#### Testado no navegador
+
+Módulo "Canvas teste" criado do zero. **Campos**: três de tipos diferentes (texto, data, e-mail) adicionados pelo canvas; "Contato" arrastado da terceira para a primeira posição por eventos de ponteiro reais, gravando `sort_order` 10/20/30 no banco e **sobrevivendo ao F5** (cartões, prévia e ícone de tipo de cada cartão). Prévia acompanhou tudo ao vivo: desligar "Tabela" em "Prazo" tirou a coluna, religar devolveu; tentar desligar a terceira flag de visibilidade foi recusado com *"O campo precisa aparecer em pelo menos um lugar…"*. Rótulo renomeado no cartão e tipo trocado de E-mail para Telefone pelo ícone, ambos gravados. **Workflow**: três situações ("Aberto" virou inicial sozinha), um nó arrastado gravou `canvas_x/canvas_y` = 158/186 enquanto os outros dois continuaram em nulo e caíram no cálculo em linha — tudo intacto depois do F5. Duas transições criadas pelo modo "Ligar situações", com as dicas mudando a cada passo e o par chegando travado no formulário; no banco, `aberto → em_andamento` e `em_andamento → resolvido`, direções certas. Nenhum arraste virou seleção acidental. **Camada 1 de ponta a ponta**: ação `now` em "Prazo" configurada pelo painel da seta; registro criado nasceu em "Aberto", passou por "Em andamento" e chegou em "Resolvido" com `Prazo` = `2026-08-21` preenchido sozinho. **Camada 2 sem a flag**: "O que a ação faz" com **uma** opção e "Valor" com **três** (igual a M4), e o banco recusou pelo console as duas formas cruzadas — *"Ação que lê ou escreve em outro módulo só pode ser configurada por um desenvolvedor do Facilite."* — provando que a recusa não é CSS. **Tributações e Grupos tributários**: canvas presente só no modo "editar existente" (6 e 11 cartões, sem "Novo campo", sem botão de remover, chips ativos), aviso da tabela dedicada intacto, sem seção de workflow. **Produtos e Financeiro**: recusa com a mensagem de M3, sem canvas e sem workflow, nenhum botão. Módulo de teste excluído no fim pelo diálogo de atrito (digitando o nome): zero linhas restantes em `modules`, `module_fields`, `module_records`, `module_situations`, `module_transitions`, `module_transition_actions` e `role_permissions`. `tsc`, `oxlint` e `vite build` limpos, com o code splitting por página preservado. `get_advisors` (security e performance) sem nenhum aviso novo — a RPC nova aparece na mesma categoria informativa de todas as outras deste projeto, e a migration não criou índice.
+
+**Não exercitado**: a recusa de `save_module_situation_position` para quem não tem `can_manage_modules`. Ela usa a mesma `assert_module_workflow_editable` que M4 já provou recusar, e o `proacl` da função é idêntico ao das irmãs (sem `anon`/`public`), mas o teste com a flag desligada não foi feito nesta rodada.
+
+#### Fora de escopo
+
+Modo avançado com sintaxe própria (Direção C do relatório) — se vier, apoia-se neste canvas, não o substitui. Rolagem horizontal da grade de Permissões. Redesenho dos módulos com tela própria. Múltiplas conexões entre o mesmo par de nós ou transição condicional além de "de qual situação para qual" (o `unique(from, to)` já impede duplicata). Zoom/pan no diagrama e auto-arranjo de nós.
+
 ## Roteiro para criar um novo módulo
 
 Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer módulo novo (Vendas, Compras, Financeiro etc.) deve seguir o mesmo, para não divergir do motor genérico nem do RBAC.
@@ -1367,5 +1425,6 @@ Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer m�
 - A tela inicial usa o layout `original` como padrão em `src/features/home/HomePage.tsx`.
 - O repositório contém `legacy-static/` somente como referência do protótipo anterior; a aplicação ativa está em `src/`.
 - Há um `.claude/launch.json` legado que apenas define o comando de inicialização do projeto. Ele não é uma fonte de preferências nem de contexto.
+- O construtor de módulos (`/modulos`) usa canvas de campos e diagrama de workflow desde 21/08/2026; as regras de M3/M4 (quem edita o quê, Camada 2 só para `is_facilite_developer`) continuam idênticas — mudou só a superfície.
 - Mantenha mudanças focadas e não altere arquivos não relacionados sem necessidade.
 - `products.taxation` foi removido (21/08/2026, campo do protótipo original que nenhuma lógica fiscal lia); `MODULE_ICONS['grupos-tributarios']` agora tem ícone próprio (`TaxGroupIcon`) para não colidir com `modulos`, que segue com o ícone genérico de propósito.

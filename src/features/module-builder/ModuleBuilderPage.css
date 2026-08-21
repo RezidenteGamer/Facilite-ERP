@@ -181,42 +181,6 @@
   background: var(--danger-hover);
 }
 
-.module-builder__table-wrap {
-  overflow-x: auto;
-}
-
-.module-builder__table {
-  border-collapse: collapse;
-  width: 100%;
-  min-width: 620px;
-  font-size: 13px;
-}
-
-.module-builder__table th,
-.module-builder__table td {
-  padding: 8px 12px;
-  text-align: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  white-space: nowrap;
-}
-
-.module-builder__table thead th {
-  font-weight: 600;
-  opacity: 0.85;
-}
-
-.module-builder__cell-label {
-  text-align: left;
-  font-weight: 600;
-}
-
-.module-builder__cell-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.module-builder__table code,
 .module-builder__detail-meta code {
   font-size: 12px;
   opacity: 0.85;
@@ -510,4 +474,530 @@
   text-transform: uppercase;
   letter-spacing: 0.03em;
   white-space: nowrap;
+}
+
+/* --- Seletor de tipo por icone (canvas e modal de campo novo) --- */
+
+.module-builder__type-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.module-builder__type-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.module-builder__type-option:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.module-builder__type-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.module-builder__type-option--on {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #10233f;
+}
+
+.module-builder__type-glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.module-builder__type-picker--small .module-builder__type-option {
+  padding: 5px;
+  border-radius: 9px;
+}
+
+.module-builder__type-picker--small .module-builder__type-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.module-builder__field-glyph {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+/* --- Canvas de campos --- */
+
+.module-builder__canvas-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.module-builder__canvas-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.module-builder__canvas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.module-builder__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.module-builder__card--dragging {
+  opacity: 0.45;
+}
+
+.module-builder__card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.module-builder__grip {
+  flex-shrink: 0;
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--white);
+  opacity: 0.55;
+  cursor: grab;
+  touch-action: none;
+}
+
+.module-builder__grip svg {
+  width: 18px;
+  height: 18px;
+}
+
+.module-builder__grip:hover {
+  opacity: 0.9;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.module-builder__grip--off {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.module-builder__card-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.module-builder__card-label {
+  width: 100%;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.module-builder__card-label:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.module-builder__card-label:focus {
+  outline: none;
+  border-color: var(--amber);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.module-builder__card-label--static {
+  border-color: transparent;
+}
+
+.module-builder__card-key {
+  padding-left: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.module-builder__card-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--white);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.module-builder__card-remove:hover {
+  background: var(--danger);
+}
+
+.module-builder__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.module-builder__chip {
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.module-builder__chip:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.module-builder__chip--on {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: transparent;
+  color: #10233f;
+  opacity: 1;
+}
+
+.module-builder__chip:disabled {
+  cursor: not-allowed;
+}
+
+.module-builder__card-ref {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.module-builder__card-select {
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--white);
+  color: #10233f;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.module-builder__card-refnote {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* --- Previa ao vivo da lista do modulo --- */
+
+.module-builder__preview {
+  margin-top: 4px;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+}
+
+.module-builder__preview-cap {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+
+.module-builder__preview-wrap {
+  overflow-x: auto;
+}
+
+.module-builder__preview-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+
+.module-builder__preview-table th,
+.module-builder__preview-table td {
+  padding: 6px 12px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.module-builder__preview-table thead th {
+  font-weight: 700;
+}
+
+.module-builder__preview-table tbody td {
+  opacity: 0.35;
+}
+
+/* --- Diagrama de situacoes e transicoes --- */
+
+.module-builder__diagram {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.module-builder__diagram-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.module-builder__diagram-hint {
+  font-size: 12.5px;
+  opacity: 0.75;
+}
+
+.module-builder__btn--armed {
+  background: var(--white);
+  color: #10233f;
+}
+
+.module-builder__btn--armed:hover:not(:disabled) {
+  background: var(--white);
+}
+
+.module-builder__diagram-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 12px;
+  align-items: stretch;
+}
+
+@media (max-width: 980px) {
+  .module-builder__diagram-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.module-builder__plane-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.module-builder__plane {
+  position: relative;
+  min-width: 100%;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.13) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.module-builder__plane--connecting {
+  cursor: crosshair;
+}
+
+/* O SVG cobre o plano inteiro; sem isto ele engoliria o clique no fundo (que
+   e o que limpa a selecao) e o arraste dos nos. Cada aresta reativa o
+   ponteiro so para si. */
+.module-builder__edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.module-builder__edge {
+  pointer-events: auto;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.module-builder__edge:hover {
+  color: var(--white);
+}
+
+.module-builder__edge--selected {
+  color: var(--amber);
+}
+
+.module-builder__edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+}
+
+.module-builder__edge-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.module-builder__edge-label {
+  fill: var(--white);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(3, 24, 54, 0.85);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+
+.module-builder__node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(16, 35, 63, 0.92);
+  color: var(--white);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+  z-index: 1;
+}
+
+.module-builder__node:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.module-builder__node--initial {
+  border-color: var(--amber);
+  border-width: 2px;
+}
+
+.module-builder__node--selected {
+  box-shadow: 0 0 0 2px var(--white);
+}
+
+.module-builder__node--dragging {
+  opacity: 0.85;
+  cursor: grabbing;
+  z-index: 3;
+}
+
+.module-builder__node--connect-from {
+  box-shadow: 0 0 0 2px var(--amber);
+}
+
+.module-builder__node--connect-to {
+  border-style: dashed;
+}
+
+.module-builder__node-label {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.module-builder__node-code {
+  font-size: 10.5px;
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.module-builder__node-seal {
+  position: absolute;
+  top: -9px;
+  right: 8px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--amber);
+  color: #10233f;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.module-builder__panel {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.module-builder__panel-kind {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+
+.module-builder__panel-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.module-builder__panel-meta {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  opacity: 0.8;
+}
+
+.module-builder__panel-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
 }

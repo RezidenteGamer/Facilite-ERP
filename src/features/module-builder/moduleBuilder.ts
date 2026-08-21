@@ -21,10 +21,12 @@ export type BuilderModule = {
 };
 
 /**
- * Os tipos que o motor genérico **já** suporta. Esta etapa não inventa nenhum
- * tipo novo: o construtor escolhe entre os que existem, e um `select` feito à
- * mão aqui é o suficiente — criar um `data_type` novo (opções, número,
- * arquivo) seria generalizar o motor inteiro por causa de um formulário.
+ * Os tipos que o motor genérico **já** suporta. O construtor escolhe entre os
+ * que existem e não inventa nenhum tipo novo — criar um `data_type` novo
+ * (opções, número, arquivo) seria generalizar o motor inteiro por causa de um
+ * formulário. Quem desenha a escolha é `FieldTypePicker` (cinco ícones lado a
+ * lado, no lugar do `<select>` que existia até o redesenho do construtor);
+ * esta lista continua sendo a única fonte de quais tipos existem.
  *
  * Nota honesta sobre o que cada um faz hoje: só `date` muda o `<input>` (para
  * `type="date"`). `boolean`, `phone` e `email` são texto na tela — é o
@@ -291,6 +293,42 @@ export async function updateModuleField(
     })
     .eq("id", fieldId);
   if (error) throw error;
+}
+
+/**
+ * Grava a ordem nova dos campos depois de um arraste no canvas.
+ *
+ * **Sem RPC nova**: `module_fields` já aceita `update` direto pelo PostgREST
+ * de quem tem `can_manage_modules` (policy de M3, confirmada antes de
+ * escrever isto), e `sort_order` é uma coluna comum dessa tabela — a mesma
+ * que `updateModuleField` já mexeria se o formulário a oferecesse. Uma RPC de
+ * reordenação em lote só existiria para economizar viagens de rede numa lista
+ * de meia dúzia de linhas.
+ *
+ * Só os campos que **mudaram** de posição são gravados: reordenar dois
+ * cartões numa lista de dez não deveria escrever dez linhas.
+ */
+export async function reorderModuleFields(
+  fields: { id: string; sortOrder: number }[],
+): Promise<void> {
+  const client = assertSupabase();
+
+  /* Reescreve a escala do zero (10, 20, 30…) em vez de tentar encaixar um
+     valor entre dois vizinhos: os `sort_order` que vêm de `create_user_module`
+     e de `addModuleField` já andam de 10 em 10, e recalcular tudo evita o caso
+     em que dois campos vizinhos têm valores consecutivos e não sobra espaço
+     no meio. */
+  const updates = fields
+    .map((field, index) => ({ id: field.id, sortOrder: (index + 1) * 10 }))
+    .filter((next, index) => next.sortOrder !== fields[index].sortOrder);
+
+  for (const update of updates) {
+    const { error } = await client
+      .from("module_fields")
+      .update({ sort_order: update.sortOrder })
+      .eq("id", update.id);
+    if (error) throw error;
+  }
 }
 
 /**

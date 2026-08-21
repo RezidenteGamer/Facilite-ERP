@@ -833,6 +833,8 @@ export type Database = {
       }
       module_situations: {
         Row: {
+          canvas_x: number | null
+          canvas_y: number | null
           code: string
           created_at: string
           id: string
@@ -842,6 +844,8 @@ export type Database = {
           sort_order: number
         }
         Insert: {
+          canvas_x?: number | null
+          canvas_y?: number | null
           code: string
           created_at?: string
           id?: string
@@ -851,6 +855,8 @@ export type Database = {
           sort_order?: number
         }
         Update: {
+          canvas_x?: number | null
+          canvas_y?: number | null
           code?: string
           created_at?: string
           id?: string
@@ -2637,6 +2643,14 @@ export type Database = {
           p_sort_order: number
         }
         Returns: string
+      }
+      save_module_situation_position: {
+        Args: {
+          p_canvas_x: number
+          p_canvas_y: number
+          p_id: string
+        }
+        Returns: undefined
       }
       save_module_transition: {
         Args: {

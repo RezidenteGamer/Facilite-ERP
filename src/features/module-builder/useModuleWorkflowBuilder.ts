@@ -7,6 +7,7 @@ import {
   fetchModuleTransitions,
   fetchTransitionActions,
   saveModuleSituation,
+  saveModuleSituationPosition,
   saveModuleTransition,
   saveTransitionAction,
   type ModuleSituation,
@@ -161,6 +162,29 @@ export function useModuleWorkflowBuilder(
     [moduleId, reload],
   );
 
+  /**
+   * Arrastar um nó do diagrama. O estado local muda **antes** da ida ao
+   * banco: uma caixa que volta para o lugar antigo e só depois pula para o
+   * novo tornaria o arraste inutilizável. Se a gravação falhar, o erro
+   * aparece e o `reload` traz a posição real de volta.
+   */
+  const moveSituation = useCallback(
+    async (id: string, x: number, y: number) => {
+      setSituations((previous) =>
+        previous.map((situation) =>
+          situation.id === id ? { ...situation, canvasX: x, canvasY: y } : situation,
+        ),
+      );
+      try {
+        await saveModuleSituationPosition(id, x, y);
+      } catch (err) {
+        setError(extractErrorMessage(err, "Não foi possível gravar a posição da situação."));
+        await reload();
+      }
+    },
+    [reload],
+  );
+
   const removeSituation = useCallback(
     async (id: string) => {
       await deleteModuleSituation(id);
@@ -211,6 +235,7 @@ export function useModuleWorkflowBuilder(
     error,
     reload,
     saveSituation,
+    moveSituation,
     removeSituation,
     saveTransition,
     removeTransition,

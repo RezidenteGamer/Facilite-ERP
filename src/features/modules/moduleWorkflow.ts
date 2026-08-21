@@ -26,6 +26,14 @@ export type ModuleSituation = {
   label: string;
   sortOrder: number;
   isInitial: boolean;
+  /**
+   * Posição no diagrama do construtor. Nuláveis: situação criada antes do
+   * redesenho do construtor (ou por qualquer caminho que não seja o arraste)
+   * não tem posição gravada, e o diagrama calcula uma em linha pela ordem de
+   * `sort_order` em vez de recusar desenhar.
+   */
+  canvasX: number | null;
+  canvasY: number | null;
 };
 
 export type ModuleTransition = {
@@ -78,7 +86,7 @@ function assertSupabase() {
 export async function fetchModuleSituations(moduleId: string): Promise<ModuleSituation[]> {
   const { data, error } = await assertSupabase()
     .from("module_situations")
-    .select("id, module_id, code, label, sort_order, is_initial")
+    .select("id, module_id, code, label, sort_order, is_initial, canvas_x, canvas_y")
     .eq("module_id", moduleId)
     .order("sort_order", { ascending: true });
   if (error) throw error;
@@ -90,6 +98,8 @@ export async function fetchModuleSituations(moduleId: string): Promise<ModuleSit
     label: row.label,
     sortOrder: row.sort_order,
     isInitial: row.is_initial,
+    canvasX: row.canvas_x,
+    canvasY: row.canvas_y,
   }));
 }
 
@@ -167,6 +177,29 @@ export async function saveModuleSituation(
   });
   if (error) throw error;
   return data as string;
+}
+
+/**
+ * Grava **só** a posição do nó no diagrama.
+ *
+ * RPC própria, e não `save_module_situation`, porque aquela não aceita patch
+ * parcial: ela exige rótulo, ordem e `is_initial`, revalida o rótulo e mexe em
+ * qual situação é a inicial. Arrastar uma caixa não deveria poder tocar em
+ * nada disso — um arraste que reescreve `is_initial` seria um efeito colateral
+ * invisível. O portão é o mesmo (`assert_module_workflow_editable`), então
+ * nenhuma fronteira nova nasce aqui.
+ */
+export async function saveModuleSituationPosition(
+  id: string,
+  x: number,
+  y: number,
+): Promise<void> {
+  const { error } = await assertSupabase().rpc("save_module_situation_position", {
+    p_id: id,
+    p_canvas_x: x,
+    p_canvas_y: y,
+  });
+  if (error) throw error;
 }
 
 export async function deleteModuleSituation(id: string): Promise<void> {

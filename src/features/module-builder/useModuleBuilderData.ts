@@ -10,6 +10,7 @@ import {
   fetchBuilderModules,
   fetchModuleFields,
   removeModuleField,
+  reorderModuleFields,
   updateModuleField,
   type BuilderModule,
   type NewModuleField,
@@ -110,6 +111,33 @@ export function useModuleBuilderData() {
     [reloadFields, selectedId],
   );
 
+  /**
+   * Ordem nova vinda do arraste no canvas. O estado local muda antes da ida
+   * ao banco — os cartões precisam ficar onde foram soltos, não voltar e
+   * pular. O erro (se houver) recarrega a ordem de verdade.
+   */
+  const reorderFields = useCallback(
+    async (orderedIds: string[]) => {
+      const byId = new Map(fields.map((field) => [field.id, field]));
+      const ordered = orderedIds
+        .map((id) => byId.get(id))
+        .filter((field): field is ModuleFieldDefinition => Boolean(field));
+      if (ordered.length !== fields.length) return;
+
+      // Os `sort_order` de origem, para a gravação só tocar no que mudou.
+      const payload = ordered.map((field) => ({ id: field.id, sortOrder: field.sortOrder }));
+      setFields(ordered.map((field, index) => ({ ...field, sortOrder: (index + 1) * 10 })));
+
+      try {
+        await reorderModuleFields(payload);
+      } catch (err) {
+        setError(extractErrorMessage(err, "Não foi possível gravar a ordem dos campos."));
+        await reloadFields(selectedId);
+      }
+    },
+    [fields, reloadFields, selectedId],
+  );
+
   const dropField = useCallback(
     async (fieldId: string) => {
       await removeModuleField(fieldId);
@@ -131,6 +159,7 @@ export function useModuleBuilderData() {
     deleteModule,
     addField,
     editField,
+    reorderFields,
     dropField,
   };
 }

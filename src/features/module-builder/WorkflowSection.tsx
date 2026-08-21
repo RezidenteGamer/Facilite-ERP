@@ -12,6 +12,7 @@ import ActionFormModal from "./ActionFormModal";
 import SituationFormModal from "./SituationFormModal";
 import TransitionFormModal from "./TransitionFormModal";
 import { useModuleWorkflowBuilder, type ReferenceTarget } from "./useModuleWorkflowBuilder";
+import WorkflowCanvas, { type Selection } from "./WorkflowCanvas";
 import "./ModuleBuilderPage.css";
 
 type WorkflowSectionProps = {
@@ -28,7 +29,7 @@ type ModalState =
   | { kind: "none" }
   | { kind: "situation"; situation?: ModuleSituation }
   | { kind: "remove-situation"; situation: ModuleSituation }
-  | { kind: "transition"; transition?: ModuleTransition }
+  | { kind: "transition"; transition?: ModuleTransition; from?: string; to?: string }
   | { kind: "remove-transition"; transition: ModuleTransition }
   | { kind: "action"; transition: ModuleTransition; action?: ModuleTransitionAction }
   | { kind: "remove-action"; action: ModuleTransitionAction };
@@ -72,10 +73,20 @@ function describeAction(
 }
 
 /**
- * Seção de situações, transições e ações do construtor de módulos (M4).
+ * Situações e transições do módulo (M4), agora como **diagrama**: nós
+ * posicionáveis e setas com sentido, no lugar das duas listas que existiam.
  *
- * Só aparece em módulo de armazenamento genérico — a mesma fronteira que M3
- * já traçou para campos personalizados, e a mesma que a RPC impõe no banco.
+ * O que **não** mudou: a seção só aparece em módulo de armazenamento genérico
+ * (mesma fronteira de M3, e a mesma que `assert_module_workflow_editable`
+ * impõe no banco), a inicial não pode ser desmarcada — só substituída —, e a
+ * Camada 2 continua invisível para quem não é desenvolvedor do Facilite,
+ * porque `availableReferences` chega vazio aos formulários. Só a superfície é
+ * outra.
+ *
+ * As ações de uma transição vivem no painel lateral, não no desenho: uma
+ * aresta com três frases penduradas viraria um emaranhado, e conferir a
+ * automação (que é o que a Camada 2 exige) pede texto corrido, não rótulo de
+ * seta.
  */
 export default function WorkflowSection({
   moduleId,
@@ -92,6 +103,7 @@ export default function WorkflowSection({
     references,
     error,
     saveSituation,
+    moveSituation,
     removeSituation,
     saveTransition,
     removeTransition,
@@ -101,11 +113,21 @@ export default function WorkflowSection({
 
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
 
   /* Camada 2 escondida, não desabilitada: sem a característica de
      desenvolvedor do Facilite os saltos de referência simplesmente não
      existem para os formulários, e a Camada 1 continua inteira. */
   const availableReferences = isFaciliteDeveloper ? references : [];
+
+  const selectedSituation =
+    selection?.kind === "situation"
+      ? (situations.find((situation) => situation.id === selection.id) ?? null)
+      : null;
+  const selectedTransition =
+    selection?.kind === "transition"
+      ? (transitions.find((transition) => transition.id === selection.id) ?? null)
+      : null;
 
   async function run(action: () => Promise<void>) {
     setActionError(null);
@@ -116,6 +138,120 @@ export default function WorkflowSection({
       setActionError(extractErrorMessage(err, "Não foi possível concluir a operação."));
     }
   }
+
+  const panel = (() => {
+    if (selectedSituation) {
+      return (
+        <>
+          <p className="module-builder__panel-kind">Situação</p>
+          <h4 className="module-builder__panel-title">{selectedSituation.label}</h4>
+          <p className="module-builder__panel-meta">
+            <code>{selectedSituation.code}</code>
+            {selectedSituation.isInitial && (
+              <span className="module-builder__badge">inicial</span>
+            )}
+          </p>
+          {selectedSituation.isInitial && (
+            <p className="module-builder__hint">
+              Todo registro novo nasce aqui. Para trocar, marque outra como inicial — o módulo não
+              pode ficar sem nenhuma.
+            </p>
+          )}
+          <div className="module-builder__panel-actions">
+            <button
+              className="module-builder__link"
+              type="button"
+              onClick={() => setModal({ kind: "situation", situation: selectedSituation })}
+            >
+              Editar
+            </button>
+            <button
+              className="module-builder__link module-builder__link--danger"
+              type="button"
+              onClick={() => setModal({ kind: "remove-situation", situation: selectedSituation })}
+            >
+              Excluir
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    if (selectedTransition) {
+      const actions = actionsByTransition[selectedTransition.id] ?? [];
+      return (
+        <>
+          <p className="module-builder__panel-kind">Transição</p>
+          <h4 className="module-builder__panel-title">{selectedTransition.label}</h4>
+          <p className="module-builder__panel-meta">
+            {situationById[selectedTransition.fromSituationId]?.label ?? "?"} →{" "}
+            {situationById[selectedTransition.toSituationId]?.label ?? "?"}
+          </p>
+
+          <p className="module-builder__panel-kind">Ações automáticas</p>
+          {actions.length === 0 ? (
+            <p className="module-builder__empty">
+              Nenhuma — a transição só muda a situação do registro.
+            </p>
+          ) : (
+            <ul className="module-builder__wf-sublist">
+              {actions.map((action) => (
+                <li className="module-builder__wf-subitem" key={action.id}>
+                  <span>
+                    {describeAction(action, fields, references)}
+                    {isCrossModuleAction(action) && (
+                      <span className="module-builder__badge">outro módulo</span>
+                    )}
+                  </span>
+                  <button
+                    className="module-builder__link module-builder__link--danger"
+                    type="button"
+                    onClick={() => setModal({ kind: "remove-action", action })}
+                  >
+                    Remover
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="module-builder__panel-actions">
+            <button
+              className="module-builder__link"
+              type="button"
+              onClick={() => setModal({ kind: "action", transition: selectedTransition })}
+            >
+              Nova ação
+            </button>
+            <button
+              className="module-builder__link"
+              type="button"
+              onClick={() => setModal({ kind: "transition", transition: selectedTransition })}
+            >
+              Editar
+            </button>
+            <button
+              className="module-builder__link module-builder__link--danger"
+              type="button"
+              onClick={() => setModal({ kind: "remove-transition", transition: selectedTransition })}
+            >
+              Excluir
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <p className="module-builder__panel-kind">Nada selecionado</p>
+        <p className="module-builder__hint">
+          Clique numa situação para renomear ou excluir, ou numa seta para configurar o que ela
+          preenche sozinha ao ser acionada.
+        </p>
+      </>
+    );
+  })();
 
   return (
     <section className="module-builder__workflow">
@@ -145,116 +281,15 @@ export default function WorkflowSection({
           Este módulo ainda não tem situações. A primeira que você criar vira a situação inicial.
         </p>
       ) : (
-        <ul className="module-builder__wf-list">
-          {situations.map((situation) => (
-            <li className="module-builder__wf-item" key={situation.id}>
-              <div className="module-builder__wf-main">
-                <span className="module-builder__wf-label">{situation.label}</span>
-                <span className="module-builder__wf-meta">
-                  <code>{situation.code}</code>
-                  {situation.isInitial && (
-                    <span className="module-builder__badge">inicial</span>
-                  )}
-                </span>
-              </div>
-              <div className="module-builder__wf-actions">
-                <button
-                  className="module-builder__link"
-                  type="button"
-                  onClick={() => setModal({ kind: "situation", situation })}
-                >
-                  Editar
-                </button>
-                <button
-                  className="module-builder__link module-builder__link--danger"
-                  type="button"
-                  onClick={() => setModal({ kind: "remove-situation", situation })}
-                >
-                  Excluir
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {situations.length >= 2 && (
-        <>
-          <div className="module-builder__workflow-head">
-            <h3 className="module-builder__workflow-title">Transições</h3>
-            <button
-              className="module-builder__btn module-builder__btn--small"
-              type="button"
-              onClick={() => setModal({ kind: "transition" })}
-            >
-              Nova transição
-            </button>
-          </div>
-
-          {transitions.length === 0 ? (
-            <p className="module-builder__empty">
-              Nenhuma transição ainda — sem elas, o registro fica parado na situação inicial.
-            </p>
-          ) : (
-            <ul className="module-builder__wf-list">
-              {transitions.map((transition) => (
-                <li className="module-builder__wf-item" key={transition.id}>
-                  <div className="module-builder__wf-main">
-                    <span className="module-builder__wf-label">{transition.label}</span>
-                    <span className="module-builder__wf-meta">
-                      {situationById[transition.fromSituationId]?.label ?? "?"} →{" "}
-                      {situationById[transition.toSituationId]?.label ?? "?"}
-                    </span>
-
-                    <ul className="module-builder__wf-sublist">
-                      {(actionsByTransition[transition.id] ?? []).map((action) => (
-                        <li className="module-builder__wf-subitem" key={action.id}>
-                          <span>
-                            {describeAction(action, fields, references)}
-                            {isCrossModuleAction(action) && (
-                              <span className="module-builder__badge">outro módulo</span>
-                            )}
-                          </span>
-                          <button
-                            className="module-builder__link module-builder__link--danger"
-                            type="button"
-                            onClick={() => setModal({ kind: "remove-action", action })}
-                          >
-                            Remover
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="module-builder__wf-actions">
-                    <button
-                      className="module-builder__link"
-                      type="button"
-                      onClick={() => setModal({ kind: "action", transition })}
-                    >
-                      Nova ação
-                    </button>
-                    <button
-                      className="module-builder__link"
-                      type="button"
-                      onClick={() => setModal({ kind: "transition", transition })}
-                    >
-                      Editar
-                    </button>
-                    <button
-                      className="module-builder__link module-builder__link--danger"
-                      type="button"
-                      onClick={() => setModal({ kind: "remove-transition", transition })}
-                    >
-                      Excluir
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+        <WorkflowCanvas
+          situations={situations}
+          transitions={transitions}
+          selection={selection}
+          onSelect={setSelection}
+          onMoveSituation={(id, x, y) => moveSituation(id, x, y)}
+          onConnect={(from, to) => setModal({ kind: "transition", from, to })}
+          panel={panel}
+        />
       )}
 
       {modal.kind === "situation" && (
@@ -283,7 +318,12 @@ export default function WorkflowSection({
           title={`Excluir a situação “${modal.situation.label}”?`}
           message="Só sai se nenhum registro estiver nela e nenhuma transição a usar — o banco recusa nos dois casos, e diz qual é o impedimento."
           confirmLabel="Excluir"
-          onConfirm={() => run(() => removeSituation(modal.situation.id))}
+          onConfirm={() =>
+            run(async () => {
+              await removeSituation(modal.situation.id);
+              setSelection(null);
+            })
+          }
           onCancel={() => setModal({ kind: "none" })}
         />
       )}
@@ -303,9 +343,21 @@ export default function WorkflowSection({
                   label: modal.transition.label,
                   sortOrder: modal.transition.sortOrder,
                 }
-              : undefined
+              : modal.from && modal.to
+                ? {
+                    id: null,
+                    fromSituationId: modal.from,
+                    toSituationId: modal.to,
+                    label: "",
+                    sortOrder: 0,
+                  }
+                : undefined
           }
-          lockPair={Boolean(modal.transition)}
+          /* O par vem do diagrama nos dois casos: numa transição já criada ele
+             é imutável, e numa nova ele é justamente o que os dois cliques
+             acabaram de dizer. Editar por `<select>` aqui desfaria a ligação
+             que a pessoa desenhou. */
+          lockPair
           submitLabel={modal.transition ? "Salvar" : "Criar"}
           onSubmit={(input) => run(() => saveTransition(input))}
           onCancel={() => setModal({ kind: "none" })}
@@ -317,7 +369,12 @@ export default function WorkflowSection({
           title={`Excluir a transição “${modal.transition.label}”?`}
           message="As ações automáticas configuradas nela vão junto. Os registros continuam nas situações onde já estão."
           confirmLabel="Excluir"
-          onConfirm={() => run(() => removeTransition(modal.transition.id))}
+          onConfirm={() =>
+            run(async () => {
+              await removeTransition(modal.transition.id);
+              setSelection(null);
+            })
+          }
           onCancel={() => setModal({ kind: "none" })}
         />
       )}

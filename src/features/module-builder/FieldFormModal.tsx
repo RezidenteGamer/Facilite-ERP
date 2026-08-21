@@ -3,7 +3,8 @@ import { useState } from "react";
 import FormField from "../../components/form/FormField";
 import type { ModuleFieldDefinition } from "../registry-engine/types";
 import "../registry-engine/RegistryFormModal.css";
-import { FIELD_TYPES, previewFieldKey, type NewModuleField } from "./moduleBuilder";
+import FieldTypePicker from "./FieldTypePicker";
+import { previewFieldKey, type NewModuleField } from "./moduleBuilder";
 import "./ModuleBuilderPage.css";
 
 type FieldFormModalProps = {
@@ -35,9 +36,12 @@ type FieldFormModalProps = {
 };
 
 /**
- * Formulário de um campo de módulo. O `<select>` de tipo é feito à mão e só
- * oferece os `data_type` que o motor genérico já conhece — esta etapa não
- * inventa tipo novo.
+ * Formulário de um campo **novo**. Depois de criado, o campo é editado no
+ * próprio cartão do canvas (rótulo, tipo, flags e referência), então este
+ * modal existe só para o momento em que ainda não há cartão para clicar.
+ *
+ * O tipo é escolhido por ícone (`FieldTypePicker`), como no cartão — os
+ * mesmos cinco `data_type` que o motor genérico já conhece, nem um a mais.
  */
 export default function FieldFormModal({
   title,
@@ -113,23 +117,8 @@ export default function FieldFormModal({
               />
 
               <div className="module-builder__select-field">
-                <label className="module-builder__select-label" htmlFor="field-type">
-                  Tipo
-                </label>
-                <select
-                  id="field-type"
-                  className="module-builder__select"
-                  value={dataType}
-                  onChange={(event) =>
-                    setDataType(event.target.value as ModuleFieldDefinition["dataType"])
-                  }
-                >
-                  {FIELD_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
-                </select>
+                <span className="module-builder__select-label">Tipo</span>
+                <FieldTypePicker value={dataType} onChange={setDataType} />
               </div>
 
               {referenceChoices.length > 0 && (
