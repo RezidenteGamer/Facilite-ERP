@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../../components/icons";
+import { useAuth } from "../../auth/AuthContext";
 import IconsLayoutMenu from "../components/IconsLayoutMenu";
 import ModuleGrid from "../components/ModuleGrid";
 import { useIconsArrangement } from "../useIconsArrangement";
@@ -20,7 +21,9 @@ const MENU_HEIGHT = 130;
  */
 export default function OriginalLayout() {
   const navigate = useNavigate();
+  const { currentBranchId, branches } = useAuth();
   const { arrangement, setArrangement } = useIconsArrangement();
+  const currentBranchName = branches.find((branch) => branch.id === currentBranchId)?.name ?? "Nenhuma filial selecionada";
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
@@ -48,7 +51,7 @@ export default function OriginalLayout() {
   return (
     <AppShell
       navItems={navItems}
-      secondaryText="Filial 1 - (nome empresa)"
+      secondaryText={currentBranchName}
       moduleLabel="Comércio"
       reserveHeaderScroll
       onContentContextMenu={handleContentContextMenu}
