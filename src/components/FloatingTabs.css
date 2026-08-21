@@ -31,12 +31,6 @@
   padding: 0;
 }
 
-.floating-tab--back img {
-  width: 44px;
-  height: 44px;
-  object-fit: contain;
-}
-
 /* A aba do Suporte herda o mesmo "peek" (bottom: -16px) das outras abas —
    e o painel que ela abre usa exatamente a mesma posição/largura, para
    manter a continuidade visual entre os dois estados (recolhido/estendido). */
@@ -65,10 +59,5 @@
     left: 12px;
     width: 60px;
     height: 50px;
-  }
-
-  .floating-tab--back img {
-    width: 26px;
-    height: 26px;
   }
 }

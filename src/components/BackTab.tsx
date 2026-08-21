@@ -1,7 +1,4 @@
 import { useNavigate } from "react-router-dom";
-import backIcon from "../assets/icons/voltar-sistema-geral.webp";
-import { BACK_ICON_PLACEHOLDER } from "../assets/icons/voltar-sistema-geral.placeholder";
-import FadeImage from "./FadeImage";
 import "./FloatingTabs.css";
 
 type BackTabProps = {
@@ -19,8 +16,6 @@ export default function BackTab({ onClick }: BackTabProps) {
       type="button"
       aria-label="Voltar"
       onClick={onClick ?? (() => navigate(-1))}
-    >
-      <FadeImage src={backIcon} alt="" placeholder={BACK_ICON_PLACEHOLDER} />
-    </button>
+    />
   );
 }
