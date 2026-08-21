@@ -5,20 +5,22 @@
 import sharp from "sharp";
 import { writeFileSync } from "node:fs";
 
-const ICON_SRC = "src/assets/icons/voltar-sistema-geral.png";
+// Fonte em qualidade "full" — fora do repo, ver .gitignore (mesma pasta de
+// referência usada para outros assets de sistema, não módulos).
+const ICON_SRC = "Recursos de Desenvolvimento/Sistema Geral/voltar-sistema-geral-png.png";
 const BG_SRC = "src/assets/img/tela-de-login-cinematica.webp";
 
 async function run() {
   // Ícone do BackTab: exibido no máximo a 44x44 CSS px (ver FloatingTabs.css).
-  // Gera em ~4x pra cobrir telas de alta densidade sem exagero.
+  // Gera em ~5x pra cobrir telas de alta densidade sem exagero.
   const icon = sharp(ICON_SRC);
   const iconMeta = await icon.metadata();
-  const iconTargetW = 176;
+  const iconTargetW = 220;
   const iconTargetH = Math.round((iconMeta.height / iconMeta.width) * iconTargetW);
 
   await sharp(ICON_SRC)
     .resize(iconTargetW, iconTargetH)
-    .webp({ quality: 90 })
+    .webp({ quality: 92 })
     .toFile("src/assets/icons/voltar-sistema-geral.webp");
 
   const iconPlaceholder = await sharp(ICON_SRC)
@@ -26,8 +28,11 @@ async function run() {
     .webp({ quality: 40 })
     .toBuffer();
   writeFileSync(
-    "src/assets/icons/voltar-sistema-geral.placeholder.txt",
-    `data:image/webp;base64,${iconPlaceholder.toString("base64")}`,
+    "src/assets/icons/voltar-sistema-geral.placeholder.ts",
+    `// Miniatura borrada (16px, gerada por scripts/optimize-images.mjs) usada como\n` +
+      `// placeholder enquanto o ícone em tamanho real carrega.\n` +
+      `export const BACK_ICON_PLACEHOLDER =\n` +
+      `  "data:image/webp;base64,${iconPlaceholder.toString("base64")}";\n`,
   );
 
   // Fundo do login: mantém as dimensões (já batem com o uso em tela cheia),
