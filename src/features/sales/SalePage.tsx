@@ -80,18 +80,28 @@ export default function SalePage() {
   ];
 
   if (draft.confirmedSale) {
-    const isNota = lastIntent === "nota";
+    const notaPedida = lastIntent === "nota";
+    // O título segue o resultado real da emissão, não a intenção — pedir
+    // nota e ela falhar não pode virar "nota gerada" mentiroso, e também não
+    // pode virar "venda não confirmada", porque ela foi (ver useSaleDraft).
+    const notaEmitida = notaPedida && draft.fiscalOutcome?.ok === true;
+    const notaFalhou = notaPedida && draft.fiscalOutcome?.ok === false;
     return (
       <AppShell navItems={navItems} secondaryText="Realizar venda">
         <div className="sale">
           <div className="sale__panel">
             <div className="sale__card sale__card--success">
               <p className="sale__success-title">
-                {isNota
+                {notaEmitida
                   ? `Nota fiscal da venda ${draft.confirmedSale.code} gerada!`
                   : `Venda ${draft.confirmedSale.code} confirmada!`}
               </p>
               <p className="sale__success-total">Total: {formatMoney(draft.confirmedSale.totalAmount)}</p>
+              {notaFalhou && (
+                <p className="sale__fiscal-warning">
+                  A nota fiscal não saiu: {draft.fiscalOutcome && !draft.fiscalOutcome.ok ? draft.fiscalOutcome.errors.join(" ") : null}
+                </p>
+              )}
               <div className="sale__success-actions">
                 <button
                   className="sale__continue"
@@ -103,9 +113,13 @@ export default function SalePage() {
                 >
                   Nova venda
                 </button>
-                {isNota ? (
+                {notaEmitida ? (
                   <button className="sale__back" type="button" onClick={() => navigate("/notas-emitidas")}>
                     Ver nota
+                  </button>
+                ) : notaFalhou ? (
+                  <button className="sale__back" type="button" onClick={() => navigate("/notas-emitidas")}>
+                    Tentar emitir depois
                   </button>
                 ) : (
                   <button className="sale__back" type="button" onClick={() => navigate("/inicio")}>

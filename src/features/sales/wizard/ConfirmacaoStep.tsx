@@ -10,18 +10,16 @@ type ConfirmacaoStepProps = {
 };
 
 /**
- * Etapa 6: aqui é onde a venda vira registro de verdade — "Salvar Venda" e
- * "Gerar Nota Fiscal" gravam exatamente a mesma coisa (não existe emissão
- * fiscal real no sistema ainda); a diferença é só a mensagem/atalho na tela
- * de sucesso depois. Substitui o antigo modal de confirmação — esta etapa
- * já É a confirmação, um popup em cima dela seria atrito redundante.
+ * Etapa 6: aqui é onde a venda vira registro de verdade. Substitui o antigo
+ * modal de confirmação — esta etapa já É a confirmação, um popup em cima
+ * dela seria atrito redundante.
  */
 export default function ConfirmacaoStep({ draft, canCreate, onConfirmed }: ConfirmacaoStepProps) {
   const disabled = !draft.canConfirm || !canCreate || draft.submitting;
 
   function handleConfirm(intent: SaleIntent) {
     onConfirmed(intent);
-    draft.confirmSale();
+    draft.confirmSale(intent === "nota" ? { emitirNota: true } : undefined);
   }
 
   return (

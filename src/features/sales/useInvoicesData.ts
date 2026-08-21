@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { getFiscalProvider } from "../../lib/fiscal/provider";
 import {
+  emitInvoiceForSale,
   fetchInvoiceSales,
-  fetchSaleForInvoice,
   persistCancelResult,
-  persistEmitResult,
   saleFiscalRef,
-  updateSaleItemsCfop,
+  type EmitOutcome,
   type InvoiceSaleRow,
 } from "../../lib/repositories/fiscalDocumentsRepository";
-import { fetchTaxRules } from "../../lib/repositories/taxRulesRepository";
-import { buildNfePayloadFromSale } from "./invoiceMapping";
+import { getFiscalProvider } from "../../lib/fiscal/provider";
 
 /** Mesmo padrão de `extractErrorMessage` do Financeiro/Controle de Caixa: erros do supabase-js não são `instanceof Error`. */
 export function extractErrorMessage(err: unknown, fallback: string): string {
@@ -21,7 +18,7 @@ export function extractErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export type EmitOutcome = { ok: true } | { ok: false; errors: string[] };
+export type { EmitOutcome };
 
 /** Carrega as vendas confirmadas da filial + documento fiscal associado, e expõe emitir/cancelar. */
 export function useInvoicesData(branchId: string | null) {
@@ -50,28 +47,18 @@ export function useInvoicesData(branchId: string | null) {
     reload();
   }, [reload]);
 
-  /** Emite (ou reemite — idempotente por venda) a nota da venda selecionada. */
+  /**
+   * Emite (ou reemite — idempotente por venda) a nota da venda selecionada.
+   * Wrapper fino sobre `emitInvoiceForSale` (fiscalDocumentsRepository.ts) —
+   * o núcleo de "montar payload + emitir + persistir" mora lá, reaproveitado
+   * também pelo wizard de Realizar Venda; aqui só se soma o `reload()` da
+   * lista, que só faz sentido para esta tela.
+   */
   async function emitInvoice(saleId: string): Promise<EmitOutcome> {
     if (!branchId) return { ok: false, errors: ["Selecione uma filial."] };
-
-    const [sale, rules] = await Promise.all([fetchSaleForInvoice(saleId), fetchTaxRules()]);
-    const built = buildNfePayloadFromSale(sale, rules);
-    if (!built.ok) return { ok: false, errors: built.errors };
-
-    const provider = getFiscalProvider();
-    const document = await provider.emit({ ref: saleFiscalRef(saleId), model: "nfe", payload: built.payload });
-    await persistEmitResult(branchId, { saleId }, document);
-
-    if (document.status === "autorizado") {
-      await updateSaleItemsCfop(saleId, built.cfop);
-    }
-
+    const outcome = await emitInvoiceForSale(branchId, saleId);
     await reload();
-
-    if (document.status !== "autorizado") {
-      return { ok: false, errors: [document.mensagemSefaz ?? "A SEFAZ recusou a emissão."] };
-    }
-    return { ok: true };
+    return outcome;
   }
 
   /** Cancela a nota — `run()` da tela cuida de mostrar a mensagem de recusa (justificativa curta, já cancelada etc.). */

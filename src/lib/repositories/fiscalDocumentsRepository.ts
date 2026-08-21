@@ -11,8 +11,11 @@
  */
 import { supabase } from "../supabaseClient";
 import type { Tables, TablesInsert } from "../../types/supabase";
+import { getFiscalProvider } from "../fiscal/provider";
 import type { FiscalArtifact, FiscalCancelResult, FiscalDocument } from "../fiscal/types";
 import type { SaleForInvoice } from "../../features/sales/invoiceMapping";
+import { buildNfePayloadFromSale } from "../../features/sales/invoiceMapping";
+import { fetchTaxRules } from "./taxRulesRepository";
 import { toTaxGroup } from "./taxGroupLookups";
 
 type FiscalDocumentRow = Tables<"fiscal_documents">;
@@ -313,6 +316,46 @@ export async function persistEmitResult(
  * O provedor real não tem essa limitação (a API dele persiste). Documentado
  * também no AGENTS.md.
  */
+export type EmitOutcome = { ok: true } | { ok: false; errors: string[] };
+
+/**
+ * Núcleo de "emitir NF-e para uma venda": busca venda + regras fiscais, monta
+ * o payload, chama o `FiscalProvider`, persiste o resultado e grava o CFOP
+ * nos itens quando autorizada. Extraído de `useInvoicesData.ts` para que o
+ * wizard de Realizar Venda (`useSaleDraft.ts`) chame exatamente a mesma
+ * lógica que Notas Emitidas usa, em vez de uma segunda implementação
+ * divergente — foi essa duplicação (o botão "Gerar Nota Fiscal" nunca emitia
+ * nada de verdade) que causou o bug que esta função corrige. Quem consome
+ * decide o que fazer depois (`useInvoicesData.emitInvoice` dá `reload()` na
+ * lista; `useSaleDraft.confirmSale` só guarda o resultado) — por isso não
+ * recarrega nada aqui, mesmo padrão de `financial_entries_create_installments`
+ * (núcleo reutilizável + porta específica de quem consome).
+ *
+ * Nunca lança exceção — devolve `{ ok, errors }`, mesmo espírito de
+ * `emitFiscalDocumentForSale` (`src/features/pos/fiscalDocument.ts`, NFC-e do
+ * PDV) para que uma falha de emissão nunca derrube quem chamou.
+ */
+export async function emitInvoiceForSale(branchId: string, saleId: string): Promise<EmitOutcome> {
+  try {
+    const [sale, rules] = await Promise.all([fetchSaleForInvoice(saleId), fetchTaxRules()]);
+    const built = buildNfePayloadFromSale(sale, rules);
+    if (!built.ok) return { ok: false, errors: built.errors };
+
+    const provider = getFiscalProvider();
+    const document = await provider.emit({ ref: saleFiscalRef(saleId), model: "nfe", payload: built.payload });
+    await persistEmitResult(branchId, { saleId }, document);
+
+    if (document.status !== "autorizado") {
+      return { ok: false, errors: [document.mensagemSefaz ?? "A SEFAZ recusou a emissão."] };
+    }
+    await updateSaleItemsCfop(saleId, built.cfop);
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error && err.message ? err.message : "Erro inesperado ao emitir a nota fiscal.";
+    return { ok: false, errors: [message] };
+  }
+}
+
 export async function persistCancelResult(
   documentId: string,
   result: FiscalCancelResult,

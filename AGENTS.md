@@ -792,6 +792,40 @@ Não foi possível testar clicando na tela nesta sessão — o Browser pane não
 
 Impressão térmica do cupom fiscal (formato de impressora fiscal/não fiscal — nenhum módulo do sistema faz isso hoje); contingência offline do PDV (venda sem internet, emissão depois — não pedido, decisão própria se vier a ser necessário); `FocusNfeProvider` real (continua só o simulado); filtro por modelo na tela de Notas Emitidas (lista já mostra os dois sem esconder nenhum; filtro fica para quando a lista crescer o bastante para precisar).
 
+### Correção: o wizard de Realizar Venda não emitia nota nenhuma (21/08/2026)
+
+**Bug de risco fiscal real, não só tela desatualizada.** O wizard (`SaleWizard.tsx` → `ConfirmacaoStep.tsx`) sempre teve dois botões, "Salvar Venda" e "Gerar Nota Fiscal" — desde antes da etapa 8 (Notas Emitidas) existir, quando o comentário "não existe emissão fiscal real no sistema ainda" era verdade. Deixou de ser verdade quando a etapa 8 nasceu, mas ninguém religou os dois lados: os dois botões continuaram gravando exatamente a mesma coisa, e "Gerar Nota Fiscal" só trocava a mensagem da tela de sucesso para "Nota fiscal da venda X gerada!" sem nenhuma linha nova em `fiscal_documents`. Confirmado no navegador antes da correção: "Ver nota" levava para Notas Emitidas, que mostrava a mesma venda como "Sem nota" — a contradição entre as duas telas era a prova de que a mensagem de sucesso mentia.
+
+**A decisão foi religar de verdade, não remover o botão.** O wizard foi desenhado para um fluxo de clique único (venda + nota juntas); a alternativa de centralizar emissão só em Notas Emitidas removeria uma conveniência que o produto já oferecia sem resolver o risco por um caminho mais simples. O que importava era não duplicar a lógica de "montar payload + emitir + persistir" — foi exatamente uma segunda implementação divergindo da primeira que teria causado (ou effectivamente já causava, na forma de "não faz nada") este bug.
+
+#### `emitInvoiceForSale`: o núcleo extraído
+
+`useInvoicesData.ts`'s `emitInvoice(saleId)` fazia tudo num só lugar: buscava a venda + as regras fiscais, montava o payload (`buildNfePayloadFromSale`), chamava `getFiscalProvider().emit()`, persistia (`persistEmitResult`), gravava o CFOP dos itens (`updateSaleItemsCfop`) e só então recarregava a lista de notas. **Tudo menos o `reload()`** virou `emitInvoiceForSale(branchId, saleId)` em `fiscalDocumentsRepository.ts` — mesmo arquivo de onde já vinham `fetchSaleForInvoice`/`persistEmitResult`/`saleFiscalRef`/`updateSaleItemsCfop`, então não é uma dependência nova entre `features/sales` e o repositório (o repositório já importava `SaleForInvoice` de `invoiceMapping.ts` antes desta correção). `useInvoicesData.emitInvoice` virou um wrapper fino: chama a função extraída, depois `await reload()` — mesmo padrão de núcleo reutilizável + porta específica de quem consome já registrado em `financial_entries_create_installments`.
+
+`emitInvoiceForSale` **nunca lança exceção** — devolve `{ ok: true } | { ok: false; errors }`, mesmo contrato de `emitFiscalDocumentForSale` (`src/features/pos/fiscalDocument.ts`, NFC-e do PDV) e do `EmitOutcome` que já existia em `useInvoicesData.ts` (movido para o repositório, reexportado de lá para não quebrar quem já importava).
+
+#### `useSaleDraft.confirmSale`: a venda nunca falha por causa da nota
+
+`confirmSale()` ganhou um parâmetro opcional (`confirmSale({ emitirNota: true })`, default sem emitir). A ordem importa: a venda grava primeiro (`createSale`, `setConfirmedSale`) e **só depois de gravada com sucesso** — nunca antes, nunca condicionando a gravação — `emitInvoiceForSale` é chamado se `emitirNota` foi pedido. O resultado vai para um estado novo, `fiscalOutcome`, separado de `submitError` de propósito: mesma filosofia já registrada no gancho de NFC-e do PDV (`fiscalWarning` separado de `submitError` em `usePosSale.ts`) — `submitError` continua significando "a venda em si falhou"; uma falha de emissão aqui é aviso, não erro de venda, porque a venda de fato aconteceu (estoque baixou, financeiro gerou) independente de a nota sair.
+
+#### Tela: o resultado real decide o título, não a intenção
+
+Em `SalePage.tsx`, a tela de sucesso passou a olhar `draft.fiscalOutcome`, não só `lastIntent === "nota"`:
+
+- Nota não pedida → "Venda X confirmada!" (como já era).
+- Pedida e `fiscalOutcome.ok === true` → "Nota fiscal da venda X gerada!" — agora é verdade. "Ver nota" continua indo para `/notas-emitidas`.
+- Pedida e `fiscalOutcome.ok === false` → título continua "Venda X confirmada!" (é sempre verdade) com um aviso âmbar não bloqueante abaixo (`.sale__fiscal-warning`, mesmo padrão visual de `.pos__fiscal-warning` do PDV — nem vermelho, que sinalizaria falha da venda, nem verde, que seria sucesso pleno) listando `fiscalOutcome.errors`. O botão "Ver nota" some (não existe nota); vira "Tentar emitir depois", levando para `/notas-emitidas`, onde "Emitir Nota" já funciona para aquela venda — não foi construído deep-link para a nota específica, mesmo escopo já limitado nas etapas 8/8.5.
+
+`ConfirmacaoStep.tsx` e `SaleWizard.tsx` perderam os comentários desatualizados ("não existe emissão fiscal real no sistema ainda" / "'nota' não gera nenhuma nota fiscal de verdade") — `SaleIntent` como tipo não mudou, só passou a significar o que diz.
+
+#### Testado
+
+`scripts/wizard-invoice-check.mjs` (mesmo padrão de `fiscal-cycle-check.mjs`/`nfce-emission-check.mjs`: `ssrLoadModule` do Vite, login com a conta de testes, dados reais do banco) exercitou o caminho de produção que o wizard chama por baixo — **11/11 verificações passaram**: venda com produto com NCM+grupo tributário → `emitInvoiceForSale` autoriza e `fiscal_documents` ganha uma linha real (`model=nfe`, `status=autorizado`) para aquela venda especificamente, provando o fim da divergência; venda com produto sem grupo tributário (Café) → venda confirmada normalmente, emissão recusada citando o item, nenhuma linha gravada; Notas Emitidas (`fetchInvoiceSales`) mostra as duas vendas com o status real, nunca divergente; reemissão da mesma venda continua idempotente (upsert por `ref`, 1 linha só). **Não testado no navegador nesta sessão** — mesma limitação de ambiente já documentada na etapa 8.5 (o Browser pane não conseguiu alcançar o servidor de dev local, `navigate` falhou consistentemente mesmo em porta livre recém-aberta); `tsc -b`, `oxlint` (só os 4 avisos `only-export-components` pré-existentes) e `vite build` limpos. **Fica pendente**: confirmar visualmente o aviso âmbar na tela de sucesso e o botão "Tentar emitir depois" assim que o Browser pane conseguir alcançar um servidor local nesta máquina.
+
+#### Fora de escopo
+
+Qualquer mudança em Notas Emitidas além da extração (`InvoicesPage.tsx` continua chamando `emitInvoiceForSale` por baixo de `useInvoicesData.emitInvoice`, sem diferença de comportamento); NFC-e/PDV (não mexido, já emitia de verdade desde a etapa 8.5); deep-link direto para a nota específica em vez da lista de Notas Emitidas.
+
 ### Decisão arquitetural: módulo Devolução de venda (19/08/2026)
 
 Etapa 9, e a primeira que precisa desfazer **proporcionalmente** três coisas que não sabem nada umas das outras: estoque (o item volta), financeiro (o dinheiro daquele item precisa voltar) e nota fiscal (a operação foi documentada para a SEFAZ, a devolução também precisa ser). `SaleReturnPage.tsx`/`saleReturns.ts` eram mock (`SALE_RETURNS` com um item de exemplo, "Devolver venda" sem `onClick`, e o rótulo de busca ainda dizia "Buscar Compra", copiado do mock de Compras — corrigido para "Buscar devolução").

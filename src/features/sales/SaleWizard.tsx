@@ -11,7 +11,7 @@ import type { useSaleDraft } from "./useSaleDraft";
 import "./SalePage.css";
 import "./SaleWizard.css";
 
-/** "nota" não gera nenhuma nota fiscal de verdade — ver comentário em ConfirmacaoStep. */
+/** "nota" pede emissão de NF-e junto da confirmação — ver `ConfirmacaoStep.tsx`/`useSaleDraft.confirmSale`. */
 export type SaleIntent = "venda" | "nota";
 
 type SaleWizardProps = {

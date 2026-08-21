@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatContactAddress, type Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createSale, type CreateSaleInput } from "../../lib/repositories/salesRepository";
+import { emitInvoiceForSale, type EmitOutcome } from "../../lib/repositories/fiscalDocumentsRepository";
 import { formatMoney, type SalePaymentMethod, type Sale } from "./sales";
 import type { SaleSeller } from "../../lib/repositories/salesLookups";
 
@@ -135,6 +136,14 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<Sale | null>(null);
+  /**
+   * Resultado da emissão da nota quando `confirmSale({ emitirNota: true })` é
+   * chamado — `null` quando a nota não foi pedida. Estado separado de
+   * `submitError` de propósito, mesma filosofia do `fiscalWarning` do PDV
+   * (`usePosSale.ts`): a venda nunca falha nem fica pendente por causa da
+   * nota, então uma falha de emissão aqui é aviso, não erro de venda.
+   */
+  const [fiscalOutcome, setFiscalOutcome] = useState<EmitOutcome | null>(null);
   const [lastRemoved, setLastRemoved] = useState<RemovedEntry | null>(null);
 
   // Some sozinho depois de alguns segundos — "Desfazer" não deveria ficar
@@ -255,7 +264,7 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
 
   const canConfirm = headerValid && cart.length > 0 && payments.length > 0 && paymentsMatch && !submitting;
 
-  async function confirmSale() {
+  async function confirmSale(options?: { emitirNota?: boolean }) {
     if (!branchId) {
       setSubmitError("Nenhuma filial selecionada.");
       return;
@@ -264,6 +273,7 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
 
     setSubmitting(true);
     setSubmitError(null);
+    setFiscalOutcome(null);
     try {
       const input: CreateSaleInput = {
         branchId,
@@ -288,6 +298,11 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
       };
       const sale = await createSale(input);
       setConfirmedSale(sale);
+      // A venda já está gravada aqui — uma falha de emissão nunca desfaz nem
+      // trava o que já aconteceu, mesmo critério do gancho de NFC-e do PDV.
+      if (options?.emitirNota) {
+        setFiscalOutcome(await emitInvoiceForSale(branchId, sale.id));
+      }
     } catch (err) {
       setSubmitError(extractErrorMessage(err, cart));
     } finally {
@@ -303,6 +318,7 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
     setDiscount("");
     setSubmitError(null);
     setConfirmedSale(null);
+    setFiscalOutcome(null);
     setLastRemoved(null);
   }
 
@@ -337,6 +353,7 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
     submitting,
     submitError,
     confirmedSale,
+    fiscalOutcome,
     confirmSale,
     reset,
   };
