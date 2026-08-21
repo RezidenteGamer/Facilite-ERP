@@ -11,19 +11,25 @@ const ICON_SRC = "Recursos de Desenvolvimento/Sistema Geral/voltar-sistema-geral
 const BG_SRC = "src/assets/img/tela-de-login-cinematica.webp";
 
 async function run() {
+  // A arte original é um ícone "neon" com glow suave no canal alfa (halo
+  // gradiente em volta da seta, de propósito na fonte) — bonito em telas
+  // grandes, mas lê como borrado nos 44px do BackTab. `.linear` nos 4
+  // canais (RGB inalterados, alfa "esticado") endurece a transição do
+  // gradiente pra silhueta sólida, sem mudar cor/forma.
+  const sharpenedAlpha = await sharp(ICON_SRC).linear([1, 1, 1, 5], [0, 0, 0, -520]).png().toBuffer();
+
   // Ícone do BackTab: exibido no máximo a 44x44 CSS px (ver FloatingTabs.css).
   // Gera em ~5x pra cobrir telas de alta densidade sem exagero.
-  const icon = sharp(ICON_SRC);
-  const iconMeta = await icon.metadata();
+  const iconMeta = await sharp(sharpenedAlpha).metadata();
   const iconTargetW = 220;
   const iconTargetH = Math.round((iconMeta.height / iconMeta.width) * iconTargetW);
 
-  await sharp(ICON_SRC)
+  await sharp(sharpenedAlpha)
     .resize(iconTargetW, iconTargetH)
     .webp({ quality: 92 })
     .toFile("src/assets/icons/voltar-sistema-geral.webp");
 
-  const iconPlaceholder = await sharp(ICON_SRC)
+  const iconPlaceholder = await sharp(sharpenedAlpha)
     .resize(16)
     .webp({ quality: 40 })
     .toBuffer();
