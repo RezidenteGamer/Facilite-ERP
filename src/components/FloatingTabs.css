@@ -54,17 +54,22 @@
     bottom: -10px;
   }
 
-  .floating-tab--support {
-    right: 12px;
-    width: min(340px, calc(100vw - 24px));
-    padding: 14px 12px 12px;
-    font-size: 32px;
-  }
-
   .floating-tab--back {
     left: 12px;
     width: 60px;
     height: 50px;
+  }
+
+  /* A aba Suporte precisa ficar mais estreita aqui do que o cálculo puro
+     de "100vw - margens" daria — senão, em telas estreitas, ela cresce
+     por cima da aba Voltar (mesma borda inferior, mesmo z-index) e
+     esconde o botão embaixo dela. 96px reservados = 72px da aba Voltar
+     (12px de left + 60px de largura) + 24px de respiro até a Suporte. */
+  .floating-tab--support {
+    right: 12px;
+    width: min(340px, calc(100vw - 24px - 96px));
+    padding: 14px 12px 12px;
+    font-size: 32px;
   }
 
   .floating-tab--back svg {

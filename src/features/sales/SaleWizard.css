@@ -17,12 +17,14 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  /* Mesmo motivo do z-index em .sale__confirm-actions (SalePage.css): as
-     abas fixas do rodapé (Suporte/WindowDock) podem cair em cima da
-     navegação em janelas mais baixas — 31 garante que o clique sempre
-     vence aqui. */
-  position: relative;
-  z-index: 31;
+  /* Fica no fluxo normal da página de propósito: quando rola por baixo
+     das abas fixas do rodapé (Suporte/WindowDock), é pra ficar ATRÁS
+     delas, igual qualquer outro conteúdo do sistema — nada de sticky
+     nem z-index elevado pra "vencer" essa sobreposição, senão o botão
+     passa a perseguir a rolagem/pintar por cima da aba, que é o
+     comportamento errado. A folga --content-bottom-clearance do
+     .app-content já garante que ele não termina ESCONDIDO atrás da aba
+     quando a página rola até o fim. */
 }
 
 .sale-wizard__nav-next {

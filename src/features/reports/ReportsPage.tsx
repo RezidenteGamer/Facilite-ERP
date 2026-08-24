@@ -452,7 +452,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <AppShell navItems={navItems} secondaryText="Relatórios" contentTone="blue" fillViewport>
+    <AppShell navItems={navItems} secondaryText="Relatórios" contentTone="blue" fillViewport onBack={() => setActiveId(null)}>
       <div className="reports-detail">
         <div className="reports-detail__header">
           <button type="button" className="reports-detail__back" onClick={() => setActiveId(null)}>

@@ -469,15 +469,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  /* Em janelas mais baixas (~800px de altura) o card cabe quase inteiro na
-     viewport sem precisar rolar — e a aba "Suporte" (position:fixed,
-     z-index:5) e o WindowDock (position:fixed, z-index:30) acabam caindo
-     bem em cima dos botões de confirmar, roubando o clique. 31 fica acima
-     dos dois só o suficiente pra sempre vencer o clique aqui, mas ainda
-     abaixo do popup do Suporte quando ele está aberto (z-index:60) — ver
-     WindowDock.css para a escala completa. */
-  position: relative;
-  z-index: 31;
+  /* Fica no fluxo normal, sem z-index elevado: em janelas mais baixas o
+     card pode passar por baixo das abas fixas do rodapé (Suporte/
+     WindowDock) durante o scroll, e nesse caso é pra ficar ATRÁS delas
+     como qualquer outro conteúdo do sistema — não "vencer" a
+     sobreposição pintando por cima. A folga --content-bottom-clearance
+     do .app-content já garante que os botões não terminam escondidos
+     atrás da aba quando a página rola até o fim. */
 }
 
 /* ---------- Revisão ---------- */
