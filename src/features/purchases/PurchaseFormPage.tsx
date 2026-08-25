@@ -36,6 +36,9 @@ const PAYMENT_METHODS: SalePaymentMethod[] = ["dinheiro", "debito", "credito", "
 
 const CART_DROPZONE_ID = "purchase-cart-dropzone";
 
+/* Mesmo id de janela que a lista (`PurchasesPage.tsx`) — ver `updateWindowPath`. */
+const PURCHASE_WINDOW_ID = "compras";
+
 /** `useDroppable` só enxerga o `DndContext` de dentro dele — o drop-target precisa ser um filho. */
 function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: CART_DROPZONE_ID });
@@ -49,9 +52,9 @@ function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }
 /** Tela de criação de uma nova Compra: espelha `SaleOrderFormPage.tsx` — cabeçalho + itens, sem split de pagamento. */
 export default function PurchaseFormPage() {
   const navigate = useNavigate();
-  const { openWindow } = useOpenWindows();
+  const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId } = useAuth();
-  const draft = usePurchaseDraft(currentBranchId);
+  const draft = usePurchaseDraft(currentBranchId, PURCHASE_WINDOW_ID);
   const [lookupOpen, setLookupOpen] = useState(false);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
@@ -74,12 +77,15 @@ export default function PurchaseFormPage() {
 
   useEffect(() => {
     openWindow({
-      id: "compras",
+      id: PURCHASE_WINDOW_ID,
       label: "Compras",
-      path: "/compras",
+      path: "/compras/nova",
       icon: PurchasesIcon,
     });
-  }, [openWindow]);
+    // Garante que a janela aponte para o formulário mesmo quando a lista já
+    // a registrou primeiro — ver `updateWindowPath` em `openWindows.tsx`.
+    updateWindowPath(PURCHASE_WINDOW_ID, "/compras/nova");
+  }, [openWindow, updateWindowPath]);
 
   const navItems: HeaderNavItem[] = [
     { id: "inicio", label: "Inicio", icon: HouseIcon, onClick: () => navigate("/inicio") },

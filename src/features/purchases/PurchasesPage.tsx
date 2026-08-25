@@ -26,7 +26,7 @@ const COLUNAS: RegistryColumn<Purchase>[] = [
 /** Módulo "Compras". */
 export default function PurchasesPage() {
   const navigate = useNavigate();
-  const { openWindow } = useOpenWindows();
+  const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId, branches } = useAuth();
   const { purchases, loading, error } = usePurchasesData(currentBranchId);
 
@@ -42,7 +42,10 @@ export default function PurchasesPage() {
       path: "/compras",
       icon: PurchasesIcon,
     });
-  }, [openWindow]);
+    // Garante que voltar para a lista pelo dock aponte para cá mesmo quando
+    // o formulário "nova" registrou a janela primeiro — ver `PurchaseFormPage.tsx`.
+    updateWindowPath("compras", "/compras");
+  }, [openWindow, updateWindowPath]);
 
   useEffect(() => {
     if (selectedId && !purchases.some((p) => p.id === selectedId)) setSelectedId(null);

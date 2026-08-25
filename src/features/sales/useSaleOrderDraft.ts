@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useOpenWindows } from "../../components/openWindows";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createSaleOrder, type CreateSaleOrderInput } from "../../lib/repositories/saleOrdersRepository";
@@ -74,12 +75,44 @@ function extractErrorMessage(err: unknown): string {
   return "Não foi possível salvar o pedido. Tente novamente — se o problema continuar, acione o suporte.";
 }
 
-/** Estado do rascunho de um pedido em andamento: cabeçalho + carrinho. Sem split de pagamento — ver AGENTS.md. */
-export function useSaleOrderDraft(branchId: string | null, defaultSeller?: SaleSeller | null) {
-  const [header, setHeader] = useState<SaleOrderHeaderForm>(() => buildHeaderInicial(defaultSeller));
-  const [cart, setCart] = useState<SaleOrderCartLine[]>([]);
-  const [freight, setFreight] = useState("");
-  const [discount, setDiscount] = useState("");
+/** Slot do rascunho dentro do estado da janela — ver `openWindows.tsx`. */
+const DRAFT_SLOT = "sale-order-draft";
+
+/**
+ * O que sobrevive a uma troca de janela: só o que o operador digitou — mesmo
+ * critério de `PersistedSaleDraft` em `useSaleDraft.ts`.
+ */
+type PersistedSaleOrderDraft = {
+  header: SaleOrderHeaderForm;
+  cart: SaleOrderCartLine[];
+  freight: string;
+  discount: string;
+};
+
+/**
+ * Estado do rascunho de um pedido em andamento: cabeçalho + carrinho. Sem
+ * split de pagamento — ver AGENTS.md. `windowId` é o mesmo id passado a
+ * `openWindow`: com ele o rascunho sobrevive a ir em outra janela e voltar —
+ * ver a decisão "estado por janela no `OpenWindowsProvider`" em AGENTS.md.
+ */
+export function useSaleOrderDraft(
+  branchId: string | null,
+  defaultSeller?: SaleSeller | null,
+  windowId?: string | null,
+) {
+  const { getWindowState, setWindowState, clearWindowState } = useOpenWindows();
+  // Lido uma única vez, na montagem — depois disso a fonte da verdade é o
+  // `useState` daqui.
+  const [restored] = useState(() =>
+    windowId ? getWindowState<PersistedSaleOrderDraft>(windowId, DRAFT_SLOT) : undefined,
+  );
+
+  const [header, setHeader] = useState<SaleOrderHeaderForm>(
+    () => restored?.header ?? buildHeaderInicial(defaultSeller),
+  );
+  const [cart, setCart] = useState<SaleOrderCartLine[]>(() => restored?.cart ?? []);
+  const [freight, setFreight] = useState(() => restored?.freight ?? "");
+  const [discount, setDiscount] = useState(() => restored?.discount ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedOrder, setConfirmedOrder] = useState<SaleOrder | null>(null);
@@ -90,6 +123,21 @@ export function useSaleOrderDraft(branchId: string | null, defaultSeller?: SaleS
     const timer = window.setTimeout(() => setLastRemoved(null), UNDO_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [lastRemoved]);
+
+  /* Espelha o rascunho no estado da janela a cada mudança — mesmo raciocínio
+     do efeito equivalente em `useSaleDraft.ts`. O pedido confirmado é o outro
+     fim de vida: `confirmedOrder` não zera o rascunho (a tela de sucesso
+     ainda mostra o que foi salvo), então, se este efeito continuasse
+     gravando, abrir "Pedidos de venda" de novo ressuscitaria o pedido que
+     acabou de ser salvo — aqui o rascunho acaba, limpa em vez de gravar. */
+  useEffect(() => {
+    if (!windowId) return;
+    if (confirmedOrder) {
+      clearWindowState(windowId);
+      return;
+    }
+    setWindowState<PersistedSaleOrderDraft>(windowId, DRAFT_SLOT, { header, cart, freight, discount });
+  }, [windowId, confirmedOrder, header, cart, freight, discount, setWindowState, clearWindowState]);
 
   useEffect(() => {
     if (!defaultSeller) return;

@@ -46,7 +46,7 @@ const COLUNAS: RegistryColumn<Conditional>[] = [
  */
 export default function ConditionalsPage() {
   const navigate = useNavigate();
-  const { openWindow } = useOpenWindows();
+  const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId, branches } = useAuth();
 
   const canView = hasPermission(MODULE_ID, "view");
@@ -70,7 +70,10 @@ export default function ConditionalsPage() {
       path: "/condicionais",
       icon: RefreshIcon,
     });
-  }, [openWindow]);
+    // Garante que voltar para a lista pelo dock aponte para cá mesmo quando
+    // o formulário "nova" registrou a janela primeiro — ver `NewConditionalPage.tsx`.
+    updateWindowPath("condicionais", "/condicionais");
+  }, [openWindow, updateWindowPath]);
 
   useEffect(() => {
     if (selectedId && !conditionals.some((c) => c.id === selectedId)) setSelectedId(null);

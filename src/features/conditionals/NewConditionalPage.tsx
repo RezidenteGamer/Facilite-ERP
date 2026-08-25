@@ -33,6 +33,9 @@ const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 6 } };
 
 const CART_DROPZONE_ID = "conditional-cart-dropzone";
 
+/* Mesmo id de janela que a lista (`ConditionalsPage.tsx`) — ver `updateWindowPath`. */
+const CONDITIONAL_WINDOW_ID = "condicionais";
+
 /** `useDroppable` só enxerga o `DndContext` de dentro dele — o drop-target precisa ser um filho. */
 function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: CART_DROPZONE_ID });
@@ -53,9 +56,9 @@ function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }
  */
 export default function NewConditionalPage() {
   const navigate = useNavigate();
-  const { openWindow } = useOpenWindows();
+  const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId } = useAuth();
-  const draft = useConditionalDraft(currentBranchId);
+  const draft = useConditionalDraft(currentBranchId, CONDITIONAL_WINDOW_ID);
   const [lookupOpen, setLookupOpen] = useState(false);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
@@ -78,12 +81,15 @@ export default function NewConditionalPage() {
 
   useEffect(() => {
     openWindow({
-      id: "condicionais",
+      id: CONDITIONAL_WINDOW_ID,
       label: "Condicionais",
-      path: "/condicionais",
+      path: "/condicionais/nova",
       icon: RefreshIcon,
     });
-  }, [openWindow]);
+    // Garante que a janela aponte para o formulário mesmo quando a lista já
+    // a registrou primeiro — ver `updateWindowPath` em `openWindows.tsx`.
+    updateWindowPath(CONDITIONAL_WINDOW_ID, "/condicionais/nova");
+  }, [openWindow, updateWindowPath]);
 
   const navItems: HeaderNavItem[] = [
     { id: "inicio", label: "Inicio", icon: HouseIcon, onClick: () => navigate("/inicio") },

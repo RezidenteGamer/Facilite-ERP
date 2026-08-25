@@ -36,6 +36,10 @@ const PAYMENT_METHODS: SalePaymentMethod[] = ["dinheiro", "debito", "credito", "
 
 const CART_DROPZONE_ID = "sale-order-cart-dropzone";
 
+/* Mesmo id de janela que a lista (`SaleOrdersPage.tsx`) — lista e formulário
+   são duas sub-rotas do mesmo módulo no dock, ver `updateWindowPath`. */
+const SALE_ORDER_WINDOW_ID = "pedidos-venda";
+
 type LookupKind = "cliente" | "vendedor" | null;
 
 /** `useDroppable` só enxerga o `DndContext` de dentro dele — o drop-target precisa ser um filho. */
@@ -51,13 +55,13 @@ function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }
 /** Tela de criação de um novo Pedido de venda: espelha `SalePage.tsx`, mas em uma etapa só. */
 export default function SaleOrderFormPage() {
   const navigate = useNavigate();
-  const { openWindow } = useOpenWindows();
+  const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId, profile } = useAuth();
   const defaultSeller = useMemo(
     () => (profile ? { id: profile.id, name: profile.name, operatorCode: profile.operatorCode } : null),
     [profile],
   );
-  const draft = useSaleOrderDraft(currentBranchId, defaultSeller);
+  const draft = useSaleOrderDraft(currentBranchId, defaultSeller, SALE_ORDER_WINDOW_ID);
   const [lookup, setLookup] = useState<LookupKind>(null);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
@@ -80,12 +84,16 @@ export default function SaleOrderFormPage() {
 
   useEffect(() => {
     openWindow({
-      id: "pedidos-venda",
+      id: SALE_ORDER_WINDOW_ID,
       label: "Pedidos de venda",
-      path: "/pedidos-venda",
+      path: "/pedidos-venda/novo",
       icon: SaleOrdersIcon,
     });
-  }, [openWindow]);
+    // Garante que a janela aponte para o formulário mesmo quando a lista já
+    // a registrou primeiro (`openWindow` não sobrescreve rota de janela
+    // existente) — ver `updateWindowPath` em `openWindows.tsx`.
+    updateWindowPath(SALE_ORDER_WINDOW_ID, "/pedidos-venda/novo");
+  }, [openWindow, updateWindowPath]);
 
   const navItems: HeaderNavItem[] = [
     { id: "inicio", label: "Inicio", icon: HouseIcon, onClick: () => navigate("/inicio") },

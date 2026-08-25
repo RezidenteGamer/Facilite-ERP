@@ -33,7 +33,7 @@ const COLUNAS: RegistryColumn<SaleOrder>[] = [
 /** Módulo "Pedidos de venda". */
 export default function SaleOrdersPage() {
   const navigate = useNavigate();
-  const { openWindow } = useOpenWindows();
+  const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId, branches } = useAuth();
   const { orders, loading, error, convertToSale } = useSaleOrdersData(currentBranchId);
 
@@ -53,7 +53,10 @@ export default function SaleOrdersPage() {
       path: "/pedidos-venda",
       icon: SaleOrdersIcon,
     });
-  }, [openWindow]);
+    // Garante que voltar para a lista pelo dock aponte para cá mesmo quando
+    // o formulário "novo" registrou a janela primeiro — ver `SaleOrderFormPage.tsx`.
+    updateWindowPath("pedidos-venda", "/pedidos-venda");
+  }, [openWindow, updateWindowPath]);
 
   useEffect(() => {
     if (selectedId && !orders.some((o) => o.id === selectedId)) setSelectedId(null);

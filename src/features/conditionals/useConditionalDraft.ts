@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useOpenWindows } from "../../components/openWindows";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createConditional } from "../../lib/repositories/conditionalsRepository";
@@ -33,14 +34,48 @@ function lineTotal(line: ConditionalCartLine) {
 
 type RemovedEntry = { line: ConditionalCartLine; index: number };
 
-/** Estado do rascunho de uma condicional em andamento: cabeçalho + carrinho — mesmo formato de `useSaleOrderDraft`. */
-export function useConditionalDraft(branchId: string | null) {
-  const [header, setHeader] = useState<ConditionalHeaderForm>(buildHeaderInicial);
-  const [cart, setCart] = useState<ConditionalCartLine[]>([]);
+/** Slot do rascunho dentro do estado da janela — ver `openWindows.tsx`. */
+const DRAFT_SLOT = "conditional-draft";
+
+/** O que sobrevive a uma troca de janela — mesmo critério de `PersistedSaleDraft` em `useSaleDraft.ts`. */
+type PersistedConditionalDraft = {
+  header: ConditionalHeaderForm;
+  cart: ConditionalCartLine[];
+};
+
+/**
+ * Estado do rascunho de uma condicional em andamento: cabeçalho + carrinho —
+ * mesmo formato de `useSaleOrderDraft`. `windowId` é o mesmo id passado a
+ * `openWindow`: com ele o rascunho sobrevive a ir em outra janela e voltar —
+ * ver a decisão "estado por janela no `OpenWindowsProvider`" em AGENTS.md.
+ */
+export function useConditionalDraft(branchId: string | null, windowId?: string | null) {
+  const { getWindowState, setWindowState, clearWindowState } = useOpenWindows();
+  const [restored] = useState(() =>
+    windowId ? getWindowState<PersistedConditionalDraft>(windowId, DRAFT_SLOT) : undefined,
+  );
+
+  const [header, setHeader] = useState<ConditionalHeaderForm>(() => restored?.header ?? buildHeaderInicial());
+  const [cart, setCart] = useState<ConditionalCartLine[]>(() => restored?.cart ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<{ code: string; total: number } | null>(null);
   const [lastRemoved, setLastRemoved] = useState<RemovedEntry | null>(null);
+
+  /* Espelha o rascunho no estado da janela a cada mudança — mesmo raciocínio
+     do efeito equivalente em `useSaleDraft.ts`. A condicional confirmada é o
+     outro fim de vida: `confirmed` não zera o rascunho (a tela de sucesso
+     ainda mostra o que foi salvo), então, se este efeito continuasse
+     gravando, abrir "Condicionais" de novo ressuscitaria a condicional que
+     acabou de ser salva — aqui o rascunho acaba, limpa em vez de gravar. */
+  useEffect(() => {
+    if (!windowId) return;
+    if (confirmed) {
+      clearWindowState(windowId);
+      return;
+    }
+    setWindowState<PersistedConditionalDraft>(windowId, DRAFT_SLOT, { header, cart });
+  }, [windowId, confirmed, header, cart, setWindowState, clearWindowState]);
 
   function setField<K extends keyof ConditionalHeaderForm>(field: K, value: ConditionalHeaderForm[K]) {
     setHeader((current) => ({ ...current, [field]: value }));

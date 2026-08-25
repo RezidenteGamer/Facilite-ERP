@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useOpenWindows } from "../../components/openWindows";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createPurchase, type CreatePurchaseInput } from "../../lib/repositories/purchasesRepository";
@@ -88,10 +89,29 @@ function extractErrorMessage(err: unknown): string {
   return "Não foi possível salvar a compra. Tente novamente — se o problema continuar, acione o suporte.";
 }
 
-/** Estado do rascunho de uma compra em andamento: cabeçalho + itens. Espelha `useSaleOrderDraft.ts`. */
-export function usePurchaseDraft(branchId: string | null) {
-  const [header, setHeader] = useState<PurchaseHeaderForm>(buildHeaderInicial);
-  const [cart, setCart] = useState<PurchaseCartLine[]>([]);
+/** Slot do rascunho dentro do estado da janela — ver `openWindows.tsx`. */
+const DRAFT_SLOT = "purchase-draft";
+
+/** O que sobrevive a uma troca de janela — mesmo critério de `PersistedSaleDraft` em `useSaleDraft.ts`. */
+type PersistedPurchaseDraft = {
+  header: PurchaseHeaderForm;
+  cart: PurchaseCartLine[];
+};
+
+/**
+ * Estado do rascunho de uma compra em andamento: cabeçalho + itens. Espelha
+ * `useSaleOrderDraft.ts`. `windowId` é o mesmo id passado a `openWindow`: com
+ * ele o rascunho sobrevive a ir em outra janela e voltar — ver a decisão
+ * "estado por janela no `OpenWindowsProvider`" em AGENTS.md.
+ */
+export function usePurchaseDraft(branchId: string | null, windowId?: string | null) {
+  const { getWindowState, setWindowState, clearWindowState } = useOpenWindows();
+  const [restored] = useState(() =>
+    windowId ? getWindowState<PersistedPurchaseDraft>(windowId, DRAFT_SLOT) : undefined,
+  );
+
+  const [header, setHeader] = useState<PurchaseHeaderForm>(() => restored?.header ?? buildHeaderInicial());
+  const [cart, setCart] = useState<PurchaseCartLine[]>(() => restored?.cart ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedPurchase, setConfirmedPurchase] = useState<Purchase | null>(null);
@@ -102,6 +122,21 @@ export function usePurchaseDraft(branchId: string | null) {
     const timer = window.setTimeout(() => setLastRemoved(null), UNDO_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [lastRemoved]);
+
+  /* Espelha o rascunho no estado da janela a cada mudança — mesmo raciocínio
+     do efeito equivalente em `useSaleDraft.ts`. A compra confirmada é o
+     outro fim de vida: `confirmedPurchase` não zera o rascunho (a tela de
+     sucesso ainda mostra o que foi salvo), então, se este efeito continuasse
+     gravando, abrir "Compras" de novo ressuscitaria a compra que acabou de
+     ser salva — aqui o rascunho acaba, limpa em vez de gravar. */
+  useEffect(() => {
+    if (!windowId) return;
+    if (confirmedPurchase) {
+      clearWindowState(windowId);
+      return;
+    }
+    setWindowState<PersistedPurchaseDraft>(windowId, DRAFT_SLOT, { header, cart });
+  }, [windowId, confirmedPurchase, header, cart, setWindowState, clearWindowState]);
 
   function setField<K extends keyof PurchaseHeaderForm>(field: K, value: PurchaseHeaderForm[K]) {
     setHeader((current) => ({ ...current, [field]: value }));
