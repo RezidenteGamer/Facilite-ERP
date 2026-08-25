@@ -12,6 +12,7 @@ import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { useAuth } from "../auth/AuthContext";
 import { ClientsIcon } from "../home/icons";
+import { contactInputFromFormValues } from "./contactForm";
 import type { Contact, ContactKind } from "./contacts";
 import { useContactsData } from "./useContactsData";
 
@@ -125,25 +126,7 @@ export default function CustomersPage() {
   }
 
   async function handleCreateSubmit(values: Record<string, string>) {
-    const created = await createContact({
-      name: values.name ?? "",
-      document: values.document ?? "",
-      active: true,
-      logradouro: values.logradouro || undefined,
-      numero: values.numero || undefined,
-      bairro: values.bairro || undefined,
-      municipio: values.municipio || undefined,
-      uf: values.uf || undefined,
-      cep: values.cep || undefined,
-      rg: values.rg || undefined,
-      birthDate: values.birthDate || undefined,
-      phone: values.phone || undefined,
-      email: values.email || undefined,
-      whatsapp: values.whatsapp || undefined,
-      inscricaoEstadual: values.inscricaoEstadual || undefined,
-      indicadorIe: values.indicadorIe || undefined,
-      codigoIbgeMunicipio: values.codigoIbgeMunicipio || undefined,
-    });
+    const created = await createContact(contactInputFromFormValues(values));
 
     if (pendingPhotoFile) {
       try {

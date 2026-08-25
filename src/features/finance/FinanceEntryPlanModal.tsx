@@ -1,8 +1,10 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMemo, useState } from "react";
 import FormField from "../../components/form/FormField";
-import LookupModal from "../../components/form/LookupModal";
-import type { Contact } from "../customers/contacts";
+import SearchCombobox from "../../components/form/SearchCombobox";
+import type { Contact, ContactKind } from "../customers/contacts";
+import QuickContactFormModal from "../customers/QuickContactFormModal";
+import { useAuth } from "../auth/AuthContext";
 import "../registry-engine/RegistryFormModal.css";
 import "./FinanceEntryPlanModal.css";
 import {
@@ -16,6 +18,8 @@ import { extractErrorMessage } from "./useFinancialEntriesData";
 type FinanceEntryPlanModalProps = {
   type: FinanceEntryType;
   contactLabel: string;
+  /** Qual cadastro o campo de contato abre quando nao acha ninguem. */
+  contactKind: ContactKind;
   fetchContacts: (query: string) => Promise<Contact[]>;
   onSubmit: (input: FinanceEntryPlanInput) => Promise<void>;
   onCancel: () => void;
@@ -37,12 +41,20 @@ type FinanceEntryPlanModalProps = {
 export default function FinanceEntryPlanModal({
   type,
   contactLabel,
+  contactKind,
   fetchContacts,
   onSubmit,
   onCancel,
 }: FinanceEntryPlanModalProps) {
   const [contact, setContact] = useState<Contact | null>(null);
-  const [lookupOpen, setLookupOpen] = useState(false);
+  /* O texto digitado e do campo, nao do contato escolhido: os dois so
+     coincidem enquanto ninguem estiver buscando outro. */
+  const [contactQuery, setContactQuery] = useState("");
+  /** Nome digitado que originou o "Cadastrar novo" - `null` = modal fechado. */
+  const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
+  /* Sem permissao de criar contato o atalho some - oferecer um cadastro que a
+     RLS vai recusar so produz erro. */
+  const canCreateContact = useAuth().hasPermission("clientes-fornecedores", "create");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [documentText, setDocumentText] = useState("");
   const [totalText, setTotalText] = useState("");
@@ -122,13 +134,26 @@ export default function FinanceEntryPlanModal({
             ))}
 
             <div className="registry-form-modal__fields">
-              <FormField
+              <SearchCombobox<Contact>
                 id="finance-plan-contact"
                 label={contactLabel}
-                value={contact?.name ?? ""}
-                onChange={() => {}}
-                lookup
-                onLookup={() => setLookupOpen(true)}
+                placeholder="Digite o nome ou o documento..."
+                value={contactQuery}
+                onChange={(text) => {
+                  setContactQuery(text);
+                  /* Digitar por cima do contato escolhido desfaz a escolha - o
+                     campo tem que mostrar o que vai ser lancado. */
+                  if (contact) setContact(null);
+                }}
+                fetchItems={fetchContacts}
+                getKey={(c) => c.id}
+                renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+                onSelect={(c) => {
+                  setContact(c);
+                  setContactQuery(c.name);
+                }}
+                onCreateNew={canCreateContact ? (query) => setCreatingContactName(query) : undefined}
+                createNewLabel={`Cadastrar novo ${contactLabel.toLowerCase()}`}
               />
               <FormField
                 id="finance-plan-payment-method"
@@ -212,17 +237,18 @@ export default function FinanceEntryPlanModal({
               </button>
             </div>
 
-            {lookupOpen && (
-              <LookupModal<Contact>
-                title={`Selecionar ${contactLabel.toLowerCase()}`}
-                placeholder="Buscar por nome ou documento..."
-                fetchItems={fetchContacts}
-                getKey={(c) => c.id}
-                renderItem={(c) => ({ primary: c.name, secondary: c.document })}
-                onClose={() => setLookupOpen(false)}
-                onSelect={(c) => {
-                  setContact(c);
-                  setLookupOpen(false);
+            {/* Dentro do `Dialog.Content` de proposito: e assim que o Radix
+                empilha um modal sobre outro sem que o de baixo interprete o
+                clique como "clicou fora". */}
+            {creatingContactName !== null && (
+              <QuickContactFormModal
+                kind={contactKind}
+                initialName={creatingContactName}
+                onCancel={() => setCreatingContactName(null)}
+                onCreated={(created) => {
+                  setContact(created);
+                  setContactQuery(created.name);
+                  setCreatingContactName(null);
                 }}
               />
             )}

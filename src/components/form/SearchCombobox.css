@@ -1,0 +1,146 @@
+/* Só a lista e a lupa decorativa moram aqui — o rótulo, a cápsula e a dica
+   vêm de `FormField.css`, que o componente importa junto. */
+
+.search-combobox {
+  position: relative;
+}
+
+/* Rotulo so para leitor de tela — ver `hideLabel`. */
+.search-combobox__label--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Antes era um botão (a lupa que abria o modal); virou ornamento, porque
+   agora a busca acontece ao digitar. O clique na cápsula inteira leva o
+   foco ao campo, então continua sendo um alvo "que funciona". */
+.search-combobox__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: var(--tile-yellow);
+  pointer-events: none;
+}
+
+.search-combobox__icon svg {
+  width: 26px;
+  height: 26px;
+  /* traço encorpado como no desenho — o padrão do ícone é fino demais aqui */
+  stroke-width: 2.8;
+}
+
+@keyframes search-combobox-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes search-combobox-in-above {
+  from { transform: translateY(6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.search-combobox__dropdown {
+  /* `fixed` + coordenadas calculadas no componente: a lista é portalizada
+     para o `body` para escapar do recorte e do containing block do modal que
+     pode hospedar o campo. Ver o comentário em `SearchCombobox.tsx`. */
+  position: fixed;
+  /* Acima do overlay dos modais (z-index 80): a lista pertence ao campo que
+     está dentro do modal, então tem que aparecer sobre ele. */
+  z-index: 90;
+  /* O Radix desliga os ponteiros do `body` enquanto um modal está aberto
+     (`disableOutsidePointerEvents`); sem isto a lista ficaria visível e
+     inclicável exatamente nas telas que esta portalização veio atender. */
+  pointer-events: auto;
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  background: var(--acrylic-accent);
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-saturate));
+  border: 1px solid var(--blue-panel-edge);
+  box-shadow: var(--shadow-8);
+  color: var(--white);
+  animation: search-combobox-in 0.12s var(--ease);
+}
+
+/* Abre para cima quando não há espaço embaixo (campo no rodapé de um modal). */
+.search-combobox__dropdown--above {
+  animation-name: search-combobox-in-above;
+}
+
+.search-combobox__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* `max-height` real vem inline, do espaço que sobra na viewport. */
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.search-combobox__hint {
+  margin: 12px 0;
+  text-align: center;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.search-combobox__hint--error {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.search-combobox__option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--radius-md, 12px);
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s var(--ease);
+}
+
+.search-combobox__option--active,
+.search-combobox__option:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  outline: none;
+}
+
+.search-combobox__option-primary {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.search-combobox__option-secondary {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+/* A linha de cadastro rápido: o "nenhum resultado" é o contexto, o âmbar é
+   a ação — mesma cor de "atenção/ação" usada no resto do sistema. */
+.search-combobox__option--create .search-combobox__option-primary {
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.search-combobox__option-create-cta {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tile-yellow);
+}
+
+@media (max-width: 900px) {
+  .search-combobox__icon svg { width: 22px; height: 22px; }
+}

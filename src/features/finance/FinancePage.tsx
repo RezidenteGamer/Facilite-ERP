@@ -336,6 +336,7 @@ export default function FinancePage() {
         <FinanceEntryPlanModal
           type={formType}
           contactLabel={lookupLabel}
+          contactKind={contactKind}
           fetchContacts={fetchLookupContacts}
           onSubmit={async (input) => {
             await createPlan(input);
@@ -359,12 +360,14 @@ export default function FinancePage() {
           lookupField={{
             label: lookupLabel,
             value: formContact?.name ?? "",
-            modalTitle: `Selecionar ${lookupLabel.toLowerCase()}`,
-            searchPlaceholder: "Buscar por nome ou documento...",
+            searchPlaceholder: "Digite o nome ou o documento...",
             fetchItems: fetchLookupContacts,
             getKey: (contact) => contact.id,
             renderItem: (contact) => ({ primary: contact.name, secondary: contact.document }),
             onSelect: setFormContact,
+            /* Digitar por cima do contato escolhido desfaz a escolha - o campo
+               tem que mostrar o que vai ser gravado. */
+            onClear: () => setFormContact(null),
           }}
           validate={validateFinanceEntryEditValues}
           onSubmit={handleEditSubmit}

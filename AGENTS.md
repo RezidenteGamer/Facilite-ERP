@@ -1451,6 +1451,71 @@ Os três seguiam a mesma receita de `useXDraft` (cabeçalho + carrinho + `submit
 
 **Testado no navegador**, os três módulos, ciclo completo: cliente/fornecedor + 1-2 itens no formulário → dock para Produtos → dock de volta → formulário intacto (não a lista) com os dados preservados; confirmar a operação → fechar a janela → reabrir do zero → formulário em branco; novo rascunho → fechar pelo "X" sem confirmar → reabrir → em branco. `tsc` e `oxlint` limpos (só os avisos `only-export-components` pré-existentes, sem relação). Nenhum erro no console.
 
+### Decisão arquitetural: `SearchCombobox` — busca com sugestão ao digitar (fase 1) (25/08/2026)
+
+Até aqui **todo** campo que consulta outro cadastro (Cliente, Fornecedor, Vendedor, Venda de origem, Grupo tributário — 9 lugares) era o mesmo par: um `FormField` com lupa + um `LookupModal` separado, aberto pelo botão. Pedido do usuário: digitar direto no campo e ver a sugestão ao vivo, com atalho de cadastro quando a busca não acha ninguém. **Esta é a fase 1**: o componente nasce e só os campos Cliente e Vendedor da etapa 1 de Realizar Venda (`ClienteStep.tsx`) foram convertidos. Os outros 8 call sites (`SaleOrderFormPage`, `PurchaseFormPage`, `NewConditionalPage`, `SaleReturnModal`, `PosPage`, `FinanceEntryPlanModal`, `ProductsPage`) continuam no padrão antigo de propósito, para a conversão em massa só acontecer depois deste piloto ser validado no uso.
+
+- **`src/components/form/SearchCombobox.tsx`** (+ `.css`): rótulo + cápsula digitável + lista ancorada logo abaixo. **A busca não mudou** — recebe a mesma `fetchItems(query)` que o `LookupModal` já recebia, com o mesmo debounce de 250 ms e o mesmo cancelamento da resposta atrasada. O que mudou é só exibição e interação.
+- **Reaproveita `FormField.css` em vez de reescrever a moldura**: o componente importa o CSS do campo comum e usa as mesmas classes `form-field__*` para rótulo/cápsula/dica. Duplicar essa moldura garantiria que as duas versões saíssem do lugar na primeira mudança de tema ou de altura. `FormField.tsx` continuou sendo o input de texto/data/select do motor genérico. (Na fase 2 a lupa opcional dele foi removida, junto com o último call site que a usava — ver abaixo.)
+- **Teclado e acessibilidade**: `role="combobox"` + `aria-expanded`/`aria-controls`/`aria-activedescendant` no input, `role="listbox"`/`role="option"` na lista. Setas percorrem, Enter escolhe o destacado, Escape fecha só a lista, clique fora fecha sem escolher. O Escape fecha só a lista, nunca o que está em volta — na fase 2 isso precisou virar um listener em captura no `window`, ver abaixo.
+- **O destaque começa em -1**, e só as setas o movem: com o primeiro item já destacado, um Enter distraído escolheria alguém sozinho.
+- **`onCreateNew` é opcional, e essa é a decisão**: sem a prop, a linha "Nenhum resultado para X — Cadastrar novo" simplesmente não existe. Vendedor é um usuário do sistema (`profiles`, gerido em `/usuarios-operadores`), não um cadastro de negócio — criar um dali não faria sentido, então o campo recebeu o componente novo **sem** o atalho.
+- **`QuickContactFormModal`** (`src/features/customers/`): o cadastro rápido é o **mesmo `RegistryFormModal`** de Clientes e Fornecedores, com os mesmos campos vindos de `module_fields` — não um formulário paralelo. O nome já digitado no combobox chega preenchido; ao salvar, o contato criado volta para quem chamou e é selecionado no campo na hora. A foto fica de fora (quem está no meio de uma venda não para para tirar retrato). É o **primeiro atalho de cadastro fora da tela do próprio módulo** no sistema.
+- **O mapeamento `values` → contato virou `contactForm.ts`**, usado por `CustomersPage` e pelo cadastro rápido: duas cópias sairiam do lugar na primeira coluna nova.
+- **`RegistryFormModal` ganhou `submitError`** (prop opcional, aditiva): sem ela, um `onSubmit` assíncrono que rejeita deixa o formulário aberto sem dizer nada ao operador — o que já acontecia em `CustomersPage`. Nenhum consumidor existente mudou.
+- **O atalho respeita a permissão**: `ClienteStep` só passa `onCreateNew` se `hasPermission('clientes-fornecedores', 'create')`. Oferecer um cadastro que a RLS vai recusar só produziria erro.
+- **Correção de comportamento que a conversão tornou necessária**: digitar por cima de um cliente/vendedor já escolhido agora **limpa o id**. Antes o campo também era digitável, mas a via principal era o modal; com a digitação virando a via principal, ficar com o id antigo e o nome novo na tela (gravando uma venda para outra pessoa) deixou de ser hipótese remota. É por isso que "Próximo" volta a ficar desabilitado quando o operador mexe no texto sem escolher de novo.
+
+#### Testado no navegador
+
+Realizar Venda, etapa 1: "Ana" mostra a sugestão ao digitar, sem lupa nenhuma; escolha por seta+Enter e por clique, as duas preenchem o campo e liberam o "Próximo". "Zzzznaoexiste" mostra a linha de cadastro rápido → formulário de Clientes com o nome já preenchido → salvar seleciona o cliente novo no campo e fecha o modal. Vendedor: mesma digitação e seleção, sem a linha de cadastro. Escape fecha a lista sem escolher e sem sair da tela; clique fora idem. Padrão antigo conferido intacto em Compras (lupa de Fornecedor), Financeiro (`lookupField` do plano de parcelas) e Produtos (`lookupField` de grupo tributário, o caminho que passa pelo `RegistryFormModal` alterado) — os três continuam empilhando o `LookupModal` sobre o formulário sem fechá-lo. Nenhum erro no console. `oxlint` limpo e `vite build` com o code splitting preservado.
+
+#### Fora de escopo
+
+Os 8 call sites restantes (fase 2). Cadastro rápido de fornecedor — `QuickContactFormModal` já aceita `kind: 'fornecedores'`, mas nenhuma tela usa ainda. Foto no cadastro rápido. Rolagem virtualizada da lista (o `fetchItems` de contatos já vem limitado pela RPC).
+
+### `SearchCombobox` fase 2: os 8 call sites restantes (25/08/2026)
+
+Conversão do resto do sistema para o campo digitável, validado o piloto de Realizar Venda. Os 8 lugares: Cliente e Vendedor de **Pedidos de venda**, Cliente de **Condicionais**, Fornecedor de **Compras**, contato do **Financeiro** (modal de lançamento) e o `lookupField` do **modal de edição** do Financeiro, Cliente do **PDV**, Venda de origem da **Devolução de venda**, Grupo tributário de **Produtos** (via `lookupField` do `RegistryFormModal`). Decisão do usuário nesta rodada: os **5 campos de contato** (os quatro de cliente/fornecedor mais o do Financeiro) ganham o mesmo atalho "Cadastrar novo" que Realizar Venda já tinha — sem isso, o mesmo campo Cliente ofereceria cadastro numa tela e não na outra. Vendedor, Venda de origem e Grupo tributário seguem **sem** o atalho: não são cadastro de negócio que faça sentido criar no meio de outra operação.
+
+#### A lista precisou sair do campo e ir para o `body`
+
+Três dos oito campos moram **dentro** de um modal Radix (`RegistryFormModal`, `FinanceEntryPlanModal`, `SaleReturnModal`), e ali uma lista `position: absolute` dentro do campo não funciona por dois motivos somados: o corpo do modal rola (`overflow-y: auto`, recorta a lista) e tem `backdrop-filter`, que cria um *containing block* novo — o mesmo detalhe já documentado no `DragOverlay` do dnd-kit. Então a lista passou a ser `createPortal(..., document.body)` com `position: fixed` e coordenadas medidas do campo (`getBoundingClientRect`), reposicionadas em `scroll` (em **captura**, porque quem rola é um contêiner interno) e `resize`. Abre para cima quando sobram menos de 180px embaixo.
+
+Isso trouxe três consequências que só aparecem em modal, e cada uma precisou de uma linha específica:
+
+- **`pointer-events: auto` na lista.** Enquanto um modal Radix está aberto, o `DismissableLayer` põe `pointer-events: none` no `body` e devolve `auto` só à sua própria camada. Sem essa regra a lista apareceria e seria **inclicável** exatamente nas telas que a portalização veio atender. Confirmado no navegador: com o modal de Produtos aberto, `getComputedStyle(document.body).pointerEvents === "none"`.
+- **`stopPropagation` no `pointerdown` da lista.** A lista está fora do `Dialog.Content` no DOM, então o Radix leria o clique nela como "clicou fora" e fecharia o formulário. (O `LookupModal` antigo não tinha esse problema porque era ele mesmo um `Dialog`, empilhado pelo Radix.)
+- **Escape em captura no `window`.** Esta é a que custou uma tentativa errada: `stopPropagation()` no `onKeyDown` do React **não** basta, porque o Radix escuta o Escape em captura no `document` — que roda antes de o evento sequer chegar ao input. O `window` é o primeiro alvo do caminho de captura, então é o único ponto que chega antes dele. Com isso o primeiro Escape fecha a sugestão e o segundo fecha o modal, que é o comportamento em camadas esperado.
+
+#### Receber foco deixou de abrir a lista
+
+Na fase 1 o campo abria a sugestão ao ganhar foco. Dentro de um modal isso vira defeito: o Radix dá foco automático ao primeiro campo, e em Produtos o primeiro campo é justamente o Grupo tributário — o formulário nascia com a lista aberta por cima dos outros campos. Agora abrem a lista o **clique no campo**, a **digitação** e a **seta para baixo**; o foco sozinho não abre.
+
+#### `fetchItems` foi para um `ref` — e isso corrigiu um laço que já existia
+
+Vários call sites passam uma seta inline (`(q) => fetchContactsByKind("clientes", q)`), cuja identidade muda a cada render. Com ela nas dependências do efeito de busca, **cada resposta dispara a busca seguinte** — um laço que o debounce de 250ms só disfarça. O `LookupModal` tinha esse problema em quatro call sites; o `SearchCombobox` guarda `fetchItems` num `ref` e depende só de `[open, value]`. Quem manda buscar de novo é o termo digitado, não a identidade da função. Efeito colateral bem-vindo: nenhum call site precisa lembrar de `useCallback`.
+
+#### `lookupField` do `RegistryFormModal` mudou de forma
+
+Perdeu `modalTitle` (não há mais modal) e ganhou `onClear?: () => void`. O texto digitado passou a ser estado **do formulário**, não de quem consome: `lookupField.value` continua descrevendo o item *escolhido*, e os dois só coincidem enquanto ninguém está buscando outro. `onClear` é o que impede o formulário de gravar o item antigo mostrando um texto novo — mesma correção já feita à mão em Realizar Venda na fase 1, agora aplicada em Produtos (grupo tributário), Financeiro (contato), Devolução (a venda escolhida, que ao ser desfeita também **limpa as linhas de item** — devolver itens de uma venda que não é a exibida seria pior que o texto errado) e nos quatro campos de cliente/fornecedor.
+
+#### O PDV precisou de duas props novas, não de um componente novo
+
+O rodapé do carrinho do PDV é claro, e a cápsula azul do `FormField` não serve ali. Em vez de um segundo componente, o `SearchCombobox` ganhou `className` (classe extra na raiz) e `hideLabel` (rótulo só para leitor de tela, já que o placeholder do PDV diz o que o campo é). `PosPage.css` devolve ao controle a mesma caixa branca discreta que o botão antigo tinha; a lista continua com o visual padrão. O "×" ao lado agora limpa o contato **e** o texto.
+
+#### O que morreu junto
+
+`LookupModal.tsx`/`.css` foram **removidos** — zero importadores depois da conversão, e deixar o componente vivo convidaria a reintroduzir o padrão antigo. Junto foram a prop `lookup`/`onLookup` do `FormField` e o CSS `.form-field__lookup`: não havia mais nenhum uso. `FormField` agora é só rótulo + cápsula (texto/data/select); campo que consulta outro cadastro é sempre `SearchCombobox`.
+
+#### Testado no navegador
+
+Os oito, um a um. **Produtos** (o caso mais arriscado, campo dentro de modal com `overflow` + `backdrop-filter` + dismissal do Radix): lista portalizada no `body`, alinhada ao campo (mesmo `left` e mesma largura), clicável com o `body` em `pointer-events: none`, escolha aplicada **sem** fechar o formulário; primeiro Escape fecha só a lista, segundo fecha o modal; abrir o formulário não abre mais a lista sozinha. **Pedidos de venda**: cliente por seta+Enter, "Cadastrar novo cliente" na busca vazia, Vendedor sem o atalho. **Condicionais**: cliente por seta+Enter. **Compras**: ciclo completo do cadastro rápido — "Fornecedor Teste Fase2" → linha de cadastro → formulário com o nome preenchido → salvar → fornecedor selecionado no campo, e confirmado depois na lista de Clientes e Fornecedores (registro de teste excluído no fim). **PDV**: caixa branca com a mesma borda/raio/altura do botão antigo, seleção por teclado, "×" limpando contato e texto. **Financeiro**: seleção dentro do modal de lançamento sem fechá-lo, e o cadastro rápido empilhando "Novo fornecedor" sobre "Nova conta a pagar" com o nome preenchido. **Devolução de venda**: escolher a venda por teclado carrega as 3 linhas de item; digitar por cima limpa as linhas. **Realizar Venda** (regressão da fase 1) intacta. Nenhum erro no console em nenhuma tela. `tsc`, `oxlint` e `vite build` limpos, code splitting preservado.
+
+#### Fora de escopo
+
+Foto no cadastro rápido. Rolagem virtualizada da lista. Cadastro rápido em Grupo tributário (o `lookupField` não expõe `onCreateNew`; quando algum módulo precisar, é uma passagem de duas props). Reposicionar a lista quando o campo se move sem `scroll`/`resize` (animação, mudança de layout) — hoje ela só remede nesses dois eventos.
+
 ## Roteiro para criar um novo módulo
 
 Clientes e Fornecedores e Produtos já passaram por esse caminho — qualquer módulo novo (Vendas, Compras, Financeiro etc.) deve seguir o mesmo, para não divergir do motor genérico nem do RBAC.

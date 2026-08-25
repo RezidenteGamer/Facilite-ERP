@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import FormField from "../../components/form/FormField";
-import LookupModal from "../../components/form/LookupModal";
+import SearchCombobox from "../../components/form/SearchCombobox";
 import PhotoDropzone from "./PhotoDropzone";
 import type { ModuleFieldDefinition } from "./types";
 import "./RegistryFormModal.css";
@@ -15,25 +15,30 @@ type RegistryFormModalMediaField = {
 };
 
 /**
- * Ponte para um campo de consulta a outro cadastro (ex.: o contato de um
- * lançamento do Financeiro) dentro do formulário genérico.
+ * Ponte para um campo de consulta a outro cadastro (ex.: o grupo tributário
+ * de um produto) dentro do formulário genérico.
  *
  * Mesmo papel de `mediaField`: `module_fields` não tem um `dataType` de
  * consulta, e criar um seria generalizar o motor inteiro por causa de um
- * campo. O modal renderiza o `LookupModal` já existente e cuida de abrir e
- * fechar; quem consome só diz o que buscar e o que fazer com o escolhido.
+ * campo. O formulário renderiza o `SearchCombobox` e cuida do texto digitado;
+ * quem consome só diz o que buscar e o que fazer com o escolhido.
  */
 type RegistryFormModalLookupField<TItem> = {
   label: string;
   /** Descrição do item já escolhido. Vazio = nada escolhido ainda. */
   value: string;
   isRequired?: boolean;
-  modalTitle: string;
   searchPlaceholder?: string;
   fetchItems: (query: string) => Promise<TItem[]>;
   getKey: (item: TItem) => string;
   renderItem: (item: TItem) => { primary: string; secondary?: string };
   onSelect: (item: TItem) => void;
+  /**
+   * Desfaz a escolha quando o operador digita por cima dela. Sem isto o
+   * formulário gravaria o item antigo enquanto mostra um texto novo — risco
+   * que só existe porque o campo passou a ser digitável.
+   */
+  onClear?: () => void;
 };
 
 /**
@@ -73,6 +78,12 @@ type RegistryFormModalProps<TItem> = {
    * recusa "abc" ou valor <= 0 no campo Valor total).
    */
   validate?: (values: Record<string, string>) => string[];
+  /**
+   * Erro vindo de fora, depois do envio (ex.: a gravação falhou) — mostrado
+   * junto dos erros de validação. Sem isto um `onSubmit` assíncrono que
+   * rejeita deixa o formulário aberto sem dizer nada ao operador.
+   */
+  submitError?: string | null;
   onSubmit: (values: Record<string, string>) => void;
   onCancel: () => void;
 };
@@ -92,6 +103,7 @@ export default function RegistryFormModal<TItem = unknown>({
   selectField,
   referenceOptions,
   validate,
+  submitError,
   onSubmit,
   onCancel,
 }: RegistryFormModalProps<TItem>) {
@@ -103,7 +115,15 @@ export default function RegistryFormModal<TItem = unknown>({
     return initial;
   });
   const [formErrors, setFormErrors] = useState<string[]>([]);
-  const [lookupOpen, setLookupOpen] = useState(false);
+  /* O texto digitado no campo de consulta é do formulário, não de quem
+     consome: `lookupField.value` descreve o item **escolhido**, e os dois só
+     coincidem enquanto ninguém estiver digitando uma busca nova. */
+  const [lookupQuery, setLookupQuery] = useState(lookupField?.value ?? "");
+
+  const lookupValue = lookupField?.value ?? "";
+  useEffect(() => {
+    setLookupQuery(lookupValue);
+  }, [lookupValue]);
 
   function handleSubmit() {
     const missing = fields
@@ -142,6 +162,8 @@ export default function RegistryFormModal<TItem = unknown>({
               </p>
             ))}
 
+            {submitError && <p className="registry-form-modal__error">{submitError}</p>}
+
             {mediaField && (
               <div className="registry-form-modal__media">
                 <PhotoDropzone
@@ -156,15 +178,22 @@ export default function RegistryFormModal<TItem = unknown>({
 
             <div className="registry-form-modal__fields">
               {lookupField && (
-                <FormField
+                <SearchCombobox<TItem>
                   id="registry-form-lookup"
                   label={lookupField.isRequired ? `${lookupField.label} *` : lookupField.label}
-                  value={lookupField.value}
-                  /* O valor só muda pelo modal de busca — digitar não faz nada
-                     de propósito, para não existir contato "de texto livre". */
-                  onChange={() => {}}
-                  lookup
-                  onLookup={() => setLookupOpen(true)}
+                  placeholder={lookupField.searchPlaceholder}
+                  value={lookupQuery}
+                  onChange={(text) => {
+                    setLookupQuery(text);
+                    if (lookupField.value) lookupField.onClear?.();
+                  }}
+                  fetchItems={lookupField.fetchItems}
+                  getKey={lookupField.getKey}
+                  renderItem={lookupField.renderItem}
+                  onSelect={(item) => {
+                    lookupField.onSelect(item);
+                    setLookupQuery(lookupField.renderItem(item).primary);
+                  }}
                 />
               )}
 
@@ -221,25 +250,6 @@ export default function RegistryFormModal<TItem = unknown>({
                 {submitLabel}
               </button>
             </div>
-
-            {/* Dentro do `Dialog.Content` de propósito: é assim que o Radix
-                empilha um modal sobre outro sem que o de baixo se feche ao
-                clique. O `LookupModal` tem portal próprio, então não afeta
-                o layout daqui. */}
-            {lookupField && lookupOpen && (
-              <LookupModal<TItem>
-                title={lookupField.modalTitle}
-                placeholder={lookupField.searchPlaceholder}
-                fetchItems={lookupField.fetchItems}
-                getKey={lookupField.getKey}
-                renderItem={lookupField.renderItem}
-                onClose={() => setLookupOpen(false)}
-                onSelect={(item) => {
-                  lookupField.onSelect(item);
-                  setLookupOpen(false);
-                }}
-              />
-            )}
           </Dialog.Content>
         </Dialog.Overlay>
       </Dialog.Portal>

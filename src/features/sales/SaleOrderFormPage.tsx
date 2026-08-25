@@ -13,13 +13,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
-import FormField from "../../components/form/FormField";
-import LookupModal from "../../components/form/LookupModal";
+import SearchCombobox from "../../components/form/SearchCombobox";
 import { useOpenWindows } from "../../components/openWindows";
 import { PRODUCT_PICKER_DRAG_PREFIX } from "../../components/product-picker/ProductPickerPanel";
 import ProductPickerPanel from "../../components/product-picker/ProductPickerPanel";
 import { useAuth } from "../auth/AuthContext";
 import type { Contact } from "../customers/contacts";
+import QuickContactFormModal from "../customers/QuickContactFormModal";
 import type { Product } from "../products/products";
 import { fetchSaleContacts, fetchSaleSellers, type SaleSeller } from "../../lib/repositories/salesLookups";
 import { SaleOrdersIcon } from "../home/icons";
@@ -40,7 +40,7 @@ const CART_DROPZONE_ID = "sale-order-cart-dropzone";
    são duas sub-rotas do mesmo módulo no dock, ver `updateWindowPath`. */
 const SALE_ORDER_WINDOW_ID = "pedidos-venda";
 
-type LookupKind = "cliente" | "vendedor" | null;
+
 
 /** `useDroppable` só enxerga o `DndContext` de dentro dele — o drop-target precisa ser um filho. */
 function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }) {
@@ -62,11 +62,15 @@ export default function SaleOrderFormPage() {
     [profile],
   );
   const draft = useSaleOrderDraft(currentBranchId, defaultSeller, SALE_ORDER_WINDOW_ID);
-  const [lookup, setLookup] = useState<LookupKind>(null);
+  /** Nome digitado que originou o "Cadastrar novo" — `null` = modal fechado. */
+  const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
 
   const canCreate = hasPermission("pedidos-venda", "create");
+  /* Sem permissão de criar contato o atalho some — oferecer um cadastro que a
+     RLS vai recusar só produz erro. */
+  const canCreateContact = hasPermission("clientes-fornecedores", "create");
 
   function handleDragStart(event: DragStartEvent) {
     const product = event.active.data.current?.product as Product | undefined;
@@ -138,21 +142,39 @@ export default function SaleOrderFormPage() {
             <div className="sale__card">
               <p className="sale__cart-title">Quem é o cliente?</p>
               <div className="sale__who">
-                <FormField
+                <SearchCombobox<Contact>
                   id="pedido-cliente"
                   label="Cliente"
+                  placeholder="Digite o nome ou o documento..."
                   value={draft.header.clienteNome}
-                  onChange={(v) => draft.setField("clienteNome", v)}
-                  lookup
-                  onLookup={() => setLookup("cliente")}
+                  onChange={(v) => {
+                    draft.setField("clienteNome", v);
+                    /* Digitar por cima de quem já estava escolhido desfaz a
+                       escolha — ver a nota do ClienteStep de Realizar Venda. */
+                    if (draft.header.clienteId) draft.setField("clienteId", "");
+                  }}
+                  fetchItems={fetchSaleContacts}
+                  getKey={(c) => c.id}
+                  renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+                  onSelect={(c) => draft.selectContact(c)}
+                  onCreateNew={canCreateContact ? (query) => setCreatingContactName(query) : undefined}
+                  createNewLabel="Cadastrar novo cliente"
                 />
-                <FormField
+                {/* Vendedor é usuário do sistema (`profiles`), não cadastro de
+                    negócio: sem atalho de criar. */}
+                <SearchCombobox<SaleSeller>
                   id="pedido-vendedor"
                   label="Vendedor"
+                  placeholder="Digite o nome..."
                   value={draft.header.vendedorNome}
-                  onChange={(v) => draft.setField("vendedorNome", v)}
-                  lookup
-                  onLookup={() => setLookup("vendedor")}
+                  onChange={(v) => {
+                    draft.setField("vendedorNome", v);
+                    if (draft.header.vendedorId) draft.setField("vendedorId", "");
+                  }}
+                  fetchItems={fetchSaleSellers}
+                  getKey={(s) => s.id}
+                  renderItem={(s) => ({ primary: s.name, secondary: s.operatorCode })}
+                  onSelect={(s) => draft.selectSeller(s)}
                 />
               </div>
 
@@ -340,32 +362,14 @@ export default function SaleOrderFormPage() {
         </DragOverlay>
       </DndContext>
 
-      {lookup === "cliente" && (
-        <LookupModal<Contact>
-          title="Selecionar cliente"
-          placeholder="Buscar por nome ou documento..."
-          onClose={() => setLookup(null)}
-          fetchItems={fetchSaleContacts}
-          getKey={(c) => c.id}
-          renderItem={(c) => ({ primary: c.name, secondary: c.document })}
-          onSelect={(c) => {
-            draft.selectContact(c);
-            setLookup(null);
-          }}
-        />
-      )}
-
-      {lookup === "vendedor" && (
-        <LookupModal<SaleSeller>
-          title="Selecionar vendedor"
-          placeholder="Buscar por nome..."
-          onClose={() => setLookup(null)}
-          fetchItems={fetchSaleSellers}
-          getKey={(s) => s.id}
-          renderItem={(s) => ({ primary: s.name, secondary: s.operatorCode })}
-          onSelect={(s) => {
-            draft.selectSeller(s);
-            setLookup(null);
+      {creatingContactName !== null && (
+        <QuickContactFormModal
+          kind="clientes"
+          initialName={creatingContactName}
+          onCancel={() => setCreatingContactName(null)}
+          onCreated={(contact) => {
+            draft.selectContact(contact);
+            setCreatingContactName(null);
           }}
         />
       )}

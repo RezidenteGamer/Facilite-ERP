@@ -18,6 +18,7 @@ import {
   allowNegativeStockToOption,
   buildProductInput,
   formatPrice,
+  validateProductFormValues,
   type AllowNegativeStockOption,
   type Product,
 } from "./products";
@@ -111,10 +112,19 @@ export default function ProductsPage() {
 
   const selected: Product | null = visibleProducts.find((product) => product.id === selectedId) ?? null;
 
-  const columns = useMemo(
-    () => (definition ? buildTableColumns<Product>(definition.fields) : []),
-    [definition],
-  );
+  const columns = useMemo(() => {
+    if (!definition) return [];
+    const built = buildTableColumns<Product>(definition.fields);
+    // Mesmo padrão de override local que `detailFields` já usa abaixo para
+    // "Preço custo"/"Preço Atacado": `buildTableColumns` é genérico (motor de
+    // metadados, sem saber o que é dinheiro), então a formatação de preço
+    // entra aqui, não em `moduleView.ts`.
+    return built.map((column) =>
+      column.label === "Valor venda"
+        ? { ...column, render: (row: Product) => formatPrice(row.salePrice) }
+        : column,
+    );
+  }, [definition]);
   const detailFields = useMemo(() => {
     if (!definition) return [];
     const fields = buildDetailFields<Product>(definition.fields, selected);
@@ -175,20 +185,23 @@ export default function ProductsPage() {
   }
 
   /**
-   * O grupo tributário entra pelo `lookupField` do `RegistryFormModal` — o
-   * mesmo prop de ponte que o Financeiro usa para o contato. `module_fields`
+   * O grupo tributário entra pelo `lookupField` do `RegistryFormModal`, que
+   * desde a etapa do `SearchCombobox` é um campo digitável com sugestão em
+   * vez de um modal aberto pela lupa. `module_fields`
    * continua sem um `data_type: 'lookup'`: criar um generalizaria o motor
    * inteiro por causa de um campo (mesma disciplina já registrada lá).
    */
   const taxGroupLookup = {
     label: "Grupo tributário",
     value: formTaxGroup?.name ?? "",
-    modalTitle: "Selecionar grupo tributário",
-    searchPlaceholder: "Buscar por código ou nome...",
+    searchPlaceholder: "Digite o código ou o nome...",
     fetchItems: fetchTaxGroups,
     getKey: (group: TaxGroup) => group.id,
     renderItem: (group: TaxGroup) => ({ primary: group.name, secondary: group.code }),
     onSelect: (group: TaxGroup) => setFormTaxGroup({ id: group.id, name: group.name }),
+    /* Digitar por cima do grupo escolhido desfaz a escolha — o campo tem que
+       mostrar o que vai ser gravado. */
+    onClear: () => setFormTaxGroup(null),
   };
 
   /** Mesmo papel de `taxGroupLookup`, via `selectField` — três estados, ver `AllowNegativeStockOption`. */
@@ -298,6 +311,7 @@ export default function ProductsPage() {
           fields={formFields}
           lookupField={taxGroupLookup}
           selectField={allowNegativeStockSelect}
+          validate={validateProductFormValues}
           onSubmit={handleCreateSubmit}
           onCancel={() => setModal("none")}
         />
@@ -309,6 +323,7 @@ export default function ProductsPage() {
           fields={formFields}
           lookupField={taxGroupLookup}
           selectField={allowNegativeStockSelect}
+          validate={validateProductFormValues}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -337,6 +352,7 @@ export default function ProductsPage() {
           fields={formFields}
           lookupField={taxGroupLookup}
           selectField={allowNegativeStockSelect}
+          validate={validateProductFormValues}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),

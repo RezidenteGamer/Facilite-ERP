@@ -1,4 +1,3 @@
-import { SearchIcon } from "../icons";
 import "./FormField.css";
 
 type FormFieldProps = {
@@ -9,18 +8,19 @@ type FormFieldProps = {
   type?: "text" | "date" | "email" | "password" | "select";
   /** Só para `type: "select"`. */
   options?: { value: string; label: string }[];
-  /** Mostra a lupa de consulta à direita (campos que abrem uma busca). */
-  lookup?: boolean;
-  onLookup?: () => void;
   disabled?: boolean;
   /** Texto curto abaixo do campo — só para explicar algo não óbvio pelo rótulo. */
   hint?: string;
 };
 
 /**
- * Campo de formulário do sistema: rótulo acima e cápsula branca abaixo,
- * com lupa opcional para os campos que consultam outro cadastro.
- * Compartilhado pelas telas de venda, pedido, compra e devolução.
+ * Campo de formulário do sistema: rótulo acima e cápsula branca abaixo.
+ * Compartilhado pelo motor genérico (`RegistryFormModal`) e pelas telas de
+ * venda, pedido, compra e devolução.
+ *
+ * Campos que consultam outro cadastro **não** moram aqui: eles usam o
+ * `SearchCombobox` (digitação com sugestão), que reaproveita esta mesma
+ * moldura via `FormField.css`.
  */
 export default function FormField({
   id,
@@ -29,8 +29,6 @@ export default function FormField({
   onChange,
   type = "text",
   options,
-  lookup = false,
-  onLookup,
   disabled = false,
   hint,
 }: FormFieldProps) {
@@ -67,18 +65,6 @@ export default function FormField({
                sem isto, um campo perto do rodapé some atrás dele ao focar. */
             onFocus={(event) => event.target.scrollIntoView({ block: "center", behavior: "smooth" })}
           />
-        )}
-
-        {lookup && (
-          <button
-            className="form-field__lookup"
-            type="button"
-            aria-label={`Consultar ${label}`}
-            disabled={disabled}
-            onClick={onLookup}
-          >
-            <SearchIcon />
-          </button>
         )}
       </div>
 

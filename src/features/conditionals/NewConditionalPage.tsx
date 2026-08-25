@@ -14,11 +14,12 @@ import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import FormField from "../../components/form/FormField";
-import LookupModal from "../../components/form/LookupModal";
+import SearchCombobox from "../../components/form/SearchCombobox";
 import { useOpenWindows } from "../../components/openWindows";
 import { PRODUCT_PICKER_DRAG_PREFIX } from "../../components/product-picker/ProductPickerPanel";
 import ProductPickerPanel from "../../components/product-picker/ProductPickerPanel";
 import { useAuth } from "../auth/AuthContext";
+import QuickContactFormModal from "../customers/QuickContactFormModal";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
@@ -59,11 +60,15 @@ export default function NewConditionalPage() {
   const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId } = useAuth();
   const draft = useConditionalDraft(currentBranchId, CONDITIONAL_WINDOW_ID);
-  const [lookupOpen, setLookupOpen] = useState(false);
+  /** Nome digitado que originou o "Cadastrar novo" - `null` = modal fechado. */
+  const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
 
   const canCreate = hasPermission("condicionais", "create");
+  /* Sem permissao de criar contato o atalho some - oferecer um cadastro que a
+     RLS vai recusar so produz erro. */
+  const canCreateContact = hasPermission("clientes-fornecedores", "create");
 
   function handleDragStart(event: DragStartEvent) {
     const product = event.active.data.current?.product as Product | undefined;
@@ -134,13 +139,23 @@ export default function NewConditionalPage() {
             <div className="sale__card">
               <p className="sale__cart-title">Quem está levando?</p>
               <div className="sale__who">
-                <FormField
+                <SearchCombobox<Contact>
                   id="condicional-cliente"
                   label="Cliente"
+                  placeholder="Digite o nome ou o documento..."
                   value={draft.header.clienteNome}
-                  onChange={() => {}}
-                  lookup
-                  onLookup={() => setLookupOpen(true)}
+                  onChange={(v) => {
+                    draft.setField("clienteNome", v);
+                    /* Digitar por cima de quem ja estava escolhido desfaz a
+                       escolha - ver a nota do ClienteStep de Realizar Venda. */
+                    if (draft.header.clienteId) draft.setField("clienteId", "");
+                  }}
+                  fetchItems={(query) => fetchContactsByKind("clientes", query)}
+                  getKey={(c) => c.id}
+                  renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+                  onSelect={(c) => draft.selectContact(c)}
+                  onCreateNew={canCreateContact ? (query) => setCreatingContactName(query) : undefined}
+                  createNewLabel="Cadastrar novo cliente"
                 />
                 <FormField
                   id="condicional-prazo"
@@ -268,17 +283,14 @@ export default function NewConditionalPage() {
         </DragOverlay>
       </DndContext>
 
-      {lookupOpen && (
-        <LookupModal<Contact>
-          title="Selecionar cliente"
-          placeholder="Buscar por nome ou documento..."
-          onClose={() => setLookupOpen(false)}
-          fetchItems={(query) => fetchContactsByKind("clientes", query)}
-          getKey={(c) => c.id}
-          renderItem={(c) => ({ primary: c.name, secondary: c.document })}
-          onSelect={(c) => {
-            draft.selectContact(c);
-            setLookupOpen(false);
+      {creatingContactName !== null && (
+        <QuickContactFormModal
+          kind="clientes"
+          initialName={creatingContactName}
+          onCancel={() => setCreatingContactName(null)}
+          onCreated={(contact) => {
+            draft.selectContact(contact);
+            setCreatingContactName(null);
           }}
         />
       )}

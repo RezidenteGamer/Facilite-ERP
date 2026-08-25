@@ -483,28 +483,45 @@
   gap: 6px;
 }
 
-.pos__client {
+/* O campo de cliente do PDV usa o `SearchCombobox`, mas o rodape do carrinho
+   e claro — a capsula azul de `FormField` nao serve aqui. Estas regras
+   devolvem ao controle a mesma caixa branca discreta que o botao antigo
+   (`.pos__client`) tinha; a lista suspensa continua com o visual padrao. */
+.pos__client-combobox {
   flex: 1;
   min-width: 0;
+}
+
+.pos__client-combobox .form-field__control {
+  height: auto;
+  min-height: 0;
+  padding: 4px 6px 4px 12px;
   border: 1px solid #D9DEE7;
   border-radius: 8px;
-  padding: 9px 12px;
   background: var(--white);
-  color: var(--ink);
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-ui);
-  font-size: var(--font-size-input);
-  outline: 0;
-  cursor: pointer;
+  box-shadow: none;
   transition: border-color .15s var(--ease);
 }
 
-.pos__client:focus,
-.pos__client:hover {
+.pos__client-combobox .form-field__control:focus-within {
   border-color: var(--blue-panel);
+  box-shadow: none;
+}
+
+.pos__client-combobox .form-field__input {
+  padding: 5px 0;
+  color: var(--ink);
+}
+
+.pos__client-combobox .search-combobox__icon {
+  width: 28px;
+  height: 28px;
+  color: #5B6472;
+}
+
+.pos__client-combobox .search-combobox__icon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .pos__client-clear {

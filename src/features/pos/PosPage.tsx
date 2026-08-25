@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { SearchIcon } from "../../components/icons";
-import LookupModal from "../../components/form/LookupModal";
+import SearchCombobox from "../../components/form/SearchCombobox";
 import { useAuth } from "../auth/AuthContext";
 import { useProductsData } from "../products/useProductsData";
 import type { Product } from "../products/products";
 import type { Contact } from "../customers/contacts";
+import QuickContactFormModal from "../customers/QuickContactFormModal";
 import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
 import { normalizeSearchText } from "../../lib/searchText";
 import {
@@ -56,6 +57,9 @@ export default function PosPage() {
   const { hasPermission, currentBranchId, profile, user } = useAuth();
   const sellerId = profile?.id ?? user?.id ?? null;
   const canCreate = hasPermission("ponto-de-venda", "create");
+  /* Sem permissao de criar contato o atalho some - oferecer um cadastro que a
+     RLS vai recusar so produz erro. */
+  const canCreateContact = hasPermission("clientes-fornecedores", "create");
 
   const { products } = useProductsData(currentBranchId);
   const { session: openSession, loading: sessionLoading, reload: reloadSession } = useOpenCashSession(currentBranchId);
@@ -63,7 +67,11 @@ export default function PosPage() {
 
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [clientLookupOpen, setClientLookupOpen] = useState(false);
+  /* O texto digitado no campo de cliente e do campo, nao do contato
+     escolhido: os dois so coincidem enquanto ninguem estiver buscando outro. */
+  const [clientQuery, setClientQuery] = useState("");
+  /** Nome digitado que originou o "Cadastrar novo" - `null` = modal fechado. */
+  const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
 
   // Recarrega a sessão depois de uma venda confirmada — o extrato do Controle
   // de caixa nesta sessão muda, e uma segunda sessão pode ter sido aberta
@@ -276,15 +284,38 @@ export default function PosPage() {
             )}
 
             <div className="pos__client-row">
-              <button type="button" className="pos__client" onClick={() => setClientLookupOpen(true)}>
-                {sale.contact ? sale.contact.name : "Cliente (opcional) — buscar por nome ou CPF"}
-              </button>
+              <SearchCombobox<Contact>
+                id="pos-cliente"
+                className="pos__client-combobox"
+                label="Cliente (opcional)"
+                hideLabel
+                placeholder="Cliente (opcional) — digite o nome ou o CPF"
+                value={clientQuery}
+                onChange={(text) => {
+                  setClientQuery(text);
+                  /* Digitar por cima do cliente escolhido desfaz a escolha — a
+                     nota fiscal sai com quem o campo estiver mostrando. */
+                  if (sale.contact) sale.setContact(null);
+                }}
+                fetchItems={(query) => fetchContactsByKind("clientes", query)}
+                getKey={(c) => c.id}
+                renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+                onSelect={(c) => {
+                  sale.setContact(c);
+                  setClientQuery(c.name);
+                }}
+                onCreateNew={canCreateContact ? (query) => setCreatingContactName(query) : undefined}
+                createNewLabel="Cadastrar novo cliente"
+              />
               {sale.contact && (
                 <button
                   type="button"
                   className="pos__client-clear"
                   aria-label="Remover cliente selecionado"
-                  onClick={() => sale.setContact(null)}
+                  onClick={() => {
+                    sale.setContact(null);
+                    setClientQuery("");
+                  }}
                 >
                   ×
                 </button>
@@ -455,17 +486,15 @@ export default function PosPage() {
         </aside>
       </div>
 
-      {clientLookupOpen && (
-        <LookupModal<Contact>
-          title="Selecionar cliente"
-          placeholder="Buscar por nome ou documento..."
-          onClose={() => setClientLookupOpen(false)}
-          fetchItems={(query) => fetchContactsByKind("clientes", query)}
-          getKey={(c) => c.id}
-          renderItem={(c) => ({ primary: c.name, secondary: c.document })}
-          onSelect={(c) => {
-            sale.setContact(c);
-            setClientLookupOpen(false);
+      {creatingContactName !== null && (
+        <QuickContactFormModal
+          kind="clientes"
+          initialName={creatingContactName}
+          onCancel={() => setCreatingContactName(null)}
+          onCreated={(contact) => {
+            sale.setContact(contact);
+            setClientQuery(contact.name);
+            setCreatingContactName(null);
           }}
         />
       )}

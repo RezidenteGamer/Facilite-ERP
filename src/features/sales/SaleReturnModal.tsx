@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useState } from "react";
 import FormField from "../../components/form/FormField";
-import LookupModal from "../../components/form/LookupModal";
+import SearchCombobox from "../../components/form/SearchCombobox";
 import {
   fetchReturnableSaleDetail,
   fetchReturnableSales,
@@ -47,14 +47,12 @@ export default function SaleReturnModal({ branchId, onSubmit, onDone }: SaleRetu
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
-  const [lookupOpen, setLookupOpen] = useState(false);
   const [loadingSale, setLoadingSale] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchSales = useCallback((query: string) => fetchReturnableSales(branchId, query), [branchId]);
 
   async function handlePickSale(picked: ReturnableSale) {
-    setLookupOpen(false);
     setErrors([]);
     setQuantities({});
     setSaleLabel(`${picked.code} — ${picked.clientName}`);
@@ -155,17 +153,30 @@ export default function SaleReturnModal({ branchId, onSubmit, onDone }: SaleRetu
             ))}
 
             <div className="registry-form-modal__fields">
-              <FormField
+              {/* Sem "Cadastrar novo": uma venda não se cria a partir da
+                  devolução dela. */}
+              <SearchCombobox<ReturnableSale>
                 id="sale-return-sale"
                 label="Venda de origem *"
+                placeholder="Digite o código da venda ou o nome do cliente..."
                 value={saleLabel}
-                /* Só o modal de busca muda o valor — digitar não faz nada, de
-                   propósito (mesma nota do `lookupField` do RegistryFormModal).
-                   `disabled` não serve aqui: ele desabilita junto o botão da
-                   lupa, que é o único caminho para escolher a venda. */
-                onChange={() => {}}
-                lookup
-                onLookup={() => setLookupOpen(true)}
+                onChange={(text) => {
+                  setSaleLabel(text);
+                  /* Digitar por cima da venda escolhida desfaz a escolha: as
+                     linhas abaixo pertencem a ela, e mantê-las sob um texto
+                     novo devolveria itens de uma venda que não é a exibida. */
+                  if (sale) {
+                    setSale(null);
+                    setQuantities({});
+                  }
+                }}
+                fetchItems={fetchSales}
+                getKey={(item) => item.id}
+                renderItem={(item) => ({
+                  primary: `${item.code} — ${item.clientName}`,
+                  secondary: `${formatReturnDate(item.issueDate)} · ${formatReturnTotal(item.total)}`,
+                })}
+                onSelect={handlePickSale}
                 hint="Busque pelo código da venda ou pelo nome do cliente."
               />
             </div>
@@ -249,25 +260,6 @@ export default function SaleReturnModal({ branchId, onSubmit, onDone }: SaleRetu
                 {submitting ? "Devolvendo..." : "Confirmar devolução"}
               </button>
             </div>
-
-            {/* Renderizado dentro do Dialog.Content (não como irmão do Root) —
-                é assim que o Radix empilha um modal sobre outro sem o de baixo
-                interpretar o clique como "clicou fora". Mesma nota já
-                registrada no `lookupField` do RegistryFormModal. */}
-            {lookupOpen && (
-              <LookupModal<ReturnableSale>
-                title="Buscar venda"
-                placeholder="Código da venda ou cliente"
-                onClose={() => setLookupOpen(false)}
-                onSelect={handlePickSale}
-                fetchItems={fetchSales}
-                getKey={(item) => item.id}
-                renderItem={(item) => ({
-                  primary: `${item.code} — ${item.clientName}`,
-                  secondary: `${formatReturnDate(item.issueDate)} · ${formatReturnTotal(item.total)}`,
-                })}
-              />
-            )}
           </Dialog.Content>
         </Dialog.Overlay>
       </Dialog.Portal>
