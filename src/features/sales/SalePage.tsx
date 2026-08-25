@@ -10,6 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import ActionableMessage from "../../components/ActionableMessage";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
@@ -31,6 +32,11 @@ import "./SalePage.css";
 // drag assim que ele começava.
 const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 6 } };
 
+/* Um id só para as três coisas que precisam concordar: a janela no dock, o
+   rascunho guardado e a etapa do wizard. Se cada uma tivesse a sua string,
+   fechar a janela limparia o estado de um id que ninguém grava. */
+const SALE_WINDOW_ID = "realizar-venda";
+
 /** Módulo "Realizar uma venda": wizard de etapas (Cliente → Produtos → Detalhes → Faturamento → Revisão → Confirmação). */
 export default function SalePage() {
   const navigate = useNavigate();
@@ -42,7 +48,7 @@ export default function SalePage() {
     () => (profile ? { id: profile.id, name: profile.name, operatorCode: profile.operatorCode } : null),
     [profile],
   );
-  const draft = useSaleDraft(currentBranchId, defaultSeller);
+  const draft = useSaleDraft(currentBranchId, defaultSeller, SALE_WINDOW_ID);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const [lastIntent, setLastIntent] = useState<SaleIntent | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
@@ -65,7 +71,7 @@ export default function SalePage() {
 
   useEffect(() => {
     openWindow({
-      id: "realizar-venda",
+      id: SALE_WINDOW_ID,
       label: "Realizar uma venda",
       path: "/realizar-venda",
       icon: SaleHandIcon,
@@ -97,10 +103,21 @@ export default function SalePage() {
                   : `Venda ${draft.confirmedSale.code} confirmada!`}
               </p>
               <p className="sale__success-total">Total: {formatMoney(draft.confirmedSale.totalAmount)}</p>
-              {notaFalhou && (
-                <p className="sale__fiscal-warning">
-                  A nota fiscal não saiu: {draft.fiscalOutcome && !draft.fiscalOutcome.ok ? draft.fiscalOutcome.errors.join(" ") : null}
-                </p>
+              {notaFalhou && draft.fiscalOutcome && !draft.fiscalOutcome.ok && (
+                <div className="sale__fiscal-warning">
+                  <p className="sale__fiscal-warning-lead">A nota fiscal não saiu:</p>
+                  {draft.fiscalOutcome.errors.map((error, index) =>
+                    error.endsWith("Cadastre uma regra em Tributações.") ? (
+                      <ActionableMessage
+                        key={index}
+                        message={error}
+                        action={{ label: "Ir para Tributações", to: "/tributacoes" }}
+                      />
+                    ) : (
+                      <p key={index}>{error}</p>
+                    ),
+                  )}
+                </div>
               )}
               <div className="sale__success-actions">
                 <button
@@ -147,6 +164,7 @@ export default function SalePage() {
           branchId={currentBranchId}
           canCreate={canCreate}
           onConfirmed={setLastIntent}
+          windowId={SALE_WINDOW_ID}
         />
 
         <DragOverlay>

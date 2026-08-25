@@ -1,3 +1,4 @@
+import ActionableMessage from "../../../components/ActionableMessage";
 import { formatMoney } from "../sales";
 import type { useSaleDraft } from "../useSaleDraft";
 import type { SaleIntent } from "../SaleWizard";
@@ -31,7 +32,16 @@ export default function ConfirmacaoStep({ draft, canCreate, onConfirmed }: Confi
           Total {formatMoney(draft.total)} — esta ação grava a venda e baixa o estoque dos produtos.
         </p>
 
-        {draft.submitError && <p className="sale__error">{draft.submitError}</p>}
+        {draft.submitError &&
+          (typeof draft.submitError === "string" ? (
+            <p className="sale__error">{draft.submitError}</p>
+          ) : (
+            <ActionableMessage
+              className="sale__error"
+              message={draft.submitError.message}
+              action={draft.submitError.action}
+            />
+          ))}
         {!canCreate && <p className="sale__error">Você não tem permissão para confirmar vendas.</p>}
 
         <div className="sale__confirm-actions">

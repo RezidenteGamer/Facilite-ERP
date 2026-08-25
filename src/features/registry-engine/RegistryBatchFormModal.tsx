@@ -65,6 +65,8 @@ type RegistryBatchFormModalProps = {
    * está sendo arrastado.
    */
   resolveDraggedItem?: (dragData: Record<string, unknown> | undefined) => BatchItem | null;
+  /** Itens que o lote já nasce com — ex.: chegar em "Ajuste de estoque" com o produto pré-selecionado. */
+  initialItems?: BatchItem[];
   /** Texto mostrado enquanto o lote está vazio. */
   emptyHint?: string;
   submitLabel?: string;
@@ -123,6 +125,7 @@ export default function RegistryBatchFormModal({
   fields,
   renderItemPicker,
   resolveDraggedItem,
+  initialItems,
   emptyHint = "Escolha os itens ao lado para montar o lote.",
   submitLabel = "Confirmar lote",
   validateRow,
@@ -130,7 +133,13 @@ export default function RegistryBatchFormModal({
   onCancel,
 }: RegistryBatchFormModalProps) {
   const formFields = useMemo(() => buildFormFields(fields), [fields]);
-  const [rows, setRows] = useState<BatchRow[]>([]);
+  const [rows, setRows] = useState<BatchRow[]>(() =>
+    (initialItems ?? []).map((item) => {
+      const values: Record<string, string> = {};
+      for (const field of formFields) values[field.accessorKey] = "";
+      return { item, values };
+    }),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draggingItem, setDraggingItem] = useState<BatchItem | null>(null);

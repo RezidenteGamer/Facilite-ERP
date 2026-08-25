@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
@@ -15,6 +15,7 @@ import RegistryBatchFormModal, {
 } from "../registry-engine/RegistryBatchFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { formatPrice, type Product } from "./products";
+import { useProductsData } from "./useProductsData";
 import { useStockAdjustmentsData } from "./useStockAdjustmentsData";
 import type { StockAdjustment } from "../../lib/repositories/stockAdjustmentsRepository";
 
@@ -100,6 +101,7 @@ function formatDateTime(value: string) {
  */
 export default function StockAdjustPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { openWindow } = useOpenWindows();
   const { hasPermission, currentBranchId, branches } = useAuth();
 
@@ -109,10 +111,41 @@ export default function StockAdjustPage() {
   const { definition, loading: definitionLoading, error: definitionError } = useModuleDefinition(MODULE_ID);
   const { adjustments, error: adjustmentsError, createAdjustmentBatch } =
     useStockAdjustmentsData(currentBranchId);
+  // Só para resolver o `?produto=` de "Ajustar estoque de X" vindo de Realizar
+  // Venda (estoque insuficiente) — a lista em si não aparece nesta tela.
+  const { products, loading: productsLoading } = useProductsData(currentBranchId);
 
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+
+  const preselectProductId = searchParams.get("produto");
+  const preselectedProduct = useMemo(
+    () => (preselectProductId ? (products.find((p) => p.id === preselectProductId) ?? null) : null),
+    [preselectProductId, products],
+  );
+
+  // Abre o lote sozinho assim que os produtos carregarem — se o id não bater
+  // com nenhum produto, abre do mesmo jeito, só sem pré-seleção (ver
+  // `initialItems` abaixo).
+  useEffect(() => {
+    if (!preselectProductId || productsLoading) return;
+    setModalOpen(true);
+  }, [preselectProductId, productsLoading]);
+
+  function closeModal() {
+    setModalOpen(false);
+    if (preselectProductId) {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.delete("produto");
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }
 
   useEffect(() => {
     openWindow({
@@ -173,7 +206,7 @@ export default function StockAdjustPage() {
         };
       }),
     );
-    setModalOpen(false);
+    closeModal();
   }
 
   const navItems: HeaderNavItem[] = [
@@ -270,8 +303,9 @@ export default function StockAdjustPage() {
             const product = dragData?.product as Product | undefined;
             return product ? toBatchItem(product) : null;
           }}
+          initialItems={preselectedProduct ? [toBatchItem(preselectedProduct)] : undefined}
           onSubmit={handleBatchSubmit}
-          onCancel={() => setModalOpen(false)}
+          onCancel={closeModal}
         />
       )}
     </AppShell>

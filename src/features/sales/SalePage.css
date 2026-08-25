@@ -527,13 +527,23 @@
    padrão âmbar do PDV (`pos__fiscal-warning`), não vermelho (não é falha da
    venda) nem verde (não é sucesso pleno). Ver useSaleDraft.ts. */
 .sale__fiscal-warning {
-  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 9px 12px;
   border-radius: 8px;
   background: #FFF4E5;
   color: #8A5A15;
   font-size: 13px;
   font-weight: 600;
+}
+
+.sale__fiscal-warning p {
+  margin: 0;
+}
+
+.sale__fiscal-warning-lead {
+  opacity: 0.85;
 }
 
 .sale__success-actions {

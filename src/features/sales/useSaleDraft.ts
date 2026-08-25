@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useOpenWindows } from "../../components/openWindows";
 import { formatContactAddress, type Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createSale, type CreateSaleInput } from "../../lib/repositories/salesRepository";
@@ -59,6 +60,18 @@ export type PaymentLine = {
   installments: number;
 };
 
+/**
+ * Erro de confirmação da venda. Texto puro nos casos genéricos; a forma
+ * estruturada só aparece para o erro de estoque insuficiente, que tem "para
+ * onde ir" — ver `ActionableMessage` e `ConfirmacaoStep.tsx`.
+ */
+export type SaleSubmitError =
+  | string
+  | {
+      message: string;
+      action: { label: string; to: string };
+    };
+
 function lineTotal(line: CartLine) {
   return Math.max(0, line.quantity * line.unitPrice - line.discountAmount);
 }
@@ -83,7 +96,7 @@ const PAYMENTS_MISMATCH_ERROR = /^A soma dos pagamentos \(([\d.,-]+)\) não bate
  * erro que a RPC não previu (queda de conexão, etc.) cai num texto genérico
  * em vez de mostrar o objeto de erro cru pro operador.
  */
-function extractErrorMessage(err: unknown, cart: CartLine[]): string {
+function extractErrorMessage(err: unknown, cart: CartLine[]): SaleSubmitError {
   const raw =
     err instanceof Error
       ? err.message
@@ -95,10 +108,22 @@ function extractErrorMessage(err: unknown, cart: CartLine[]): string {
 
   const stockMatch = raw.match(STOCK_ERROR);
   if (stockMatch) {
-    const product = cart.find((line) => line.product.id === stockMatch[1])?.product;
-    return product
-      ? `Estoque insuficiente para "${product.description}" — reduza a quantidade ou remova o item.`
-      : "Estoque insuficiente para um dos produtos da venda.";
+    const line = cart.find((l) => l.product.id === stockMatch[1]);
+    if (!line) return "Estoque insuficiente para um dos produtos da venda.";
+    // Só sugestão: pode ter mudado entre o carregamento do carrinho e a
+    // tentativa de venda, então nunca deixa negativo/zero virar mensagem.
+    const missing = line.quantity - line.product.stock;
+    const message =
+      missing > 0
+        ? `Estoque insuficiente para "${line.product.description}" — faltam ${missing} unidade${missing === 1 ? "" : "s"}.`
+        : `Estoque insuficiente para "${line.product.description}" — reduza a quantidade ou remova o item.`;
+    return {
+      message,
+      action: {
+        label: `Ajustar estoque de ${line.product.description}`,
+        to: `/ajuste-estoque?produto=${line.product.id}`,
+      },
+    };
   }
 
   const mismatchMatch = raw.match(PAYMENTS_MISMATCH_ERROR);
@@ -123,18 +148,51 @@ function extractErrorMessage(err: unknown, cart: CartLine[]): string {
   return "Não foi possível confirmar a venda. Tente novamente — se o problema continuar, acione o suporte.";
 }
 
+/** Slot do rascunho dentro do estado da janela — ver `openWindows.tsx`. */
+const DRAFT_SLOT = "sale-draft";
+
+/**
+ * O que sobrevive a uma troca de janela: só o que o operador digitou. Os
+ * campos de operação em andamento (`submitting`, `submitError`,
+ * `confirmedSale`, `fiscalOutcome`, `lastRemoved`) ficam de fora de
+ * propósito — guardar um "enviando..." ou um erro de rede de dez minutos
+ * atrás e mostrá-lo de volta descreveria um estado que não existe mais.
+ */
+type PersistedSaleDraft = {
+  header: SaleHeaderForm;
+  cart: CartLine[];
+  payments: PaymentLine[];
+  freight: string;
+  discount: string;
+};
+
 /**
  * Estado do rascunho de uma venda em andamento: cabeçalho + carrinho + pagamentos.
  * `defaultSeller` (o operador logado) pré-preenche o Vendedor — ver `buildHeaderInicial`.
+ * `windowId` é o mesmo id passado a `openWindow`: com ele o rascunho passa a
+ * morar no `OpenWindowsProvider` e sobrevive a ir em outra janela e voltar.
  */
-export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller | null) {
-  const [header, setHeader] = useState<SaleHeaderForm>(() => buildHeaderInicial(defaultSeller));
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [payments, setPayments] = useState<PaymentLine[]>([]);
-  const [freight, setFreight] = useState("");
-  const [discount, setDiscount] = useState("");
+export function useSaleDraft(
+  branchId: string | null,
+  defaultSeller?: SaleSeller | null,
+  windowId?: string | null,
+) {
+  const { getWindowState, setWindowState, clearWindowState } = useOpenWindows();
+  // Lido uma única vez, na montagem: depois disso a fonte da verdade é o
+  // `useState` daqui, e reler o que nós mesmos gravamos só daria voltas.
+  const [restored] = useState(() =>
+    windowId ? getWindowState<PersistedSaleDraft>(windowId, DRAFT_SLOT) : undefined,
+  );
+
+  const [header, setHeader] = useState<SaleHeaderForm>(
+    () => restored?.header ?? buildHeaderInicial(defaultSeller),
+  );
+  const [cart, setCart] = useState<CartLine[]>(() => restored?.cart ?? []);
+  const [payments, setPayments] = useState<PaymentLine[]>(() => restored?.payments ?? []);
+  const [freight, setFreight] = useState(() => restored?.freight ?? "");
+  const [discount, setDiscount] = useState(() => restored?.discount ?? "");
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<SaleSubmitError | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<Sale | null>(null);
   /**
    * Resultado da emissão da nota quando `confirmSale({ emitirNota: true })` é
@@ -153,6 +211,41 @@ export function useSaleDraft(branchId: string | null, defaultSeller?: SaleSeller
     const timer = window.setTimeout(() => setLastRemoved(null), UNDO_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [lastRemoved]);
+
+  /* Espelha o rascunho no estado da janela a cada mudança, para que trocar
+     de janela pelo dock (uma navegação de verdade, que desmonta esta tela)
+     não jogue fora o que o operador já digitou.
+
+     A venda confirmada é o outro lado da moeda: `confirmedSale` não zera o
+     rascunho (a tela de sucesso ainda mostra o que foi vendido), então, se
+     este efeito continuasse gravando, abrir "Realizar Venda" de novo
+     ressuscitaria a venda que acabou de ser fechada. Aqui o rascunho acaba —
+     limpa em vez de gravar. A limpeza do outro fim de vida (fechar pelo "X")
+     mora no `closeWindow`, porque lá a tela nem está montada. */
+  useEffect(() => {
+    if (!windowId) return;
+    if (confirmedSale) {
+      clearWindowState(windowId);
+      return;
+    }
+    setWindowState<PersistedSaleDraft>(windowId, DRAFT_SLOT, {
+      header,
+      cart,
+      payments,
+      freight,
+      discount,
+    });
+  }, [
+    windowId,
+    confirmedSale,
+    header,
+    cart,
+    payments,
+    freight,
+    discount,
+    setWindowState,
+    clearWindowState,
+  ]);
 
   // `profile` (fonte do `defaultSeller`) carrega de forma assíncrona — se a
   // venda já estava aberta e ninguém mexeu no campo ainda, preenche assim
