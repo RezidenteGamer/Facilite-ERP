@@ -44,6 +44,10 @@ const SPLIT_METHOD_LABEL: Record<PosPaymentMethod, string> = {
   pix: "PIX",
 };
 
+function formatPausedTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 function productBadge(product: Product): { label: string; tone: "low" | "out" } | null {
   if (product.stock <= 0) return { label: "Sem estoque", tone: "out" };
   if (product.stock <= LOW_STOCK_DEFAULT) return { label: "Estoque baixo", tone: "low" };
@@ -72,6 +76,20 @@ export default function PosPage() {
   const [clientQuery, setClientQuery] = useState("");
   /** Nome digitado que originou o "Cadastrar novo" - `null` = modal fechado. */
   const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
+  const [showPausedList, setShowPausedList] = useState(false);
+  const resumeWrapperRef = useRef<HTMLDivElement>(null);
+  const qtyHoldTimer = useRef<number | null>(null);
+
+  // Fecha a lista de vendas pausadas ao clicar fora dela.
+  useEffect(() => {
+    if (!showPausedList) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (resumeWrapperRef.current?.contains(event.target as Node)) return;
+      setShowPausedList(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [showPausedList]);
 
   // Recarrega a sessão depois de uma venda confirmada — o extrato do Controle
   // de caixa nesta sessão muda, e uma segunda sessão pode ter sido aberta
@@ -80,6 +98,46 @@ export default function PosPage() {
     if (sale.confirmedSale) reloadSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sale.confirmedSale]);
+
+  // Segurar +/- repete a mudança de quantidade sozinho. `cartRef` existe
+  // porque o intervalo é criado uma única vez no mousedown/touchstart e
+  // precisa enxergar o carrinho atualizado a cada tick, não o de quando
+  // começou a segurar.
+  const cartRef = useRef(sale.cart);
+  useEffect(() => {
+    cartRef.current = sale.cart;
+  }, [sale.cart]);
+
+  useEffect(() => {
+    return () => {
+      if (qtyHoldTimer.current !== null) window.clearInterval(qtyHoldTimer.current);
+    };
+  }, []);
+
+  function stopQtyHold() {
+    if (qtyHoldTimer.current !== null) {
+      window.clearInterval(qtyHoldTimer.current);
+      qtyHoldTimer.current = null;
+    }
+  }
+
+  function startQtyHold(lineId: string, delta: number) {
+    stopQtyHold();
+    function tick() {
+      const line = cartRef.current.find((current) => current.lineId === lineId);
+      if (!line) {
+        stopQtyHold();
+        return;
+      }
+      if (delta > 0 && line.quantity >= line.product.stock) {
+        stopQtyHold();
+        return;
+      }
+      sale.changeQuantity(lineId, delta);
+    }
+    tick();
+    qtyHoldTimer.current = window.setInterval(tick, 180);
+  }
 
   // Sem taxonomia de categoria: `products.type` é campo livre sem dado
   // estruturado hoje (a categoria vegetais/automóveis/outros do mock era só
@@ -232,12 +290,41 @@ export default function PosPage() {
               Venda Atual
             </div>
             <div className="pos__cart-controls">
-              <button type="button" aria-label="Pausar venda" title="Pausar venda (não implementado nesta etapa)" disabled>
+              <button type="button" aria-label="Pausar venda" title="Pausar venda" onClick={sale.pauseSale}>
                 <PauseIcon />
               </button>
-              <button type="button" aria-label="Retomar venda" title="Retomar venda (não implementado nesta etapa)" disabled>
-                <PlayIcon />
-              </button>
+              <div className="pos__resume-wrapper" ref={resumeWrapperRef}>
+                <button
+                  type="button"
+                  aria-label="Retomar venda"
+                  title={sale.pausedSales.length === 0 ? "Nenhuma venda pausada" : "Retomar venda"}
+                  disabled={sale.pausedSales.length === 0}
+                  onClick={() => setShowPausedList((current) => !current)}
+                >
+                  <PlayIcon />
+                </button>
+                {showPausedList && sale.pausedSales.length > 0 && (
+                  <div className="pos__resume-list">
+                    {sale.pausedSales.map((paused) => (
+                      <button
+                        key={paused.id}
+                        type="button"
+                        className="pos__resume-item"
+                        onClick={() => {
+                          sale.resumeSale(paused.id);
+                          setShowPausedList(false);
+                        }}
+                      >
+                        <span className="pos__resume-item-name">{paused.contact?.name ?? "Sem cliente"}</span>
+                        <span className="pos__resume-item-meta">
+                          {paused.cart.reduce((sum, line) => sum + line.quantity, 0)} itens ·{" "}
+                          {formatMoney(paused.total)} · {formatPausedTime(paused.pausedAt)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button type="button" aria-label="Cancelar venda" onClick={sale.reset}>
                 <CancelSaleIcon />
               </button>
@@ -255,14 +342,25 @@ export default function PosPage() {
                     <span className="pos__cart-line-price">{formatMoney(line.product.salePrice)} un.</span>
                   </div>
                   <div className="pos__cart-line-qty">
-                    <button type="button" onClick={() => sale.changeQuantity(line.lineId, -1)}>
+                    <button
+                      type="button"
+                      onMouseDown={() => startQtyHold(line.lineId, -1)}
+                      onMouseUp={stopQtyHold}
+                      onMouseLeave={stopQtyHold}
+                      onTouchStart={() => startQtyHold(line.lineId, -1)}
+                      onTouchEnd={stopQtyHold}
+                    >
                       −
                     </button>
                     <span>{line.quantity}</span>
                     <button
                       type="button"
                       disabled={line.quantity >= line.product.stock}
-                      onClick={() => sale.changeQuantity(line.lineId, 1)}
+                      onMouseDown={() => startQtyHold(line.lineId, 1)}
+                      onMouseUp={stopQtyHold}
+                      onMouseLeave={stopQtyHold}
+                      onTouchStart={() => startQtyHold(line.lineId, 1)}
+                      onTouchEnd={stopQtyHold}
                     >
                       +
                     </button>

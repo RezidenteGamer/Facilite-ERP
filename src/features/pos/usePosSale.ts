@@ -24,6 +24,21 @@ export type PosSplitLine = {
   installments: number;
 };
 
+/** Snapshot de uma venda pausada — os mesmos campos do rascunho atual, mais id e horário pra listar na hora de retomar. */
+export type PosPausedSale = {
+  id: string;
+  pausedAt: number;
+  cart: PosCartLine[];
+  contact: Contact | null;
+  discount: string;
+  discountMode: "percent" | "value";
+  method: PosPaymentMethod | "dividir";
+  received: string;
+  installments: number;
+  splitLines: PosSplitLine[];
+  total: number;
+};
+
 const STOCK_ERROR = /^Estoque insuficiente para o produto ([0-9a-f-]{36})\.$/i;
 const PAYMENTS_MISMATCH_ERROR =
   /^A soma dos pagamentos \(([\d.,-]+)\) não bate com o total da venda \(([\d.,-]+)\)\.$/;
@@ -118,6 +133,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
   const [received, setReceived] = useState("");
   const [installments, setInstallments] = useState(1);
   const [splitLines, setSplitLines] = useState<PosSplitLine[]>([]);
+  const [pausedSales, setPausedSales] = useState<PosPausedSale[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<Sale | null>(null);
@@ -232,6 +248,67 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     setMethod("dinheiro");
   }
 
+  /** Empilha o rascunho atual em `pausedSales` e limpa a venda atual. Nada a fazer com carrinho vazio. */
+  function pauseSale() {
+    if (cart.length === 0) return;
+    setPausedSales((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        pausedAt: Date.now(),
+        cart,
+        contact,
+        discount,
+        discountMode,
+        method,
+        received,
+        installments,
+        splitLines,
+        total,
+      },
+    ]);
+    reset();
+  }
+
+  /**
+   * Restaura o snapshot `id` como venda atual. Se já houver uma venda em
+   * andamento (carrinho não vazio), ela é pausada automaticamente antes de
+   * carregar a escolhida — evita descartar itens silenciosamente e evita um
+   * segundo diálogo de confirmação só pra trocar de venda pausada.
+   */
+  function resumeSale(id: string) {
+    const target = pausedSales.find((paused) => paused.id === id);
+    if (!target) return;
+
+    if (cart.length > 0) {
+      const currentSnapshot: PosPausedSale = {
+        id: crypto.randomUUID(),
+        pausedAt: Date.now(),
+        cart,
+        contact,
+        discount,
+        discountMode,
+        method,
+        received,
+        installments,
+        splitLines,
+        total,
+      };
+      setPausedSales((current) => [...current.filter((paused) => paused.id !== id), currentSnapshot]);
+    } else {
+      setPausedSales((current) => current.filter((paused) => paused.id !== id));
+    }
+
+    setCart(target.cart);
+    setContact(target.contact);
+    setDiscount(target.discount);
+    setDiscountMode(target.discountMode);
+    setMethod(target.method);
+    setReceived(target.received);
+    setInstallments(target.installments);
+    setSplitLines(target.splitLines);
+  }
+
   async function confirmSale(hasOpenSession: boolean) {
     if (!branchId || !sellerId) {
       setSubmitError("Nenhuma filial ou operador identificado.");
@@ -300,6 +377,9 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     removeSplitLine,
     splitTotal,
     splitMatches,
+    pausedSales,
+    pauseSale,
+    resumeSale,
     subtotal,
     discountAmount,
     total,
