@@ -7,6 +7,7 @@ import { useProductsData } from "../products/useProductsData";
 import type { Product } from "../products/products";
 import type { Contact } from "../customers/contacts";
 import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
+import { normalizeSearchText } from "../../lib/searchText";
 import {
   CancelSaleIcon,
   CardIcon,
@@ -76,11 +77,11 @@ export default function PosPage() {
   // estruturado hoje (a categoria vegetais/automóveis/outros do mock era só
   // exemplo) — ver AGENTS.md. Filtra só por busca e produto ativo.
   const visibleProducts = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     return products.filter((product) => {
       if (!product.active) return false;
       if (!term) return true;
-      return product.description.toLowerCase().includes(term) || product.code.toLowerCase().includes(term);
+      return normalizeSearchText(product.description).includes(term) || normalizeSearchText(product.code).includes(term);
     });
   }, [products, search]);
 

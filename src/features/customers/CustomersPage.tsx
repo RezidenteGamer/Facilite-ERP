@@ -6,6 +6,7 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
 import { uploadContactPhoto } from "../../lib/repositories/contactPhotos";
+import { normalizeSearchText } from "../../lib/searchText";
 import { buildDetailFields, buildFormFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
@@ -67,13 +68,13 @@ export default function CustomersPage() {
   }, [contacts]);
 
   const visibleContacts = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return contacts;
     return contacts.filter(
       (contact) =>
-        contact.name.toLowerCase().includes(term) ||
-        contact.document.includes(term) ||
-        contact.code.includes(term),
+        normalizeSearchText(contact.name).includes(term) ||
+        normalizeSearchText(contact.document).includes(term) ||
+        normalizeSearchText(contact.code).includes(term),
     );
   }, [contacts, search]);
 

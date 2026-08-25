@@ -6,6 +6,7 @@ import { useOpenWindows } from "../../components/openWindows";
 import ProductPickerPanel from "../../components/product-picker/ProductPickerPanel";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { StockAdjustIcon } from "../home/icons";
 import { buildDetailFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryBatchFormModal, {
@@ -130,12 +131,12 @@ export default function StockAdjustPage() {
   }, [adjustments]);
 
   const visibleAdjustments = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return adjustments;
     return adjustments.filter(
       (adjustment) =>
-        adjustment.productDescription.toLowerCase().includes(term) ||
-        adjustment.productCode.toLowerCase().includes(term),
+        normalizeSearchText(adjustment.productDescription).includes(term) ||
+        normalizeSearchText(adjustment.productCode).includes(term),
     );
   }, [adjustments, search]);
 

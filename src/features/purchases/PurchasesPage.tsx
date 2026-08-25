@@ -5,6 +5,7 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { PurchasesIcon } from "../home/icons";
 import { SALE_PAYMENT_METHOD_LABEL } from "../sales/sales";
 import { PURCHASE_STATUS_LABEL, formatPurchaseTotal, type Purchase } from "./purchases";
@@ -52,11 +53,11 @@ export default function PurchasesPage() {
   }, [purchases, selectedId]);
 
   const visiblePurchases = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return purchases;
     return purchases.filter(
       (purchase) =>
-        purchase.contactName.toLowerCase().includes(term) || purchase.code.toLowerCase().includes(term),
+        normalizeSearchText(purchase.contactName).includes(term) || normalizeSearchText(purchase.code).includes(term),
     );
   }, [purchases, search]);
 

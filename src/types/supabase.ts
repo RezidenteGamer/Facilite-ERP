@@ -2183,6 +2183,10 @@ export type Database = {
         Args: { p_branch_id: string; p_items: Json }
         Returns: undefined
       }
+      assert_module_workflow_editable: {
+        Args: { p_module_id: string }
+        Returns: undefined
+      }
       can_manage_branches: { Args: never; Returns: boolean }
       can_manage_modules: { Args: never; Returns: boolean }
       can_manage_permissions: { Args: never; Returns: boolean }
@@ -2234,8 +2238,8 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      convert_sale_order_to_sale: {
-        Args: { p_sale_order_id: string }
+      convert_conditional_to_sale: {
+        Args: { payload: Json }
         Returns: {
           address: string | null
           branch_id: string
@@ -2273,8 +2277,8 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      convert_conditional_to_sale: {
-        Args: { payload: Json }
+      convert_sale_order_to_sale: {
+        Args: { p_sale_order_id: string }
         Returns: {
           address: string | null
           branch_id: string
@@ -2480,29 +2484,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      create_sale_return: {
-        Args: { payload: Json }
-        Returns: {
-          branch_id: string
-          code: string
-          created_at: string
-          created_by: string | null
-          id: string
-          issue_date: string
-          reason: string
-          sale_id: string
-          status: Database["public"]["Enums"]["sale_return_status"]
-          subtotal_amount: number
-          total_amount: number
-          updated_at: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "sale_returns"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       create_sale_order: {
         Args: { payload: Json }
         Returns: {
@@ -2536,6 +2517,45 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_sale_return: {
+        Args: { payload: Json }
+        Returns: {
+          branch_id: string
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          issue_date: string
+          reason: string
+          sale_id: string
+          status: Database["public"]["Enums"]["sale_return_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "sale_returns"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_user_module: {
+        Args: {
+          p_branch_scoped: boolean
+          p_fields: Json
+          p_label: string
+          p_sort_order: number
+        }
+        Returns: string
+      }
+      delete_module_situation: { Args: { p_id: string }; Returns: undefined }
+      delete_module_transition: { Args: { p_id: string }; Returns: undefined }
+      delete_module_transition_action: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+      delete_user_module: { Args: { p_module_id: string }; Returns: undefined }
       financial_entries_cash_sales_in_window: {
         Args: {
           p_branch_id: string
@@ -2617,75 +2637,8 @@ export type Database = {
           isSetofReturn: true
         }
       }
-      create_user_module: {
-        Args: {
-          p_branch_scoped: boolean
-          p_fields: Json
-          p_label: string
-          p_sort_order: number
-        }
-        Returns: string
-      }
-      delete_user_module: { Args: { p_module_id: string }; Returns: undefined }
-      delete_module_situation: { Args: { p_id: string }; Returns: undefined }
-      delete_module_transition: { Args: { p_id: string }; Returns: undefined }
-      delete_module_transition_action: {
-        Args: { p_id: string }
-        Returns: undefined
-      }
-      has_facilite_developer_access: { Args: never; Returns: boolean }
-      save_module_situation: {
-        Args: {
-          p_id: string | null
-          p_is_initial: boolean
-          p_label: string
-          p_module_id: string
-          p_sort_order: number
-        }
-        Returns: string
-      }
-      save_module_situation_position: {
-        Args: {
-          p_canvas_x: number
-          p_canvas_y: number
-          p_id: string
-        }
-        Returns: undefined
-      }
-      save_module_transition: {
-        Args: {
-          p_from_situation_id: string | null
-          p_id: string | null
-          p_label: string
-          p_module_id: string
-          p_sort_order: number
-          p_to_situation_id: string | null
-        }
-        Returns: string
-      }
-      save_module_transition_action: {
-        Args: {
-          p_id: string | null
-          p_sort_order: number
-          p_source_field_key: string | null
-          p_target_field_key: string
-          p_target_kind: string
-          p_transition_id: string
-          p_value: string | null
-          p_value_kind: string
-          p_via_reference_field_key: string | null
-        }
-        Returns: string
-      }
-      transition_module_record: {
-        Args: { p_record_id: string; p_to_situation_id: string }
-        Returns: string
-      }
       has_branch_access: { Args: { p_branch_id: string }; Returns: boolean }
-      stock_allows_negative: {
-        Args: { p_branch_id: string; p_product_id: string }
-        Returns: boolean
-      }
+      has_facilite_developer_access: { Args: never; Returns: boolean }
       has_permission: {
         Args: { p_action: string; p_module_id: string }
         Returns: boolean
@@ -2722,7 +2675,6 @@ export type Database = {
         }
       }
       module_field_key: { Args: { p_label: string }; Returns: string }
-      slugify_text: { Args: { p_text: string }; Returns: string }
       open_cash_session: {
         Args: { p_opening_amount: number; p_register_id: string }
         Returns: {
@@ -2773,6 +2725,133 @@ export type Database = {
       register_conditional_return: {
         Args: { payload: Json }
         Returns: undefined
+      }
+      save_module_situation: {
+        Args: {
+          p_id: string
+          p_is_initial: boolean
+          p_label: string
+          p_module_id: string
+          p_sort_order: number
+        }
+        Returns: string
+      }
+      save_module_situation_position: {
+        Args: { p_canvas_x: number; p_canvas_y: number; p_id: string }
+        Returns: undefined
+      }
+      save_module_transition: {
+        Args: {
+          p_from_situation_id: string
+          p_id: string
+          p_label: string
+          p_module_id: string
+          p_sort_order: number
+          p_to_situation_id: string
+        }
+        Returns: string
+      }
+      save_module_transition_action: {
+        Args: {
+          p_id: string
+          p_sort_order: number
+          p_source_field_key: string
+          p_target_field_key: string
+          p_target_kind: string
+          p_transition_id: string
+          p_value: string
+          p_value_kind: string
+          p_via_reference_field_key: string
+        }
+        Returns: string
+      }
+      search_contacts_by_kind: {
+        Args: {
+          p_kind: Database["public"]["Enums"]["contact_kind"]
+          p_term?: string
+        }
+        Returns: {
+          active: boolean
+          bairro: string | null
+          birth_date: string | null
+          cep: string | null
+          code: string
+          codigo_ibge_municipio: string | null
+          created_at: string
+          document: string
+          email: string | null
+          id: string
+          indicador_ie: string | null
+          inscricao_estadual: string | null
+          kind: Database["public"]["Enums"]["contact_kind"]
+          logradouro: string | null
+          municipio: string | null
+          name: string
+          numero: string | null
+          phone: string | null
+          photo_url: string | null
+          rg: string | null
+          uf: string | null
+          updated_at: string
+          whatsapp: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "contacts"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      search_returnable_sales: {
+        Args: { p_branch_id: string; p_term?: string }
+        Returns: {
+          client_name: string
+          code: string
+          id: string
+          issue_date: string
+          total_amount: number
+        }[]
+      }
+      search_sale_sellers: {
+        Args: { p_term?: string }
+        Returns: {
+          id: string
+          name: string
+          operator_code: string
+        }[]
+      }
+      search_tax_groups: {
+        Args: { p_term?: string }
+        Returns: {
+          aliquota_cofins: number | null
+          aliquota_icms: number | null
+          aliquota_pis: number | null
+          cclasstrib: string | null
+          code: string
+          created_at: string
+          csosn: string | null
+          cst_cofins: string | null
+          cst_ibs_cbs: string | null
+          cst_icms: string | null
+          cst_pis: string | null
+          id: string
+          name: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "tax_groups"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      slugify_text: { Args: { p_text: string }; Returns: string }
+      stock_allows_negative: {
+        Args: { p_branch_id: string; p_product_id: string }
+        Returns: boolean
+      }
+      transition_module_record: {
+        Args: { p_record_id: string; p_to_situation_id: string }
+        Returns: string
       }
     }
     Enums: {

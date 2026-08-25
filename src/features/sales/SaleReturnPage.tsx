@@ -11,6 +11,7 @@ import {
 } from "../../lib/repositories/saleReturnsRepository";
 import type { InvoiceDocument } from "../../lib/repositories/fiscalDocumentsRepository";
 import { useAuth } from "../auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { SaleReturnIcon } from "../home/icons";
 import CancelInvoiceModal from "./CancelInvoiceModal";
 import { invoiceStatusLabel, openFiscalArtifact } from "./invoices";
@@ -94,13 +95,13 @@ export default function SaleReturnPage() {
   }, [openWindow]);
 
   const visibleReturns = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return returns;
     return returns.filter(
       (item) =>
-        item.clientName.toLowerCase().includes(term) ||
-        item.code.toLowerCase().includes(term) ||
-        item.saleCode.toLowerCase().includes(term),
+        normalizeSearchText(item.clientName).includes(term) ||
+        normalizeSearchText(item.code).includes(term) ||
+        normalizeSearchText(item.saleCode).includes(term),
     );
   }, [returns, search]);
 

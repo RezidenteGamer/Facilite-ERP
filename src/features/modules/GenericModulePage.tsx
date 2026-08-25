@@ -10,6 +10,7 @@ import { buildDetailFields, buildFormFields, buildTableColumns } from "../regist
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { STATUS_KEY, type GenericRow } from "../../lib/repositories/genericModuleRepository";
+import { normalizeSearchText } from "../../lib/searchText";
 import type { CatalogModule } from "./catalog";
 import { extractErrorMessage, useGenericModuleData } from "./useGenericModuleData";
 import { useModuleReferences } from "./useModuleReferences";
@@ -89,11 +90,11 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
   /* Busca genérica: varre os valores que a própria lista mostra, já que não
      existe "campo de busca" declarado nos metadados. */
   const visibleRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return rows;
     const searchable = fields.filter((field) => field.showInTable);
     return rows.filter((row) =>
-      searchable.some((field) => String(row[field.accessorKey] ?? "").toLowerCase().includes(term)),
+      searchable.some((field) => normalizeSearchText(String(row[field.accessorKey] ?? "")).includes(term)),
     );
   }, [rows, search, fields]);
 

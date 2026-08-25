@@ -52,12 +52,7 @@ export function toTaxGroup(row: {
 /** Busca grupos por código ou nome. Sem termo, devolve os primeiros 20 por código. */
 export async function fetchTaxGroups(query: string): Promise<TaxGroup[]> {
   const client = assertSupabase();
-  let request = client.from("tax_groups").select("*").order("code");
-  const term = query.trim();
-  if (term) {
-    request = request.or(`code.ilike.%${term}%,name.ilike.%${term}%`);
-  }
-  const { data, error } = await request.limit(20);
+  const { data, error } = await client.rpc("search_tax_groups", { p_term: query.trim() });
   if (error) throw error;
   return (data ?? []).map(toTaxGroup);
 }

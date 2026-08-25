@@ -17,12 +17,7 @@ function assertSupabase() {
  */
 export async function fetchContactsByKind(kind: ContactKind, query: string): Promise<Contact[]> {
   const client = assertSupabase();
-  let request = client.from("contacts").select("*").eq("kind", kind).eq("active", true).order("name");
-  const term = query.trim();
-  if (term) {
-    request = request.or(`name.ilike.%${term}%,document.ilike.%${term}%`);
-  }
-  const { data, error } = await request.limit(20);
+  const { data, error } = await client.rpc("search_contacts_by_kind", { p_kind: kind, p_term: query.trim() });
   if (error) throw error;
   return (data ?? []).map((row) => ({
     id: row.id,

@@ -25,12 +25,7 @@ export function fetchSaleContacts(query: string): Promise<Contact[]> {
 /** Busca vendedores (profiles ativos) por nome — usado no lookup de Vendedor. */
 export async function fetchSaleSellers(query: string): Promise<SaleSeller[]> {
   const client = assertSupabase();
-  let request = client.from("profiles").select("id, name, operator_code").eq("active", true).order("name");
-  const term = query.trim();
-  if (term) {
-    request = request.ilike("name", `%${term}%`);
-  }
-  const { data, error } = await request.limit(20);
+  const { data, error } = await client.rpc("search_sale_sellers", { p_term: query.trim() });
   if (error) throw error;
   return (data ?? []).map((row) => ({ id: row.id, name: row.name, operatorCode: row.operator_code }));
 }

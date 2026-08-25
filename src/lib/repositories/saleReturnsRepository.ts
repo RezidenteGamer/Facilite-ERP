@@ -93,50 +93,15 @@ export type ReturnableSale = {
 /** Vendas confirmadas da filial, para o operador escolher qual está sendo devolvida. */
 export async function fetchReturnableSales(branchId: string, query: string): Promise<ReturnableSale[]> {
   const client = assertSupabase();
-  let request = client
-    .from("sales")
-    .select("id, code, issue_date, total_amount, contact:contacts(name)")
-    .eq("branch_id", branchId)
-    .eq("status", "confirmed")
-    .order("created_at", { ascending: false })
-    .limit(30);
-
-  const term = query.trim();
-  if (term) {
-    // Busca por código da venda ou nome do cliente — o filtro por nome não
-    // cabe no `or` do PostgREST junto com um join, então o código é o eixo
-    // do servidor e o nome é filtrado abaixo, sobre o mesmo recorte.
-    request = request.ilike("code", `%${term}%`);
-  }
-
-  const { data, error } = await request;
+  const { data, error } = await client.rpc("search_returnable_sales", {
+    p_branch_id: branchId,
+    p_term: query.trim(),
+  });
   if (error) throw error;
-
-  const rows = (data ?? []).map((sale) => ({
+  return (data ?? []).map((sale) => ({
     id: sale.id,
     code: sale.code,
-    clientName: sale.contact?.name ?? "Sem cliente",
-    issueDate: sale.issue_date,
-    total: sale.total_amount,
-  }));
-
-  if (!term || rows.length > 0) return rows;
-
-  // Nenhuma venda com esse código: tenta como nome de cliente.
-  const { data: byClient, error: byClientError } = await client
-    .from("sales")
-    .select("id, code, issue_date, total_amount, contact:contacts!inner(name)")
-    .eq("branch_id", branchId)
-    .eq("status", "confirmed")
-    .ilike("contacts.name", `%${term}%`)
-    .order("created_at", { ascending: false })
-    .limit(30);
-  if (byClientError) throw byClientError;
-
-  return (byClient ?? []).map((sale) => ({
-    id: sale.id,
-    code: sale.code,
-    clientName: sale.contact?.name ?? "Sem cliente",
+    clientName: sale.client_name,
     issueDate: sale.issue_date,
     total: sale.total_amount,
   }));

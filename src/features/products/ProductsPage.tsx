@@ -6,6 +6,7 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
 import { fetchTaxGroups } from "../../lib/repositories/taxGroupLookups";
+import { normalizeSearchText } from "../../lib/searchText";
 import { fetchBranchAllowsNegativeStock } from "../../lib/repositories/branchesRepository";
 import type { TaxGroup } from "../../lib/fiscal/taxGroups";
 import { useAuth } from "../auth/AuthContext";
@@ -100,11 +101,11 @@ export default function ProductsPage() {
   }, [currentBranchId]);
 
   const visibleProducts = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return products;
     return products.filter(
       (product) =>
-        product.description.toLowerCase().includes(term) || product.code.toLowerCase().includes(term),
+        normalizeSearchText(product.description).includes(term) || normalizeSearchText(product.code).includes(term),
     );
   }, [products, search]);
 

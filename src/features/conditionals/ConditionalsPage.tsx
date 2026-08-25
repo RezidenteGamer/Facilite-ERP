@@ -6,6 +6,7 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { RefreshIcon } from "../home/icons";
 import { extractErrorMessage } from "../sales/useInvoicesData";
 import ConditionalResolveModal from "./ConditionalResolveModal";
@@ -80,11 +81,11 @@ export default function ConditionalsPage() {
   }, [conditionals, selectedId]);
 
   const visibleConditionals = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return conditionals;
     return conditionals.filter(
       (conditional) =>
-        conditional.clientName.toLowerCase().includes(term) || conditional.code.toLowerCase().includes(term),
+        normalizeSearchText(conditional.clientName).includes(term) || normalizeSearchText(conditional.code).includes(term),
     );
   }, [conditionals, search]);
 

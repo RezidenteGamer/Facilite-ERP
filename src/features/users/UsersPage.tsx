@@ -11,6 +11,7 @@ import {
   type RegistryColumn,
 } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { UsersIcon } from "../home/icons";
 import ResetPasswordModal from "./ResetPasswordModal";
 import UserFormModal, { type UserFormValues } from "./UserFormModal";
@@ -58,10 +59,10 @@ export default function UsersPage() {
   }, [users]);
 
   const visibleUsers = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return users;
     return users.filter(
-      (user) => user.name.toLowerCase().includes(term) || user.document.includes(term),
+      (user) => normalizeSearchText(user.name).includes(term) || normalizeSearchText(user.document).includes(term),
     );
   }, [users, search]);
 

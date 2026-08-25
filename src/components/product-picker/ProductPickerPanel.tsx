@@ -2,6 +2,7 @@ import { useDraggable } from "@dnd-kit/core";
 import { useMemo, useState } from "react";
 import { PencilIcon, SearchIcon } from "../icons";
 import { useAuth } from "../../features/auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { buildFormFields } from "../../features/registry-engine/moduleView";
 import RegistryFormModal from "../../features/registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../../features/registry-engine/useModuleDefinition";
@@ -92,12 +93,12 @@ export default function ProductPickerPanel({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const visibleProducts = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     const active = products.filter((product) => product.active);
     if (!term) return active;
     return active.filter(
       (product) =>
-        product.description.toLowerCase().includes(term) || product.code.toLowerCase().includes(term),
+        normalizeSearchText(product.description).includes(term) || normalizeSearchText(product.code).includes(term),
     );
   }, [products, search]);
 

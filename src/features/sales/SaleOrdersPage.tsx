@@ -6,6 +6,7 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
+import { normalizeSearchText } from "../../lib/searchText";
 import { SaleOrdersIcon } from "../home/icons";
 import { SALE_PAYMENT_METHOD_LABEL } from "./sales";
 import { SALE_ORDER_STATUS_LABEL, formatOrderTotal, type SaleOrder } from "./saleOrders";
@@ -63,10 +64,10 @@ export default function SaleOrdersPage() {
   }, [orders, selectedId]);
 
   const visibleOrders = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search.trim());
     if (!term) return orders;
     return orders.filter(
-      (order) => order.contactName.toLowerCase().includes(term) || order.code.toLowerCase().includes(term),
+      (order) => normalizeSearchText(order.contactName).includes(term) || normalizeSearchText(order.code).includes(term),
     );
   }, [orders, search]);
 
