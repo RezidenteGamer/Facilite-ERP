@@ -6,9 +6,9 @@ export function formatMoney(value: number) {
 const PLACEHOLDER_COLORS = ["#E4B457", "#F0913C", "#5BC8E0", "#8FA6B8", "#2B2E36", "#4CAF63", "#7C6FE0", "#E8635A"];
 
 /**
- * Sem foto de produto no cadastro (`products` não tem coluna de imagem) —
- * o bloco colorido com iniciais é só decorativo, gerado no cliente a partir
- * do nome/código do produto, nunca persistido.
+ * Fallback para produtos sem `photo_url` cadastrado — o bloco colorido com
+ * iniciais é só decorativo, gerado no cliente a partir do nome/código do
+ * produto, nunca persistido. Quando o produto tem foto, ela é usada no lugar.
  */
 export function productPlaceholder(description: string, code: string): { label: string; color: string } {
   const source = description.trim() || code;

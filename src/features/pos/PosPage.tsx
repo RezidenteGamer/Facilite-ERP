@@ -253,9 +253,19 @@ export default function PosPage() {
                   onClick={() => sale.addProduct(product)}
                 >
                   {badge && <span className={`pos__badge pos__badge--${badge.tone}`}>{badge.label}</span>}
-                  <span className="pos__card-image" style={{ background: placeholder.color }} aria-hidden="true">
-                    {placeholder.label}
-                  </span>
+                  {product.photoUrl ? (
+                    <img
+                      className="pos__card-image"
+                      src={product.photoUrl}
+                      alt=""
+                      aria-hidden="true"
+                      style={{ objectFit: "cover" }}
+                    />
+                  ) : (
+                    <span className="pos__card-image" style={{ background: placeholder.color }} aria-hidden="true">
+                      {placeholder.label}
+                    </span>
+                  )}
                   <span className="pos__card-body">
                     <span className="pos__card-name">{product.description}</span>
                     <span className="pos__card-price">{formatMoney(product.salePrice)}</span>
