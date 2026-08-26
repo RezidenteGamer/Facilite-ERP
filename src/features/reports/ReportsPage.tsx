@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import * as XLSX from "xlsx";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import FormField from "../../components/form/FormField";
 import SearchCombobox from "../../components/form/SearchCombobox";
@@ -43,7 +44,13 @@ type EntitySelection = { id: string; label: string };
 const MODULE_ID = "relatorios";
 
 type ReportRow = Record<string, unknown>;
-type ReportTable = { columns: RegistryColumn<ReportRow>[]; rows: ReportRow[]; summary: RegistrySummaryItem[] };
+/** Coluna do relatório: além do `render` (JSX, para a tabela), toda coluna
+    carrega `exportValue` — texto puro para a planilha .xlsx. Não dá pra
+    extrair texto confiável de `render` (devolve ReactNode), então as duas
+    funções são definidas juntas, a partir do mesmo dado tipado, em cada
+    `build*Table`. */
+type ReportColumn = RegistryColumn<ReportRow> & { exportValue: (row: ReportRow) => string };
+type ReportTable = { columns: ReportColumn[]; rows: ReportRow[]; summary: RegistrySummaryItem[] };
 
 const FISCAL_MODEL_OPTIONS = [
   { value: "", label: "Todos os modelos" },
@@ -65,16 +72,20 @@ async function buildSalesByDayTable(branchId: string, range: DateRange): Promise
   const rows = await fetchSalesByDay(branchId, range);
   const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
   const saleCount = rows.reduce((sum, row) => sum + row.saleCount, 0);
+  const dateCell = (r: ReportRow) => formatReportDate(r.saleDate as string);
+  const countCell = (r: ReportRow) => String(r.saleCount);
+  const totalCell = (r: ReportRow) => formatReportAmount(r.totalAmount as number);
   return {
     columns: [
-      { key: "date", label: "Data", width: "140px", render: (r) => formatReportDate(r.saleDate as string) },
-      { key: "count", label: "Vendas", width: "100px", align: "center", render: (r) => String(r.saleCount) },
+      { key: "date", label: "Data", width: "140px", render: dateCell, exportValue: dateCell },
+      { key: "count", label: "Vendas", width: "100px", align: "center", render: countCell, exportValue: countCell },
       {
         key: "total",
         label: "Total faturado",
         width: "160px",
         align: "right",
-        render: (r) => formatReportAmount(r.totalAmount as number),
+        render: totalCell,
+        exportValue: totalCell,
       },
     ],
     rows: rows as unknown as ReportRow[],
@@ -88,16 +99,20 @@ async function buildSalesByDayTable(branchId: string, range: DateRange): Promise
 async function buildSalesByContactTable(branchId: string, range: DateRange, contactIds: string[]): Promise<ReportTable> {
   const rows = await fetchSalesByContact(branchId, range, contactIds);
   const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
+  const contactCell = (r: ReportRow) => r.contactName as string;
+  const countCell = (r: ReportRow) => String(r.saleCount);
+  const totalCell = (r: ReportRow) => formatReportAmount(r.totalAmount as number);
   return {
     columns: [
-      { key: "contact", label: "Cliente", width: "minmax(0, 1fr)", primary: true, render: (r) => r.contactName as string },
-      { key: "count", label: "Vendas", width: "100px", align: "center", render: (r) => String(r.saleCount) },
+      { key: "contact", label: "Cliente", width: "minmax(0, 1fr)", primary: true, render: contactCell, exportValue: contactCell },
+      { key: "count", label: "Vendas", width: "100px", align: "center", render: countCell, exportValue: countCell },
       {
         key: "total",
         label: "Total",
         width: "160px",
         align: "right",
-        render: (r) => formatReportAmount(r.totalAmount as number),
+        render: totalCell,
+        exportValue: totalCell,
       },
     ],
     rows: rows as unknown as ReportRow[],
@@ -118,17 +133,22 @@ async function buildSaleItemsByProductTable(
   );
   const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
   const quantity = rows.reduce((sum, row) => sum + row.quantity, 0);
+  const codeCell = (r: ReportRow) => r.productCode as string;
+  const descriptionCell = (r: ReportRow) => r.productDescription as string;
+  const quantityCell = (r: ReportRow) => String(r.quantity);
+  const totalCell = (r: ReportRow) => formatReportAmount(r.totalAmount as number);
   return {
     columns: [
-      { key: "code", label: "Código", width: "90px", align: "center", render: (r) => r.productCode as string },
-      { key: "description", label: "Produto", width: "minmax(0, 1fr)", primary: true, render: (r) => r.productDescription as string },
-      { key: "quantity", label: "Quantidade", width: "110px", align: "center", render: (r) => String(r.quantity) },
+      { key: "code", label: "Código", width: "90px", align: "center", render: codeCell, exportValue: codeCell },
+      { key: "description", label: "Produto", width: "minmax(0, 1fr)", primary: true, render: descriptionCell, exportValue: descriptionCell },
+      { key: "quantity", label: "Quantidade", width: "110px", align: "center", render: quantityCell, exportValue: quantityCell },
       {
         key: "total",
         label: "Total vendido",
         width: "150px",
         align: "right",
-        render: (r) => formatReportAmount(r.totalAmount as number),
+        render: totalCell,
+        exportValue: totalCell,
       },
     ],
     rows: sorted as unknown as ReportRow[],
@@ -142,16 +162,20 @@ async function buildSaleItemsByProductTable(
 async function buildPurchasesByContactTable(branchId: string, range: DateRange, contactIds: string[]): Promise<ReportTable> {
   const rows = await fetchPurchasesByContact(branchId, range, contactIds);
   const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
+  const contactCell = (r: ReportRow) => r.contactName as string;
+  const countCell = (r: ReportRow) => String(r.purchaseCount);
+  const totalCell = (r: ReportRow) => formatReportAmount(r.totalAmount as number);
   return {
     columns: [
-      { key: "contact", label: "Fornecedor", width: "minmax(0, 1fr)", primary: true, render: (r) => r.contactName as string },
-      { key: "count", label: "Compras", width: "100px", align: "center", render: (r) => String(r.purchaseCount) },
+      { key: "contact", label: "Fornecedor", width: "minmax(0, 1fr)", primary: true, render: contactCell, exportValue: contactCell },
+      { key: "count", label: "Compras", width: "100px", align: "center", render: countCell, exportValue: countCell },
       {
         key: "total",
         label: "Total",
         width: "160px",
         align: "right",
-        render: (r) => formatReportAmount(r.totalAmount as number),
+        render: totalCell,
+        exportValue: totalCell,
       },
     ],
     rows: rows as unknown as ReportRow[],
@@ -171,24 +195,31 @@ async function buildPurchaseItemsByProductTable(
     if (sortBy === "quantity") return b.quantity - a.quantity;
     return (b.avgUnitCost ?? -1) - (a.avgUnitCost ?? -1);
   });
+  const codeCell = (r: ReportRow) => r.productCode as string;
+  const descriptionCell = (r: ReportRow) => r.productDescription as string;
+  const quantityCell = (r: ReportRow) => String(r.quantity);
+  const avgCostCell = (r: ReportRow) => (r.avgUnitCost !== null ? formatReportAmount(r.avgUnitCost as number) : "—");
+  const totalCell = (r: ReportRow) => formatReportAmount(r.totalAmount as number);
   return {
     columns: [
-      { key: "code", label: "Código", width: "90px", align: "center", render: (r) => r.productCode as string },
-      { key: "description", label: "Produto", width: "minmax(0, 1fr)", primary: true, render: (r) => r.productDescription as string },
-      { key: "quantity", label: "Quantidade", width: "110px", align: "center", render: (r) => String(r.quantity) },
+      { key: "code", label: "Código", width: "90px", align: "center", render: codeCell, exportValue: codeCell },
+      { key: "description", label: "Produto", width: "minmax(0, 1fr)", primary: true, render: descriptionCell, exportValue: descriptionCell },
+      { key: "quantity", label: "Quantidade", width: "110px", align: "center", render: quantityCell, exportValue: quantityCell },
       {
         key: "avgCost",
         label: "Custo médio",
         width: "130px",
         align: "right",
-        render: (r) => (r.avgUnitCost !== null ? formatReportAmount(r.avgUnitCost as number) : "—"),
+        render: avgCostCell,
+        exportValue: avgCostCell,
       },
       {
         key: "total",
         label: "Total comprado",
         width: "150px",
         align: "right",
-        render: (r) => formatReportAmount(r.totalAmount as number),
+        render: totalCell,
+        exportValue: totalCell,
       },
     ],
     rows: sorted as unknown as ReportRow[],
@@ -205,18 +236,24 @@ async function buildFiscalDocumentsTable(
     status: filters.status ? (filters.status as Tables<"fiscal_documents">["status"]) : undefined,
   });
   const autorizadas = rows.filter((r) => r.status === "autorizado").length;
+  const saleCell = (r: ReportRow) => (r.saleCode as string | null) ?? "—";
+  const modelCell = (r: ReportRow) => (r.model === "nfce" ? "NFC-e" : "NF-e");
+  const statusCell = (r: ReportRow) => invoiceStatusLabel({ status: r.status as Tables<"fiscal_documents">["status"] });
+  const chaveCell = (r: ReportRow) => (r.chave as string | null) ?? "—";
+  const createdAtCell = (r: ReportRow) => formatReportDate(r.createdAt as string);
   return {
     columns: [
-      { key: "sale", label: "Venda", width: "100px", align: "center", render: (r) => (r.saleCode as string | null) ?? "—" },
-      { key: "model", label: "Modelo", width: "90px", align: "center", render: (r) => (r.model === "nfce" ? "NFC-e" : "NF-e") },
+      { key: "sale", label: "Venda", width: "100px", align: "center", render: saleCell, exportValue: saleCell },
+      { key: "model", label: "Modelo", width: "90px", align: "center", render: modelCell, exportValue: modelCell },
       {
         key: "status",
         label: "Status",
         width: "160px",
-        render: (r) => invoiceStatusLabel({ status: r.status as Tables<"fiscal_documents">["status"] }),
+        render: statusCell,
+        exportValue: statusCell,
       },
-      { key: "chave", label: "Chave de acesso", width: "minmax(0, 1fr)", render: (r) => (r.chave as string | null) ?? "—" },
-      { key: "createdAt", label: "Emitida em", width: "140px", render: (r) => formatReportDate(r.createdAt as string) },
+      { key: "chave", label: "Chave de acesso", width: "minmax(0, 1fr)", render: chaveCell, exportValue: chaveCell },
+      { key: "createdAt", label: "Emitida em", width: "140px", render: createdAtCell, exportValue: createdAtCell },
     ],
     rows: rows as unknown as ReportRow[],
     summary: [
@@ -228,12 +265,16 @@ async function buildFiscalDocumentsTable(
 
 async function buildLowStockTable(branchId: string): Promise<ReportTable> {
   const rows = await fetchLowStockProducts(branchId);
+  const codeCell = (r: ReportRow) => r.code as string;
+  const descriptionCell = (r: ReportRow) => r.description as string;
+  const stockCell = (r: ReportRow) => String(r.stock);
+  const minimumCell = (r: ReportRow) => String(r.minimumStock);
   return {
     columns: [
-      { key: "code", label: "Código", width: "90px", align: "center", render: (r) => r.code as string },
-      { key: "description", label: "Produto", width: "minmax(0, 1fr)", primary: true, render: (r) => r.description as string },
-      { key: "stock", label: "Saldo atual", width: "120px", align: "center", render: (r) => String(r.stock) },
-      { key: "minimum", label: "Mínimo", width: "120px", align: "center", render: (r) => String(r.minimumStock) },
+      { key: "code", label: "Código", width: "90px", align: "center", render: codeCell, exportValue: codeCell },
+      { key: "description", label: "Produto", width: "minmax(0, 1fr)", primary: true, render: descriptionCell, exportValue: descriptionCell },
+      { key: "stock", label: "Saldo atual", width: "120px", align: "center", render: stockCell, exportValue: stockCell },
+      { key: "minimum", label: "Mínimo", width: "120px", align: "center", render: minimumCell, exportValue: minimumCell },
     ],
     rows: rows as unknown as ReportRow[],
     summary: [
@@ -290,22 +331,28 @@ function financeTableFor(id: string, entries: FinanceEntry[], range: DateRange):
         entry.settledAt.slice(0, 10) <= range.to,
     );
     const { entrou, saiu, saldo } = computeCashFlowTotals(rows);
+    const settledAtCell = (r: ReportRow) => (r as FinanceEntry).settledAtFormatted;
+    const typeCell = (r: ReportRow) => ((r as FinanceEntry).type === "a_pagar" ? "A pagar" : "A receber");
+    const contactCell = (r: ReportRow) => (r as FinanceEntry).contactName || "—";
+    const totalCell = (r: ReportRow) => formatEntryTotal((r as FinanceEntry).total);
     return {
       columns: [
-        { key: "settledAt", label: "Baixado em", width: "130px", render: (r) => (r as FinanceEntry).settledAtFormatted },
+        { key: "settledAt", label: "Baixado em", width: "130px", render: settledAtCell, exportValue: settledAtCell },
         {
           key: "type",
           label: "Tipo",
           width: "110px",
-          render: (r) => ((r as FinanceEntry).type === "a_pagar" ? "A pagar" : "A receber"),
+          render: typeCell,
+          exportValue: typeCell,
         },
-        { key: "contact", label: "Contato", width: "minmax(0, 1fr)", primary: true, render: (r) => (r as FinanceEntry).contactName || "—" },
+        { key: "contact", label: "Contato", width: "minmax(0, 1fr)", primary: true, render: contactCell, exportValue: contactCell },
         {
           key: "total",
           label: "Valor",
           width: "140px",
           align: "right",
-          render: (r) => formatEntryTotal((r as FinanceEntry).total),
+          render: totalCell,
+          exportValue: totalCell,
         },
       ],
       rows: rows as unknown as ReportRow[],
@@ -320,22 +367,28 @@ function financeTableFor(id: string, entries: FinanceEntry[], range: DateRange):
     const rows = entries.filter((entry) => entry.status === "aberto");
     const aPagar = rows.filter((entry) => entry.type === "a_pagar").reduce((sum, entry) => sum + entry.total, 0);
     const aReceber = rows.filter((entry) => entry.type === "a_receber").reduce((sum, entry) => sum + entry.total, 0);
+    const typeCell = (r: ReportRow) => ((r as FinanceEntry).type === "a_pagar" ? "A pagar" : "A receber");
+    const contactCell = (r: ReportRow) => (r as FinanceEntry).contactName || "—";
+    const dueDateCell = (r: ReportRow) => (r as FinanceEntry).dueDateFormatted;
+    const totalCell = (r: ReportRow) => formatEntryTotal((r as FinanceEntry).total);
     return {
       columns: [
         {
           key: "type",
           label: "Tipo",
           width: "110px",
-          render: (r) => ((r as FinanceEntry).type === "a_pagar" ? "A pagar" : "A receber"),
+          render: typeCell,
+          exportValue: typeCell,
         },
-        { key: "contact", label: "Contato", width: "minmax(0, 1fr)", primary: true, render: (r) => (r as FinanceEntry).contactName || "—" },
-        { key: "dueDate", label: "Vencimento", width: "130px", render: (r) => (r as FinanceEntry).dueDateFormatted },
+        { key: "contact", label: "Contato", width: "minmax(0, 1fr)", primary: true, render: contactCell, exportValue: contactCell },
+        { key: "dueDate", label: "Vencimento", width: "130px", render: dueDateCell, exportValue: dueDateCell },
         {
           key: "total",
           label: "Valor",
           width: "140px",
           align: "right",
-          render: (r) => formatEntryTotal((r as FinanceEntry).total),
+          render: totalCell,
+          exportValue: totalCell,
         },
       ],
       rows: rows as unknown as ReportRow[],
@@ -349,6 +402,27 @@ function financeTableFor(id: string, entries: FinanceEntry[], range: DateRange):
 }
 
 const FINANCE_REPORT_IDS = new Set(["financeiro-fluxo-caixa", "contas-a-pagar-receber"]);
+
+/** "Vendas por cliente" -> "vendas-por-cliente" (sem acento) — nome do arquivo exportado. */
+function slugifyReportLabel(label: string): string {
+  return label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Planilha .xlsx a partir das linhas já mostradas na tela (respeita a busca da tabela) — uma aba, cabeçalho = rótulos das colunas. */
+function exportReportToExcel(reportLabel: string, columns: ReportColumn[], rows: ReportRow[]): void {
+  const header = columns.map((column) => column.label);
+  const data = rows.map((row) => columns.map((column) => column.exportValue(row)));
+  const sheet = XLSX.utils.aoa_to_sheet([header, ...data]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Relatório");
+  const today = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(workbook, `${slugifyReportLabel(reportLabel)}-${today}.xlsx`);
+}
 
 /**
  * Busca de produto do filtro de entidade — em JS, sobre a lista já carregada
@@ -647,6 +721,20 @@ export default function ReportsPage() {
             selectedId={null}
             onSelect={() => {}}
             summary={table?.summary}
+            footerActions={[
+              {
+                id: "export-excel",
+                label: "Exportar EXCEL",
+                disabled: !table || visibleRows.length === 0,
+                onClick: () => table && exportReportToExcel(active.label, table.columns, visibleRows),
+              },
+              {
+                id: "print-pdf",
+                label: "Imprimir/PDF",
+                disabled: !table,
+                onClick: () => window.print(),
+              },
+            ]}
           />
         </RegistryLayout>
       </div>
