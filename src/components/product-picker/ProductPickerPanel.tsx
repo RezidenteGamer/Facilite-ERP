@@ -6,7 +6,12 @@ import { normalizeSearchText } from "../../lib/searchText";
 import { buildFormFields } from "../../features/registry-engine/moduleView";
 import RegistryFormModal from "../../features/registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../../features/registry-engine/useModuleDefinition";
-import { allowNegativeStockToOption, buildProductInput, type Product } from "../../features/products/products";
+import {
+  allowNegativeStockToOption,
+  buildProductInput,
+  validateProductFormValues,
+  type Product,
+} from "../../features/products/products";
 import { useProductsData } from "../../features/products/useProductsData";
 import "./ProductPickerPanel.css";
 
@@ -107,13 +112,20 @@ export default function ProductPickerPanel({
   async function handleEditSubmit(values: Record<string, string>) {
     if (!editingProduct) return;
     // Este é o atalho de edição do painel (lápis), que mostra só os campos
-    // básicos — não tem o `lookupField` de grupo tributário nem o
-    // `selectField` de estoque negativo que a tela de Produtos tem. Repassar
-    // os dois valores atuais é o que impede a edição rápida de desatrelar o
-    // produto do grupo ou resetar o estoque negativo sem ninguém pedir.
+    // básicos — não tem o `lookupField` de grupo tributário nem os
+    // `selectFields` de estoque negativo/unidade que a tela de Produtos tem.
+    // Repassar os valores atuais é o que impede a edição rápida de
+    // desatrelar o produto do grupo, resetar o estoque negativo ou apagar a
+    // unidade sem ninguém pedir.
     await updateProduct(
       editingProduct.id,
-      buildProductInput(values, editingProduct.taxGroupId ?? null, allowNegativeStockToOption(editingProduct.allowNegativeStock)),
+      buildProductInput(
+        values,
+        editingProduct.taxGroupId ?? null,
+        allowNegativeStockToOption(editingProduct.allowNegativeStock),
+        editingProduct.unidadeComercial ?? "",
+        editingProduct.unidadeTributavel ?? "",
+      ),
     );
     setEditingProduct(null);
   }
@@ -168,6 +180,7 @@ export default function ProductPickerPanel({
             location: editingProduct.location ?? "",
             subLocation: editingProduct.subLocation ?? "",
           }}
+          validate={validateProductFormValues}
           onSubmit={handleEditSubmit}
           onCancel={() => setEditingProduct(null)}
         />

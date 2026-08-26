@@ -47,6 +47,7 @@ function toProduct(row: ProductRow): Product {
     taxGroupId: row.tax_group_id ?? null,
     taxGroupName: row.tax_group?.name ?? undefined,
     createdAt: row.created_at ?? undefined,
+    photoUrl: row.photo_url ?? undefined,
   };
 }
 
@@ -73,6 +74,7 @@ function toUpdateRow(patch: Partial<Product>): TablesUpdate<"products"> {
     // `null` limpa o grupo de propósito (produto sem grupo é estado válido no
     // cadastro; quem recusa é a emissão).
     ...(patch.taxGroupId !== undefined && { tax_group_id: patch.taxGroupId || null }),
+    ...(patch.photoUrl !== undefined && { photo_url: patch.photoUrl || null }),
   };
 }
 

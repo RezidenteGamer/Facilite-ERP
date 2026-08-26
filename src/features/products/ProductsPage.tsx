@@ -5,7 +5,9 @@ import ConfirmDialog from "../../components/ConfirmDialog";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
+import { uploadProductPhoto } from "../../lib/repositories/productPhotos";
 import { fetchTaxGroups } from "../../lib/repositories/taxGroupLookups";
+import { fetchUnitsOfMeasure, type UnitOfMeasure } from "../../lib/repositories/unitsOfMeasureLookups";
 import { normalizeSearchText } from "../../lib/searchText";
 import { fetchBranchAllowsNegativeStock } from "../../lib/repositories/branchesRepository";
 import type { TaxGroup } from "../../lib/fiscal/taxGroups";
@@ -14,6 +16,7 @@ import { buildDetailFields, buildFormFields, buildTableColumns } from "../regist
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { ProductsIcon } from "../home/icons";
+import MarginCalculator from "./MarginCalculator";
 import {
   allowNegativeStockToOption,
   buildProductInput,
@@ -55,9 +58,17 @@ export default function ProductsPage() {
   const [modal, setModal] = useState<ModalState>("none");
   const [formTaxGroup, setFormTaxGroup] = useState<SelectedTaxGroup | null>(null);
   const [formAllowNegativeStock, setFormAllowNegativeStock] = useState<AllowNegativeStockOption>("");
+  const [formUnidadeComercial, setFormUnidadeComercial] = useState("");
+  const [formUnidadeTributavel, setFormUnidadeTributavel] = useState("");
+  /** Lista curta, buscada uma vez só — alimenta os dois `<select>` de unidade abaixo. */
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   /** Padrão da filial ativa — só para mostrar o valor efetivo na ficha quando o produto está em "null". */
   const [branchAllowsNegativeStock, setBranchAllowsNegativeStock] = useState<boolean | null>(null);
+  const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
+  const [pendingPhotoPreview, setPendingPhotoPreview] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const {
     products,
@@ -82,6 +93,20 @@ export default function ProductsPage() {
       return products[0]?.id ?? null;
     });
   }, [products]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUnitsOfMeasure()
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,24 +188,89 @@ export default function ProductsPage() {
     await updateProduct(selected.id, { active: !selected.active });
   }
 
-  /** Abre o formulário já com o grupo e o estoque negativo do produto selecionado (ou vazio, em "Novo"). */
+  function clearPendingPhoto() {
+    setPendingPhotoFile(null);
+    setPendingPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }
+
+  function handleNewPhotoSelected(file: File) {
+    setPendingPhotoFile(file);
+    setPendingPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  }
+
+  async function handleExistingPhotoSelected(productId: string, file: File) {
+    setPhotoUploading(true);
+    setPhotoError(null);
+    try {
+      const url = await uploadProductPhoto(productId, file);
+      await updateProduct(productId, { photoUrl: url });
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : "Erro ao enviar foto.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
+  /**
+   * Abre o formulário já com o grupo e o estoque negativo do produto
+   * selecionado (ou vazio, em "Novo"). Um clone nunca herda a foto do
+   * produto de origem — um produto clonado ainda não tem imagem própria —
+   * então `pendingPhotoPreview` sempre começa vazio aqui, mesmo em "clone".
+   */
   function openModal(next: Exclude<ModalState, "none">) {
     const source = next === "new" ? null : selected;
     setFormTaxGroup(
       source?.taxGroupId ? { id: source.taxGroupId, name: source.taxGroupName ?? "" } : null,
     );
     setFormAllowNegativeStock(allowNegativeStockToOption(source?.allowNegativeStock));
+    setFormUnidadeComercial(source?.unidadeComercial ?? "");
+    setFormUnidadeTributavel(source?.unidadeTributavel ?? "");
+    clearPendingPhoto();
     setModal(next);
   }
 
   async function handleCreateSubmit(values: Record<string, string>) {
-    await createProduct(buildProductInput(values, formTaxGroup?.id ?? null, formAllowNegativeStock));
+    const created = await createProduct(
+      buildProductInput(
+        values,
+        formTaxGroup?.id ?? null,
+        formAllowNegativeStock,
+        formUnidadeComercial,
+        formUnidadeTributavel,
+      ),
+    );
+
+    if (pendingPhotoFile) {
+      try {
+        const url = await uploadProductPhoto(created.id, pendingPhotoFile);
+        await updateProduct(created.id, { photoUrl: url });
+      } catch (err) {
+        setPhotoError(err instanceof Error ? err.message : "Erro ao enviar foto.");
+      }
+    }
+
+    clearPendingPhoto();
     setModal("none");
   }
 
   async function handleEditSubmit(values: Record<string, string>) {
     if (!selected) return;
-    await updateProduct(selected.id, buildProductInput(values, formTaxGroup?.id ?? null, formAllowNegativeStock));
+    await updateProduct(
+      selected.id,
+      buildProductInput(
+        values,
+        formTaxGroup?.id ?? null,
+        formAllowNegativeStock,
+        formUnidadeComercial,
+        formUnidadeTributavel,
+      ),
+    );
     setModal("none");
   }
 
@@ -206,11 +296,59 @@ export default function ProductsPage() {
 
   /** Mesmo papel de `taxGroupLookup`, via `selectField` — três estados, ver `AllowNegativeStockOption`. */
   const allowNegativeStockSelect = {
+    key: "allowNegativeStock",
     label: "Estoque negativo",
     value: formAllowNegativeStock,
     options: ALLOW_NEGATIVE_STOCK_OPTIONS,
     hint: "\"Usar padrão da filial\" segue o que está em Configurações para a filial ativa.",
     onChange: (value: string) => setFormAllowNegativeStock(value as AllowNegativeStockOption),
+  };
+
+  /**
+   * "Unidade comercial"/"Unidade tributável" deixaram de ser texto livre —
+   * viram `<select>` alimentado por `units_of_measure` (mesma ponte de
+   * `allowNegativeStockSelect`). `module_fields.show_in_form` dos dois campos
+   * foi desligado na migration; quem grava o código escolhido é este bridge,
+   * não o `fields.map` genérico do `RegistryFormModal`.
+   */
+  const unitOptions = [
+    { value: "", label: "— nenhuma —" },
+    ...units.map((unit) => ({ value: unit.code, label: `${unit.code} — ${unit.label}` })),
+  ];
+  const unidadeComercialSelect = {
+    key: "unidadeComercial",
+    label: "Unidade comercial",
+    value: formUnidadeComercial,
+    options: unitOptions,
+    onChange: setFormUnidadeComercial,
+  };
+  const unidadeTributavelSelect = {
+    key: "unidadeTributavel",
+    label: "Unidade tributável",
+    value: formUnidadeTributavel,
+    options: unitOptions,
+    onChange: setFormUnidadeTributavel,
+  };
+
+  /**
+   * Calculadora de margem: aparece logo abaixo de "Preço custo" nos três
+   * modais (novo/editar/clonar) via `fieldExtras` do `RegistryFormModal` — só
+   * preenche "Preço venda" a partir do custo, não vira campo novo em
+   * `products` nem recalcula sozinha depois (ver `MarginCalculator`).
+   */
+  const productFieldExtras = {
+    costPrice: ({
+      values,
+      setValue,
+    }: {
+      values: Record<string, string>;
+      setValue: (accessorKey: string, value: string) => void;
+    }) => (
+      <MarginCalculator
+        costPrice={values.costPrice ?? ""}
+        onApply={(salePrice) => setValue("salePrice", salePrice)}
+      />
+    ),
   };
 
   async function handleConfirmDelete() {
@@ -301,19 +439,37 @@ export default function ProductsPage() {
             onToggle: toggleActive,
           }}
           fields={detailFields}
-          media={{ label: "Imagem", layout: "inline" }}
+          media={{
+            label: "Imagem",
+            layout: "inline",
+            imageUrl: selected?.photoUrl ?? null,
+            uploading: photoUploading,
+            disabled: !selected || !canEdit,
+            onFileSelected: (file) => selected && handleExistingPhotoSelected(selected.id, file),
+          }}
         />
       </RegistryLayout>
+
+      {photoError && <p style={{ color: "var(--amber)", padding: "0 24px" }}>{photoError}</p>}
 
       {modal === "new" && (
         <RegistryFormModal<TaxGroup>
           title="Novo produto"
           fields={formFields}
+          mediaField={{
+            label: "Imagem",
+            imageUrl: pendingPhotoPreview,
+            onFileSelected: handleNewPhotoSelected,
+          }}
           lookupField={taxGroupLookup}
-          selectField={allowNegativeStockSelect}
+          selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
+          fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
           onSubmit={handleCreateSubmit}
-          onCancel={() => setModal("none")}
+          onCancel={() => {
+            clearPendingPhoto();
+            setModal("none");
+          }}
         />
       )}
 
@@ -321,8 +477,15 @@ export default function ProductsPage() {
         <RegistryFormModal<TaxGroup>
           title="Editar produto"
           fields={formFields}
+          mediaField={{
+            label: "Imagem",
+            imageUrl: selected.photoUrl ?? null,
+            uploading: photoUploading,
+            onFileSelected: (file) => handleExistingPhotoSelected(selected.id, file),
+          }}
           lookupField={taxGroupLookup}
-          selectField={allowNegativeStockSelect}
+          selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
+          fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
           initialValues={{
             description: selected.description,
@@ -336,8 +499,6 @@ export default function ProductsPage() {
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",
             origemMercadoria: selected.origemMercadoria ?? "",
-            unidadeComercial: selected.unidadeComercial ?? "",
-            unidadeTributavel: selected.unidadeTributavel ?? "",
             cstIpi: selected.cstIpi ?? "",
             minimumStock: selected.minimumStock !== undefined ? String(selected.minimumStock) : "",
           }}
@@ -350,8 +511,14 @@ export default function ProductsPage() {
         <RegistryFormModal<TaxGroup>
           title="Clonar produto"
           fields={formFields}
+          mediaField={{
+            label: "Imagem",
+            imageUrl: pendingPhotoPreview,
+            onFileSelected: handleNewPhotoSelected,
+          }}
           lookupField={taxGroupLookup}
-          selectField={allowNegativeStockSelect}
+          selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
+          fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
           initialValues={{
             description: selected.description,
@@ -365,14 +532,15 @@ export default function ProductsPage() {
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",
             origemMercadoria: selected.origemMercadoria ?? "",
-            unidadeComercial: selected.unidadeComercial ?? "",
-            unidadeTributavel: selected.unidadeTributavel ?? "",
             cstIpi: selected.cstIpi ?? "",
             minimumStock: selected.minimumStock !== undefined ? String(selected.minimumStock) : "",
           }}
           submitLabel="Clonar"
           onSubmit={handleCreateSubmit}
-          onCancel={() => setModal("none")}
+          onCancel={() => {
+            clearPendingPhoto();
+            setModal("none");
+          }}
         />
       )}
 

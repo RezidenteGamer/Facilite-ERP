@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -455,6 +455,7 @@ export type Database = {
           id: string
           indicador_ie: string | null
           inscricao_estadual: string | null
+          is_favorite: boolean
           kind: Database["public"]["Enums"]["contact_kind"]
           logradouro: string | null
           municipio: string | null
@@ -480,6 +481,7 @@ export type Database = {
           id?: string
           indicador_ie?: string | null
           inscricao_estadual?: string | null
+          is_favorite?: boolean
           kind: Database["public"]["Enums"]["contact_kind"]
           logradouro?: string | null
           municipio?: string | null
@@ -505,6 +507,7 @@ export type Database = {
           id?: string
           indicador_ie?: string | null
           inscricao_estadual?: string | null
+          is_favorite?: boolean
           kind?: Database["public"]["Enums"]["contact_kind"]
           logradouro?: string | null
           municipio?: string | null
@@ -1073,6 +1076,7 @@ export type Database = {
           minimum_stock: number | null
           ncm: string | null
           origem_mercadoria: string | null
+          photo_url: string | null
           sale_price: number
           stock: number
           sub_location: string | null
@@ -1098,6 +1102,7 @@ export type Database = {
           minimum_stock?: number | null
           ncm?: string | null
           origem_mercadoria?: string | null
+          photo_url?: string | null
           sale_price?: number
           stock?: number
           sub_location?: string | null
@@ -1123,6 +1128,7 @@ export type Database = {
           minimum_stock?: number | null
           ncm?: string | null
           origem_mercadoria?: string | null
+          photo_url?: string | null
           sale_price?: number
           stock?: number
           sub_location?: string | null
@@ -2031,6 +2037,30 @@ export type Database = {
         }
         Relationships: []
       }
+      units_of_measure: {
+        Row: {
+          allows_fraction: boolean
+          code: string
+          created_at: string
+          id: string
+          label: string
+        }
+        Insert: {
+          allows_fraction?: boolean
+          code: string
+          created_at?: string
+          id?: string
+          label: string
+        }
+        Update: {
+          allows_fraction?: boolean
+          code?: string
+          created_at?: string
+          id?: string
+          label?: string
+        }
+        Relationships: []
+      }
       user_branches: {
         Row: {
           branch_id: string
@@ -2800,6 +2830,7 @@ export type Database = {
           id: string
           indicador_ie: string | null
           inscricao_estadual: string | null
+          is_favorite: boolean
           kind: Database["public"]["Enums"]["contact_kind"]
           logradouro: string | null
           municipio: string | null

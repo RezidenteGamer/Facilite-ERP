@@ -33,12 +33,13 @@ export function useProductsData(branchId: string | null) {
     reload();
   }, [reload]);
 
-  async function createProduct(input: NewProductInput) {
+  async function createProduct(input: NewProductInput): Promise<Product> {
     if (!branchId) throw new Error("Selecione uma filial antes de cadastrar um produto.");
     const repository = createProductsRepository(branchId);
     // `code` é gerado pelo repositório; o placeholder abaixo nunca é usado.
-    await repository.create({ ...input, code: "" });
+    const created = await repository.create({ ...input, code: "" });
     await reload();
+    return created;
   }
 
   async function updateProduct(id: string, patch: Partial<Product>) {

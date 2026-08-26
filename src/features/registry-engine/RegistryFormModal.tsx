@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import FormField from "../../components/form/FormField";
 import SearchCombobox from "../../components/form/SearchCombobox";
 import PhotoDropzone from "./PhotoDropzone";
@@ -46,9 +46,13 @@ type RegistryFormModalLookupField<TItem> = {
  * mesmo papel de `lookupField`/`mediaField`: `module_fields` não tem
  * `dataType: 'select'` (a engine só distingue `text`/`date` no `<input>`,
  * ver AGENTS.md), e criar um generalizaria o motor inteiro por causa de um
- * campo. Usado hoje só pelo estoque negativo do produto (três estados).
+ * campo. Usado pelo estoque negativo do produto (três estados) e pelas
+ * unidades comercial/tributável (lista curta vinda de `units_of_measure`).
+ * `key` só precisa ser único dentro do formulário — vira parte do `id` do
+ * `<select>` no DOM, já que agora pode haver mais de um.
  */
 type RegistryFormModalSelectField = {
+  key: string;
   label: string;
   value: string;
   options: { value: string; label: string }[];
@@ -63,7 +67,7 @@ type RegistryFormModalProps<TItem> = {
   submitLabel?: string;
   mediaField?: RegistryFormModalMediaField;
   lookupField?: RegistryFormModalLookupField<TItem>;
-  selectField?: RegistryFormModalSelectField;
+  selectFields?: RegistryFormModalSelectField[];
   /**
    * Opções dos campos de referência (`module_fields.reference_module_id`),
    * por `accessorKey`. Quando um campo tem lista aqui, ele deixa de ser
@@ -71,6 +75,21 @@ type RegistryFormModalProps<TItem> = {
    * senão o formulário estaria pedindo que alguém colasse um uuid à mão.
    */
   referenceOptions?: Record<string, { value: string; label: string }[]>;
+  /**
+   * Conteúdo extra renderizado logo depois de um campo específico, por
+   * `accessorKey` — ex.: a calculadora de margem de Produtos, que fica junto
+   * do campo "Preço custo". `module_fields` não tem um conceito de "campo
+   * com widget auxiliar"; criar um generalizaria o motor inteiro por causa de
+   * um caso (mesma disciplina de `mediaField`/`lookupField`/`selectFields`,
+   * ver AGENTS.md). Vem como função — não `ReactNode` puro — porque o widget
+   * geralmente precisa ler e escrever outros campos do MESMO formulário (ex.:
+   * ler "Preço custo" e escrever em "Preço venda"), e esse estado só existe
+   * aqui dentro.
+   */
+  fieldExtras?: Record<
+    string,
+    (helpers: { values: Record<string, string>; setValue: (accessorKey: string, value: string) => void }) => ReactNode
+  >;
   /**
    * Validação além de "preenchido/vazio" — mesmo papel do `validateRow` do
    * motor de lote (`RegistryBatchFormModal`). Devolve mensagens de erro
@@ -100,8 +119,9 @@ export default function RegistryFormModal<TItem = unknown>({
   submitLabel = "Salvar",
   mediaField,
   lookupField,
-  selectField,
+  selectFields,
   referenceOptions,
+  fieldExtras,
   validate,
   submitError,
   onSubmit,
@@ -197,17 +217,18 @@ export default function RegistryFormModal<TItem = unknown>({
                 />
               )}
 
-              {selectField && (
+              {selectFields?.map((select) => (
                 <FormField
-                  id="registry-form-select"
-                  label={selectField.label}
+                  key={select.key}
+                  id={`registry-form-select-${select.key}`}
+                  label={select.label}
                   type="select"
-                  options={selectField.options}
-                  value={selectField.value}
-                  onChange={selectField.onChange}
-                  hint={selectField.hint}
+                  options={select.options}
+                  value={select.value}
+                  onChange={select.onChange}
+                  hint={select.hint}
                 />
-              )}
+              ))}
 
               {fields.map((field) => {
                 const options = field.referenceModuleId
@@ -215,21 +236,27 @@ export default function RegistryFormModal<TItem = unknown>({
                   : undefined;
 
                 return (
-                  <FormField
-                    key={field.accessorKey}
-                    id={`registry-form-${field.accessorKey}`}
-                    label={field.isRequired ? `${field.label} *` : field.label}
-                    type={options ? "select" : field.dataType === "date" ? "date" : "text"}
-                    options={
-                      options
-                        ? [{ value: "", label: "— nenhum —" }, ...options]
-                        : undefined
-                    }
-                    value={values[field.accessorKey] ?? ""}
-                    onChange={(value) =>
-                      setValues((current) => ({ ...current, [field.accessorKey]: value }))
-                    }
-                  />
+                  <div key={field.accessorKey}>
+                    <FormField
+                      id={`registry-form-${field.accessorKey}`}
+                      label={field.isRequired ? `${field.label} *` : field.label}
+                      type={options ? "select" : field.dataType === "date" ? "date" : "text"}
+                      options={
+                        options
+                          ? [{ value: "", label: "— nenhum —" }, ...options]
+                          : undefined
+                      }
+                      value={values[field.accessorKey] ?? ""}
+                      onChange={(value) =>
+                        setValues((current) => ({ ...current, [field.accessorKey]: value }))
+                      }
+                    />
+                    {fieldExtras?.[field.accessorKey]?.({
+                      values,
+                      setValue: (accessorKey, value) =>
+                        setValues((current) => ({ ...current, [accessorKey]: value })),
+                    })}
+                  </div>
                 );
               })}
             </div>

@@ -14,6 +14,11 @@ import {
 } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
 import { normalizeSearchText } from "../../lib/searchText";
+import {
+  fetchUnitsOfMeasure,
+  unitAllowsFraction,
+  type UnitOfMeasure,
+} from "../../lib/repositories/unitsOfMeasureLookups";
 import { StockAdjustIcon } from "../home/icons";
 import { buildDetailFields, buildTableColumns } from "../registry-engine/moduleView";
 import RegistryBatchFormModal, {
@@ -56,7 +61,6 @@ type StockTab = (typeof TABS)[number]["id"];
 function formatMovementQuantity(value: number) {
   return Math.abs(value).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 }
-
 
 /** Produto -> item do lote. Clicar e arrastar precisam produzir o mesmo item. */
 function toBatchItem(product: Product): BatchItem {
@@ -104,20 +108,41 @@ function validateAdjustmentRow(values: Record<string, string>): string | null {
 }
 
 /**
- * Limpa "Saldo contado" ao digitar em "Alteração" e vice-versa — os dois são
- * jeitos alternativos de informar a mesma coisa, nunca os dois juntos. A
- * validação de submit (`validateAdjustmentRow`) continua sendo a rede de
- * segurança; isto é só a conveniência de não deixar o outro campo com um
- * valor que não vai ser usado.
+ * Reação do módulo a uma digitação em "Alteração"/"Saldo contado", duas
+ * coisas de uma vez:
+ *
+ * 1. Limpa o campo oposto — os dois são jeitos alternativos de informar a
+ *    mesma coisa, nunca os dois juntos. A validação de submit
+ *    (`validateAdjustmentRow`) continua sendo a rede de segurança.
+ * 2. Arredonda o valor digitado quando o produto da linha está numa unidade
+ *    que não permite fração (`allows_fraction = false` em
+ *    `units_of_measure`, ex.: UN, PC) — arredondar ao digitar é mais
+ *    amigável do que recusar no envio. Produto sem unidade definida continua
+ *    aceitando decimal livre.
+ *
+ * Fica fora do componente parametrizada por `products`/`units` (em vez de ler
+ * de fora) para continuar uma função pura, fácil de testar isoladamente.
  */
-function clearOppositeQuantityField(
-  _rowId: string,
-  accessorKey: string,
-  value: string,
-): Record<string, string> | void {
-  if (!value.trim()) return;
-  if (accessorKey === "change") return { countedBalance: "" };
-  if (accessorKey === "countedBalance") return { change: "" };
+function makeQuantityFieldChange(products: Product[], units: UnitOfMeasure[]) {
+  return function onQuantityFieldChange(
+    rowId: string,
+    accessorKey: string,
+    value: string,
+  ): Record<string, string> | void {
+    if (accessorKey !== "change" && accessorKey !== "countedBalance") return;
+    if (!value.trim()) return;
+
+    const patch: Record<string, string> =
+      accessorKey === "change" ? { countedBalance: "" } : { change: "" };
+
+    const product = products.find((p) => p.id === rowId);
+    if (product && !unitAllowsFraction(product.unidadeComercial, units)) {
+      const parsed = toBatchNumber(value);
+      if (parsed !== null) patch[accessorKey] = String(Math.round(parsed));
+    }
+
+    return patch;
+  };
 }
 
 type ProductBatchPickerProps = {
@@ -219,8 +244,27 @@ export default function StockAdjustPage() {
     loadMore: loadMoreMovements,
   } = useStockMovementsData(currentBranchId);
   // Só para resolver o `?produto=` de "Ajustar estoque de X" vindo de Realizar
-  // Venda (estoque insuficiente) — a lista em si não aparece nesta tela.
+  // Venda (estoque insuficiente) — a lista em si não aparece nesta tela. A
+  // mesma lista de produtos também é o que `makeQuantityFieldChange` usa para
+  // achar a unidade do produto de cada linha do lote pelo `row.item.id`.
   const { products, loading: productsLoading } = useProductsData(currentBranchId);
+
+  // Lista curta, buscada uma vez — decide se a quantidade de cada linha do
+  // lote pode ser fracionada (ver `unitAllowsFraction`).
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchUnitsOfMeasure()
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -510,7 +554,7 @@ export default function StockAdjustPage() {
           emptyHint="Clique nos produtos ao lado — ou arraste-os para cá — para montar a lista de contagem. Em cada linha, informe a alteração (+/-) ou o saldo contado."
           submitLabel="Confirmar ajustes"
           validateRow={validateAdjustmentRow}
-          onFieldChange={clearOppositeQuantityField}
+          onFieldChange={makeQuantityFieldChange(products, units)}
           renderItemPicker={(onPick) => (
             <ProductBatchPicker branchId={currentBranchId} onPick={onPick} />
           )}

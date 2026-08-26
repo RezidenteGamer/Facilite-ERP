@@ -1,3 +1,5 @@
+import { parseAmount } from "../../lib/amount";
+
 export type Product = {
   id: string;
   code: string;
@@ -40,11 +42,17 @@ export type Product = {
   /** Só leitura (vem de join) — o formulário grava `taxGroupId`, nunca o nome. */
   taxGroupName?: string;
   createdAt?: string;
+  photoUrl?: string;
 };
 
-/** Formato monetário do sistema (pt-BR, sem símbolo — a coluna já diz "Valor"). */
+/**
+ * Preço de Produto (pt-BR, com "R$ ") — diferente de `formatEntryTotal` do
+ * Financeiro/PDV/Controle de Caixa, que é sem símbolo de propósito (rótulos
+ * como "Valor"/"Total" já dizem o que é); aqui a coluna se chama "Preço", e
+ * "R$ 14,90" foi pedido explicitamente para Produtos.
+ */
 export function formatPrice(value: number) {
-  return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** Campos do formulário de produto (metadados) são sempre texto — conversão manual aqui. */
@@ -57,6 +65,30 @@ export function toOptionalNumber(value: string | undefined): number | undefined 
   if (!value || !value.trim()) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * Mensagem de erro para um campo de preço, ou `null` se ele está vazio (é
+ * opcional — obrigatoriedade é responsabilidade do `RegistryFormModal`) ou é
+ * um número válido (aceita vírgula, ver `parseAmount`). Sem isso, "14,90"
+ * virava `NaN` em `toNumber`/`toOptionalNumber` e caía silenciosamente para
+ * `0`/vazio — o produto era salvo com o preço errado sem avisar ninguém.
+ */
+function priceFieldError(value: string | undefined, label: string): string | null {
+  if (!value || !value.trim()) return null;
+  return parseAmount(value) === null ? `${label} precisa ser um número válido.` : null;
+}
+
+/** `validate` do `RegistryFormModal` para os formulários de Produto (novo/editar/clonar). */
+export function validateProductFormValues(values: Record<string, string>): string[] {
+  const errors: string[] = [];
+  const salePriceError = priceFieldError(values.salePrice, "Preço venda");
+  if (salePriceError) errors.push(salePriceError);
+  const costPriceError = priceFieldError(values.costPrice, "Preço custo");
+  if (costPriceError) errors.push(costPriceError);
+  const wholesalePriceError = priceFieldError(values.wholesalePrice, "Preço Atacado");
+  if (wholesalePriceError) errors.push(wholesalePriceError);
+  return errors;
 }
 
 /**
@@ -80,26 +112,34 @@ export function allowNegativeStockToOption(value: boolean | null | undefined): A
   return "";
 }
 
+/**
+ * `unidadeComercial`/`unidadeTributavel` vêm à parte, como `taxGroupId` e
+ * `allowNegativeStockOption`: desde a unidade de medida virar `<select>`
+ * alimentado por `units_of_measure` (ver AGENTS.md), os dois campos saíram
+ * de `module_fields.show_in_form` e não chegam mais dentro de `values`.
+ */
 export function buildProductInput(
   values: Record<string, string>,
   taxGroupId: string | null,
   allowNegativeStockOption: AllowNegativeStockOption,
+  unidadeComercial: string,
+  unidadeTributavel: string,
 ): Omit<Product, "id" | "code" | "createdAt"> {
   return {
     description: values.description ?? "",
     stock: toNumber(values.stock),
-    salePrice: toNumber(values.salePrice),
+    salePrice: parseAmount(values.salePrice) ?? 0,
     active: true,
     type: values.type || undefined,
-    costPrice: toOptionalNumber(values.costPrice),
-    wholesalePrice: toOptionalNumber(values.wholesalePrice),
+    costPrice: parseAmount(values.costPrice) ?? undefined,
+    wholesalePrice: parseAmount(values.wholesalePrice) ?? undefined,
     ncm: values.ncm || undefined,
     location: values.location || undefined,
     subLocation: values.subLocation || undefined,
     cest: values.cest || undefined,
     origemMercadoria: values.origemMercadoria || undefined,
-    unidadeComercial: values.unidadeComercial || undefined,
-    unidadeTributavel: values.unidadeTributavel || undefined,
+    unidadeComercial: unidadeComercial || undefined,
+    unidadeTributavel: unidadeTributavel || undefined,
     cstIpi: values.cstIpi || undefined,
     minimumStock: toOptionalNumber(values.minimumStock),
     taxGroupId,
