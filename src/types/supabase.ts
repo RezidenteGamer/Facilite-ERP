@@ -2180,6 +2180,20 @@ export type Database = {
           },
         ]
       }
+      stock_movements_view: {
+        Row: {
+          branch_id: string | null
+          id: string | null
+          movement_type: string | null
+          occurred_at: string | null
+          origin_code: string | null
+          product_code: string | null
+          product_description: string | null
+          product_id: string | null
+          quantity_delta: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       adjust_stock_batch: {

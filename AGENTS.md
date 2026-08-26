@@ -1552,3 +1552,56 @@ Pedido do usuário sobre Ajuste de estoque: os campos "Alteração" e "Saldo con
 - **`StockAdjustPage.tsx`** passa `clearOppositeQuantityField` como `onFieldChange`: ao digitar em `change` (não vazio) devolve `{ countedBalance: "" }`, ao digitar em `counted_balance`/`countedBalance` devolve `{ change: "" }`; campo apagado não limpa nada. `"change"`/`"countedBalance"` só aparecem aqui, nunca dentro do motor. **`validateAdjustmentRow` (validação de submit) não mudou** — continua a rede de segurança; a limpeza automática é só conveniência de digitação, não substitui a validação.
 - **Hints novos só em `ajuste-estoque`** (via SQL direto em `module_fields`, sem migration de dado — é conteúdo, não schema): "Alteração" ganhou "Some ou subtraia do saldo atual (negativo para saída). Preencha isto ou "Saldo contado", nunca os dois."; "Saldo contado" ganhou o espelho. Nenhum outro módulo tem hint ainda — o mecanismo é genérico, o conteúdo é por módulo.
 - **Testado no navegador**: aberto o lote, produto adicionado, digitado "12" em Alteração — "Saldo contado" limpou sozinho (confirmado lendo `value` dos dois inputs via DOM, não só visualmente); os dois hints apareceram embaixo dos campos certos. Confirmado envio nos dois modos numa sessão só: um item por delta (+12, estoque 167→179) e outro por saldo contado (60 contado sobre 50 do sistema, gravou `change = 11`, listagem bateu com o cálculo).
+
+### Decisão arquitetural: livro de movimentações de estoque em Ajuste de estoque (26/08/2026)
+
+Pedido do usuário: *"O sistema deve ter uma nova tabela em 'Ajuste de estoque' que exiba todas as movimentações, seja troca, venda, compra, tudo."*
+
+**View, não tabela nova com trigger.** O sistema não tem um livro-razão de estoque: cada operação mexe em `products.stock` direto, dentro da própria RPC. Criar uma tabela de eventos exigiria um gatilho em cinco RPCs já testadas e em produção, com risco de dessincronizar se alguma escrita escapasse. Uma view sobre o que já está gravado não pode divergir por construção, e nenhuma RPC foi tocada nesta etapa. Se um dia o histórico precisar de dado que a view não tem (motivo customizado por tipo, por exemplo), aí sim vale reabrir a discussão de tabela de eventos.
+
+#### As três fontes que não estão na lista óbvia — e por que o livro estaria errado sem elas
+
+A intuição de "somar `sale_items` + `purchase_items` + `conditional_items` + `sale_return_items` + `stock_adjustments`" **dá o número errado**. As cinco tabelas de itens não são o mapa das escritas em `products.stock`; a lista real foi levantada função por função (`pg_get_functiondef` de cada RPC), e tem três casos a mais:
+
+1. **`convert_conditional_to_sale` grava em `sale_items` sem baixar estoque** — a peça já saiu quando a condicional foi criada. Somar `sale_items` cru conta a mesma saída duas vezes. A view exclui com `not exists` contra `conditional_item_conversions.sale_item_id`.
+2. **`register_conditional_return` devolve estoque gravando em `conditional_item_returns`** — entrada real, sem linha em nenhuma das cinco tabelas "principais".
+3. **`cancel_conditional` devolve o estoque de todos os itens de uma vez** e marca a condicional como `cancelled`. Outra entrada real; o único carimbo de tempo disponível é `conditionals.updated_at`.
+
+**Não é hipótese**: o banco já tinha 2 conversões, 1 devolução de condicional e 1 condicional cancelada quando a view foi escrita. Conferência: `products.stock − Σ(movimentos)` deve dar o estoque inicial semeado, um número redondo. Pelo livro correto os quatro produtos que passaram por condicional deram 150 / 60 / 35 / 48; pelo livro ingênuo de cinco fontes deram 151 / 61 / 36 / 49 — errado por exatamente 1 em cada um. Nos 49 produtos, todo `diferenca` saiu inteiro e redondo.
+
+São sete `movement_type`, não cinco: `venda`, `compra`, `condicional`, `devolucao-condicional`, `condicional-cancelada`, `devolucao`, `ajuste`.
+
+**Venda/compra/devolução de venda não filtram `status`** (diferente das views de Relatórios, que filtram `confirmed`). Nenhuma RPC cancela essas três, e nenhuma devolve estoque em caso de cancelamento — filtrar aqui faria o livro divergir de `products.stock`. Lá a pergunta é faturamento; aqui é saldo físico.
+
+#### A exceção ao `security_invoker = true` — e por que ela é deliberada
+
+Esta é a **única view do projeto sem `security_invoker`**, contrariando de propósito o padrão fixado nas views de Relatórios (ver a decisão da etapa 11). O motivo: o portão aqui é o módulo que **exibe** a lista (`ajuste-estoque`), não o módulo de origem de cada linha. Com `security_invoker = true`, quem tem Ajuste de estoque mas não tem Compras veria um livro silenciosamente incompleto — pior do que não ver nada, porque o saldo não fecharia e ninguém saberia por quê.
+
+Então a view roda com o privilégio do dono (`postgres`, `BYPASSRLS`) e o `where` no fim é o **único** portão:
+
+```sql
+where public.has_permission('ajuste-estoque', 'view')
+  and public.has_branch_access(m.branch_id)
+```
+
+`security_barrier = true` impede que uma função barata do usuário seja empurrada para baixo desse `where`. `anon` teve o `SELECT` revogado explicitamente; só `authenticated` lê.
+
+**A exposição é deliberadamente estreita**: quantidade, tipo, código do documento, data e nome/código do produto. Nenhum valor monetário, nenhum cliente, nenhum fornecedor — quem tem `ajuste-estoque/view` já enxerga saldo e histórico de ajuste de todo produto da filial.
+
+**Isto acende um lint ERROR no advisor de segurança do Supabase (`security_definer_view`), e é esperado** — o linter não sabe que a view carrega o próprio portão de permissão. Testado desligando `ajuste-estoque/can_view` do Administrador (dentro de uma transação com `rollback`): a view devolveu **0 linhas**; religada, 97. `has_table_privilege('anon', ...)` devolve `false`. Se uma sessão futura "consertar" esse lint pondo `security_invoker = true`, o livro passa a mostrar só os módulos que o usuário já tem — leia esta seção antes de mexer.
+
+#### Repositório e tela
+
+`src/lib/repositories/stockMovementsRepository.ts` (`fetchStockMovements`, rótulos em português por tipo) + `src/features/products/useStockMovementsData.ts`. Paginado em `STOCK_MOVEMENTS_PAGE_SIZE = 200` com "Carregar mais" no rodapé da tabela — o livro cresce a cada venda da filial e trazer tudo sem teto envelhece mal. A ordenação desempata por `id` depois de `occurred_at`: uma venda com vários itens grava várias linhas no mesmo instante, e sem o segundo critério a paginação repetiria ou pularia linhas.
+
+Na tela (`StockAdjustPage.tsx`), **aba** ao lado de "Ajustes lançados" — não uma seção abaixo. A tela já ocupa a altura toda em três colunas (ações | tabela | ficha), e empilhar uma segunda tabela na coluna do meio deixaria as duas com metade da altura; as duas listas respondem à mesma pergunta em dois recortes, que é o caso de aba que Controle de caixa já usa. Colunas e ficha da aba nova são fixas, não vindas de `module_fields`: a fonte é uma view que soma cinco módulos, não uma tabela do motor genérico.
+
+Quantidade com sinal e cor **na mesma convenção do Financeiro** (`var(--positive)` verde com `+` para entrada, `var(--danger)` vermelho com `−` para saída). Erro e carregamento do livro aparecem na ficha da direita, não no lugar da página inteira — a aba "Ajustes lançados" continua utilizável se a view falhar.
+
+#### Testado
+
+No navegador com a conta de testes: a aba mostra os **sete** tipos, cada um com o sinal certo, incluindo o par condicional `0002` (saída −1 às 10:05:57, cancelada +1 às 10:06:56) e a devolução parcial da condicional `0001` (+1). Cores conferidas por `getComputedStyle`: `rgb(30,142,62)` nas entradas, `rgb(214,40,28)` nas saídas. Venda nova de ponta a ponta pelo wizard (`/realizar-venda`, Café Torrado 500g, R$ 19,90, venda `0033`): ao recarregar `/ajuste-estoque`, a linha apareceu no topo da aba — `26/08/2026 10:48:23 · 003 · Café Torrado 500g · Venda · 0033 · − 1`. Vendas `0017` e `0023` (as duas convertidas de condicional) **não** aparecem como Venda, como esperado. `oxlint` e `vite build` limpos; `tsc` sem nenhum erro novo (os 6 erros em `src/features/modules/moduleWorkflow.ts` são anteriores a esta etapa e não têm relação com ela).
+
+#### Fora de escopo
+
+Filtro por tipo de movimento, por produto ou por intervalo de data na aba nova (a busca por produto/origem que a tela já tinha foi reaproveitada, e nada mais foi pedido). Saldo acumulado por linha ("estoque após o movimento") — `stock_adjustments.balance_after` existe só para o ajuste; reconstruir isso para as outras seis fontes exigiria uma janela ordenada sobre o livro inteiro, caro e fora do pedido. Exportar. Drill-down da linha para a venda/compra de origem. Índices novos nas tabelas de origem — a filial de testes tem 97 movimentos; se a lista ficar lenta em produção, o candidato é um índice em `(branch_id, created_at)` nas tabelas de cabeçalho, não uma materialização da view.
