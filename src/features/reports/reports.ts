@@ -34,6 +34,13 @@ export type ReportDefinition = {
   description: string;
   filterKind: ReportFilterKind;
   /**
+   * Só para `filterKind: "entity"` — qual tipo de entidade o filtro de
+   * seleção múltipla busca ("contact" = cliente/fornecedor, "product" =
+   * produto). Decide qual `SearchCombobox` a tela monta, não o intervalo de
+   * data (esse já vem de `defaultRangeFor`).
+   */
+  entityKind?: "contact" | "product";
+  /**
    * Módulo de origem cujo `has_permission(..., 'view')` realmente decide o
    * que a view/tabela deste relatório devolve (camada 1 da RLS, ver
    * AGENTS.md). Usado só para mostrar um aviso amigável — quem barra de
@@ -57,6 +64,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: ClientsIcon,
     description: "Vendas agrupadas por contact_id.",
     filterKind: "entity",
+    entityKind: "contact",
     sourceModuleId: "realizar-venda",
   },
   {
@@ -65,6 +73,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: ProductsIcon,
     description: "sale_items agrupado por product_id.",
     filterKind: "entity",
+    entityKind: "product",
     sourceModuleId: "realizar-venda",
   },
   {
@@ -81,6 +90,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: PurchasesIcon,
     description: "Compras agrupadas por contact_id.",
     filterKind: "entity",
+    entityKind: "contact",
     sourceModuleId: "compras",
   },
   {
@@ -89,6 +99,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: ProductsIcon,
     description: "purchase_items agrupado por product_id.",
     filterKind: "entity",
+    entityKind: "product",
     sourceModuleId: "compras",
   },
   {
@@ -97,6 +108,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: AverageCostIcon,
     description: "Média de purchase_items.unit_cost, por produto.",
     filterKind: "entity",
+    entityKind: "product",
     sourceModuleId: "compras",
   },
   {
@@ -129,6 +141,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: TopSellerIcon,
     description: "sale_items agrupado por product_id, ordenado por quantidade.",
     filterKind: "entity",
+    entityKind: "product",
     sourceModuleId: "realizar-venda",
   },
   {
@@ -165,9 +178,9 @@ export function defaultRangeFor(kind: ReportFilterKind): { from: string; to: str
   return { from: to, to };
 }
 
-/** Formato monetário do sistema (pt-BR, sem símbolo). */
+/** Formato monetário do sistema (pt-BR, com "R$" — mesmo padrão de `formatPrice` em Produtos). */
 export function formatReportAmount(value: number) {
-  return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** `date` do Postgres (`2026-08-20`) formatada sem passar por `Date` (mesmo cuidado de fuso de `finance.ts`). */

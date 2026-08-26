@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import FormField from "../../components/form/FormField";
+import SearchCombobox from "../../components/form/SearchCombobox";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryLayout, RegistryTable, type RegistryColumn, type RegistrySummaryItem } from "../../components/registry";
+import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
 import {
   fetchFiscalDocumentsReport,
   fetchLowStockProducts,
@@ -15,12 +17,16 @@ import {
   fetchSalesByDay,
   type DateRange,
 } from "../../lib/repositories/reportsRepository";
+import { normalizeSearchText } from "../../lib/searchText";
 import type { Tables } from "../../types/supabase";
 import { useAuth } from "../auth/AuthContext";
+import type { Contact } from "../customers/contacts";
 import { computeCashFlowTotals, formatEntryTotal, type FinanceEntry } from "../finance/finance";
 import { useFinancialEntriesData } from "../finance/useFinancialEntriesData";
 import ModuleTile from "../home/components/ModuleTile";
 import { ReportsIcon } from "../home/icons";
+import type { Product } from "../products/products";
+import { useProductsData } from "../products/useProductsData";
 import { invoiceStatusLabel } from "../sales/invoices";
 import {
   REPORT_DEFINITIONS,
@@ -30,6 +36,9 @@ import {
   type ReportDefinition,
 } from "./reports";
 import "./ReportsPage.css";
+
+/** Item selecionado no filtro de entidade (cliente/fornecedor/produto) — só o necessário para o chip e para a query. */
+type EntitySelection = { id: string; label: string };
 
 const MODULE_ID = "relatorios";
 
@@ -76,8 +85,8 @@ async function buildSalesByDayTable(branchId: string, range: DateRange): Promise
   };
 }
 
-async function buildSalesByContactTable(branchId: string, range: DateRange): Promise<ReportTable> {
-  const rows = await fetchSalesByContact(branchId, range);
+async function buildSalesByContactTable(branchId: string, range: DateRange, contactIds: string[]): Promise<ReportTable> {
+  const rows = await fetchSalesByContact(branchId, range, contactIds);
   const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
   return {
     columns: [
@@ -101,8 +110,9 @@ async function buildSaleItemsByProductTable(
   branchId: string,
   range: DateRange,
   sortBy: "total" | "quantity",
+  productIds: string[],
 ): Promise<ReportTable> {
-  const rows = await fetchSaleItemsByProduct(branchId, range);
+  const rows = await fetchSaleItemsByProduct(branchId, range, productIds);
   const sorted = [...rows].sort((a, b) =>
     sortBy === "total" ? b.totalAmount - a.totalAmount : b.quantity - a.quantity,
   );
@@ -129,8 +139,8 @@ async function buildSaleItemsByProductTable(
   };
 }
 
-async function buildPurchasesByContactTable(branchId: string, range: DateRange): Promise<ReportTable> {
-  const rows = await fetchPurchasesByContact(branchId, range);
+async function buildPurchasesByContactTable(branchId: string, range: DateRange, contactIds: string[]): Promise<ReportTable> {
+  const rows = await fetchPurchasesByContact(branchId, range, contactIds);
   const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
   return {
     columns: [
@@ -154,8 +164,9 @@ async function buildPurchaseItemsByProductTable(
   branchId: string,
   range: DateRange,
   sortBy: "quantity" | "avgCost",
+  productIds: string[],
 ): Promise<ReportTable> {
-  const rows = await fetchPurchaseItemsByProduct(branchId, range);
+  const rows = await fetchPurchaseItemsByProduct(branchId, range, productIds);
   const sorted = [...rows].sort((a, b) => {
     if (sortBy === "quantity") return b.quantity - a.quantity;
     return (b.avgUnitCost ?? -1) - (a.avgUnitCost ?? -1);
@@ -235,29 +246,30 @@ async function buildLowStockTable(branchId: string): Promise<ReportTable> {
   };
 }
 
-/** Roteia o id do bloco para o construtor de tabela certo — os 7 relatórios sem fonte já carregada no cliente (ver `financeTableFor` para os 2 que reaproveitam `useFinancialEntriesData`). */
+/** Roteia o id do bloco para o construtor de tabela certo — os 7 relatórios sem fonte já carregada no cliente (ver `financeTableFor` para os 2 que reaproveitam `useFinancialEntriesData`). `entityIds` só é usado pelos 4 relatórios `filterKind: "entity"`; os demais o ignoram. */
 async function buildAsyncReportTable(
   id: string,
   branchId: string,
   range: DateRange,
   fiscalFilters: { model: string; status: string },
+  entityIds: string[],
 ): Promise<ReportTable | null> {
   switch (id) {
     case "vendas-total":
     case "vendas-por-periodo":
       return buildSalesByDayTable(branchId, range);
     case "vendas-por-cliente":
-      return buildSalesByContactTable(branchId, range);
+      return buildSalesByContactTable(branchId, range, entityIds);
     case "vendas-por-produto":
-      return buildSaleItemsByProductTable(branchId, range, "total");
+      return buildSaleItemsByProductTable(branchId, range, "total", entityIds);
     case "produtos-mais-vendidos":
-      return buildSaleItemsByProductTable(branchId, range, "quantity");
+      return buildSaleItemsByProductTable(branchId, range, "quantity", entityIds);
     case "compras-por-fornecedor":
-      return buildPurchasesByContactTable(branchId, range);
+      return buildPurchasesByContactTable(branchId, range, entityIds);
     case "produtos-comprados":
-      return buildPurchaseItemsByProductTable(branchId, range, "quantity");
+      return buildPurchaseItemsByProductTable(branchId, range, "quantity", entityIds);
     case "custo-medio-compras":
-      return buildPurchaseItemsByProductTable(branchId, range, "avgCost");
+      return buildPurchaseItemsByProductTable(branchId, range, "avgCost", entityIds);
     case "notas-fiscais-emitidas":
       return buildFiscalDocumentsTable(branchId, fiscalFilters);
     case "estoque-abaixo-minimo":
@@ -339,6 +351,22 @@ function financeTableFor(id: string, entries: FinanceEntry[], range: DateRange):
 const FINANCE_REPORT_IDS = new Set(["financeiro-fluxo-caixa", "contas-a-pagar-receber"]);
 
 /**
+ * Busca de produto do filtro de entidade — em JS, sobre a lista já carregada
+ * da filial (mesma técnica do `ProductPickerPanel`), não existe hoje uma
+ * busca de produto por servidor para reaproveitar no `SearchCombobox`.
+ */
+function searchLocalProducts(products: Product[], query: string): Promise<Product[]> {
+  const term = normalizeSearchText(query.trim());
+  const active = products.filter((p) => p.active);
+  const filtered = term
+    ? active.filter(
+        (p) => normalizeSearchText(p.description).includes(term) || normalizeSearchText(p.code).includes(term),
+      )
+    : active;
+  return Promise.resolve(filtered.slice(0, 20));
+}
+
+/**
  * Tela de Relatórios (etapa 11) — grade de 12 blocos e, ao abrir um, filtro +
  * tabela + resumo. Bespoke (não é motor genérico nem de lote): cada bloco lê
  * uma fonte diferente e não é um CRUD de uma tabela só. A permissão em duas
@@ -360,11 +388,28 @@ export default function ReportsPage() {
   const [fiscalModel, setFiscalModel] = useState("");
   const [fiscalStatus, setFiscalStatus] = useState("");
 
+  // Filtro de entidade (cliente/fornecedor/produto) dos 4 blocos `filterKind: "entity"`.
+  // Seleção vazia = comportamento padrão (traz tudo), como antes desse filtro existir.
+  const [entitySelection, setEntitySelection] = useState<EntitySelection[]>([]);
+  const [entityQuery, setEntityQuery] = useState("");
+  const entityIds = useMemo(() => entitySelection.map((item) => item.id), [entitySelection]);
+
+  // Busca na tabela já carregada — em cima do que está renderizado (mesma
+  // coluna que o operador vê), não da linha crua: os 12 relatórios têm
+  // colunas diferentes entre si, então filtrar aqui, uma vez, no componente
+  // que já monta a tabela genérica (`ReportTable`), evita repetir a mesma
+  // lógica em cada um dos `build*Table`.
+  const [tableSearch, setTableSearch] = useState("");
+
   const [asyncTable, setAsyncTable] = useState<ReportTable | null>(null);
   const [asyncLoading, setAsyncLoading] = useState(false);
   const [asyncError, setAsyncError] = useState<string | null>(null);
 
   const { entries: financeEntries } = useFinancialEntriesData(currentBranchId);
+  // Carregado sempre (não só quando um relatório "product" está aberto): mesmo
+  // padrão do `ProductPickerPanel`, que também busca a lista inteira da filial
+  // e filtra em JS — não existe hoje uma busca de produto por servidor.
+  const { products: allProducts } = useProductsData(currentBranchId);
 
   useEffect(() => {
     openWindow({ id: "relatorios", label: "Relatórios", path: "/relatorios", icon: ReportsIcon });
@@ -372,6 +417,9 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (active) setRange(defaultRangeFor(active.filterKind));
+    setEntitySelection([]);
+    setEntityQuery("");
+    setTableSearch("");
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -383,7 +431,7 @@ export default function ReportsPage() {
     }
     setAsyncLoading(true);
     setAsyncError(null);
-    buildAsyncReportTable(active.id, currentBranchId, range, { model: fiscalModel, status: fiscalStatus })
+    buildAsyncReportTable(active.id, currentBranchId, range, { model: fiscalModel, status: fiscalStatus }, entityIds)
       .then((table) => {
         if (!cancelled) setAsyncTable(table);
       })
@@ -396,7 +444,7 @@ export default function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [active, currentBranchId, range, fiscalModel, fiscalStatus]);
+  }, [active, currentBranchId, range, fiscalModel, fiscalStatus, entityIds]);
 
   const table: ReportTable | null = useMemo(() => {
     if (!active) return null;
@@ -409,6 +457,16 @@ export default function ReportsPage() {
     () => (table?.rows ?? []).map((row, index) => ({ ...row, __reportRowId: String(index) })),
     [table],
   );
+
+  /** Linhas depois da busca — compara contra o texto de cada coluna já formatado (o que o operador vê), não os valores crus da linha. */
+  const visibleRows = useMemo(() => {
+    const term = normalizeSearchText(tableSearch.trim());
+    if (!term) return rowsWithId;
+    const columns = table?.columns ?? [];
+    return rowsWithId.filter((row) =>
+      columns.some((column) => normalizeSearchText(String(column.render(row))).includes(term)),
+    );
+  }, [rowsWithId, table, tableSearch]);
 
   const sourceViewAllowed = active ? hasPermission(active.sourceModuleId, "view") : true;
 
@@ -491,6 +549,75 @@ export default function ReportsPage() {
           )}
         </div>
 
+        {active.filterKind === "entity" && active.entityKind && (
+          <div className="reports-detail__entity-filter">
+            {active.entityKind === "contact" ? (
+              <SearchCombobox<Contact>
+                id="report-entity-contact"
+                label={active.id === "compras-por-fornecedor" ? "Fornecedor" : "Cliente"}
+                placeholder="Digite o nome ou o documento para filtrar..."
+                value={entityQuery}
+                onChange={setEntityQuery}
+                fetchItems={(query) =>
+                  fetchContactsByKind(active.id === "compras-por-fornecedor" ? "fornecedores" : "clientes", query)
+                }
+                getKey={(c) => c.id}
+                renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+                onSelect={(c) => {
+                  setEntitySelection((current) =>
+                    current.some((item) => item.id === c.id) ? current : [...current, { id: c.id, label: c.name }],
+                  );
+                  setEntityQuery("");
+                }}
+                closeOnSelect={false}
+                openAbove
+                hint={entitySelection.length === 0 ? "Nenhum selecionado: mostra todos no período." : undefined}
+              />
+            ) : (
+              <SearchCombobox<Product>
+                id="report-entity-product"
+                label="Produto"
+                placeholder="Digite o código ou a descrição para filtrar..."
+                value={entityQuery}
+                onChange={setEntityQuery}
+                fetchItems={(query) => searchLocalProducts(allProducts, query)}
+                getKey={(p) => p.id}
+                renderItem={(p) => ({ primary: p.description, secondary: p.code })}
+                onSelect={(p) => {
+                  setEntitySelection((current) =>
+                    current.some((item) => item.id === p.id) ? current : [...current, { id: p.id, label: p.description }],
+                  );
+                  setEntityQuery("");
+                }}
+                closeOnSelect={false}
+                openAbove
+                hint={entitySelection.length === 0 ? "Nenhum selecionado: mostra todos no período." : undefined}
+              />
+            )}
+
+            {entitySelection.length > 0 && (
+              <div className="reports-detail__chips">
+                {entitySelection.map((item) => (
+                  <span key={item.id} className="reports-detail__chip">
+                    {item.label}
+                    <button
+                      type="button"
+                      className="reports-detail__chip-remove"
+                      onClick={() => setEntitySelection((current) => current.filter((i) => i.id !== item.id))}
+                      aria-label={`Remover ${item.label} do filtro`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <button type="button" className="reports-detail__chip-clear" onClick={() => setEntitySelection([])}>
+                  Limpar seleção
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {!sourceViewAllowed && (
           <p className="reports-detail__warning">
             Você não tem permissão de visualização em "{active.sourceModuleId}" — este relatório fica vazio até essa
@@ -501,10 +628,21 @@ export default function ReportsPage() {
         {asyncError && <p className="reports-detail__error">{asyncError}</p>}
         {asyncLoading && <p className="reports-detail__loading">Carregando…</p>}
 
+        <div className="reports-detail__table-search">
+          <FormField
+            id="report-table-search"
+            label="Buscar na tabela"
+            type="text"
+            value={tableSearch}
+            onChange={setTableSearch}
+            hint="Filtra as linhas mostradas abaixo por qualquer coluna."
+          />
+        </div>
+
         <RegistryLayout variant="single">
           <RegistryTable
             columns={table?.columns ?? []}
-            rows={rowsWithId}
+            rows={visibleRows}
             getRowId={(row) => row.__reportRowId as string}
             selectedId={null}
             onSelect={() => {}}

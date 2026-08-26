@@ -55,14 +55,20 @@ export type SalesByContactRow = {
   totalAmount: number;
 };
 
-export async function fetchSalesByContact(branchId: string, range: DateRange): Promise<SalesByContactRow[]> {
+export async function fetchSalesByContact(
+  branchId: string,
+  range: DateRange,
+  contactIds: string[] = [],
+): Promise<SalesByContactRow[]> {
   const client = assertSupabase();
-  const { data, error } = await client
+  let query = client
     .from("report_sales_by_contact_day")
     .select("contact_id, contact_name, sale_date, sale_count, total_amount")
     .eq("branch_id", branchId)
     .gte("sale_date", range.from)
     .lte("sale_date", range.to);
+  if (contactIds.length > 0) query = query.in("contact_id", contactIds);
+  const { data, error } = await query;
   if (error) throw error;
 
   const byContact = new Map<string, SalesByContactRow>();
@@ -73,7 +79,7 @@ export async function fetchSalesByContact(branchId: string, range: DateRange): P
       // RLS de `contacts` é separada da de `sales` — sem permissão em
       // Clientes e Fornecedores, `contact_name` chega nulo mesmo com o
       // `contact_id` presente (camada 2, mesmo espírito do bloco Financeiro).
-      contactName: row.contact_id ? (row.contact_name ?? "Cliente sem permissão de leitura") : "Sem cliente identificado",
+      contactName: row.contact_id ? (row.contact_name ?? "Cliente sem permissão de leitura") : "Consumidor final",
       saleCount: 0,
       totalAmount: 0,
     };
@@ -93,14 +99,20 @@ export type SaleItemsByProductRow = {
   totalAmount: number;
 };
 
-export async function fetchSaleItemsByProduct(branchId: string, range: DateRange): Promise<SaleItemsByProductRow[]> {
+export async function fetchSaleItemsByProduct(
+  branchId: string,
+  range: DateRange,
+  productIds: string[] = [],
+): Promise<SaleItemsByProductRow[]> {
   const client = assertSupabase();
-  const { data, error } = await client
+  let query = client
     .from("report_sale_items_by_product_day")
     .select("product_id, product_code, product_description, sale_date, quantity, total_amount")
     .eq("branch_id", branchId)
     .gte("sale_date", range.from)
     .lte("sale_date", range.to);
+  if (productIds.length > 0) query = query.in("product_id", productIds);
+  const { data, error } = await query;
   if (error) throw error;
 
   const byProduct = new Map<string, SaleItemsByProductRow>();
@@ -128,14 +140,20 @@ export type PurchasesByContactRow = {
   totalAmount: number;
 };
 
-export async function fetchPurchasesByContact(branchId: string, range: DateRange): Promise<PurchasesByContactRow[]> {
+export async function fetchPurchasesByContact(
+  branchId: string,
+  range: DateRange,
+  contactIds: string[] = [],
+): Promise<PurchasesByContactRow[]> {
   const client = assertSupabase();
-  const { data, error } = await client
+  let query = client
     .from("report_purchases_by_contact_day")
     .select("contact_id, contact_name, purchase_date, purchase_count, total_amount")
     .eq("branch_id", branchId)
     .gte("purchase_date", range.from)
     .lte("purchase_date", range.to);
+  if (contactIds.length > 0) query = query.in("contact_id", contactIds);
+  const { data, error } = await query;
   if (error) throw error;
 
   const byContact = new Map<string, PurchasesByContactRow>();
@@ -171,14 +189,17 @@ export type PurchaseItemsByProductRow = {
 export async function fetchPurchaseItemsByProduct(
   branchId: string,
   range: DateRange,
+  productIds: string[] = [],
 ): Promise<PurchaseItemsByProductRow[]> {
   const client = assertSupabase();
-  const { data, error } = await client
+  let query = client
     .from("report_purchase_items_by_product_day")
     .select("product_id, product_code, product_description, purchase_date, quantity, total_amount, cost_amount")
     .eq("branch_id", branchId)
     .gte("purchase_date", range.from)
     .lte("purchase_date", range.to);
+  if (productIds.length > 0) query = query.in("product_id", productIds);
+  const { data, error } = await query;
   if (error) throw error;
 
   const byProduct = new Map<string, { row: PurchaseItemsByProductRow; costAmount: number }>();

@@ -39,6 +39,21 @@ type SearchComboboxProps<T> = {
    * ja esta dito de outro jeito (no PDV, pelo placeholder do campo).
    */
   hideLabel?: boolean;
+  /**
+   * `false` mantém a lista aberta depois de escolher um item, em vez de
+   * fechar como de costume — para quem usa este campo como seletor múltiplo
+   * (escolhe vários seguidos sem reabrir a lista a cada um). Segue `true`
+   * por padrão, o comportamento de sempre: os demais campos de busca do
+   * sistema escolhem um item e fecham.
+   */
+  closeOnSelect?: boolean;
+  /**
+   * Força a lista a abrir para cima, ignorando o cálculo automático de
+   * espaço (ver `MIN_HEIGHT_BELOW` abaixo). Para campos que sabidamente têm
+   * pouco espaço embaixo por causa do que vem depois na tela (ex.: os chips
+   * do seletor múltiplo), não por falta de espaço na viewport.
+   */
+  openAbove?: boolean;
 };
 
 /** Mesmo tempo do `LookupModal`: uma consulta por pausa de digitação, não por tecla. */
@@ -78,6 +93,8 @@ export default function SearchCombobox<T>({
   createNewLabel = "Cadastrar novo",
   className,
   hideLabel = false,
+  closeOnSelect = true,
+  openAbove = false,
 }: SearchComboboxProps<T>) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<T[]>([]);
@@ -218,7 +235,15 @@ export default function SearchCombobox<T>({
     if (index < 0) return;
     if (index < items.length) {
       onSelect(items[index]);
-      close();
+      if (closeOnSelect) {
+        close();
+      } else {
+        // Seletor múltiplo: a lista continua aberta para a próxima escolha.
+        // O clique na opção não tira o foco do campo (`onMouseDown` abaixo
+        // previne isso), então só falta reiniciar o destaque do teclado.
+        setActiveIndex(-1);
+        inputRef.current?.focus();
+      }
       return;
     }
     if (showCreateNew) startCreateNew();
@@ -270,7 +295,7 @@ export default function SearchCombobox<T>({
     if (!open || !anchor) return null;
 
     const spaceBelow = window.innerHeight - anchor.bottom;
-    const flip = spaceBelow < MIN_HEIGHT_BELOW && anchor.top > spaceBelow;
+    const flip = openAbove || (spaceBelow < MIN_HEIGHT_BELOW && anchor.top > spaceBelow);
     const available = (flip ? anchor.top : spaceBelow) - 16;
 
     return createPortal(

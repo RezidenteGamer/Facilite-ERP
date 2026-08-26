@@ -77,6 +77,82 @@
   color: var(--text-primary);
 }
 
+/* Filtro de entidade (cliente/fornecedor/produto) dos blocos "entity" — campo
+   de busca + chips do que já foi selecionado, abaixo da barra De/Até para não
+   disputar espaço com ela em telas estreitas. */
+.reports-detail__entity-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.reports-detail__entity-filter .form-field__label,
+.reports-detail__entity-filter .form-field__hint {
+  color: var(--text-primary);
+}
+
+.reports-detail__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reports-detail__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 6px 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reports-detail__chip-remove {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 50%;
+}
+
+.reports-detail__chip-remove:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.reports-detail__chip-clear {
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
+  padding: 4px 2px;
+}
+
+.reports-detail__chip-clear:hover {
+  opacity: 1;
+}
+
+/* Busca dentro da tabela já carregada — em todos os 12 relatórios, não só
+   nos "entity" (aquele filtro busca no banco por cliente/produto; este aqui
+   filtra em cima do que já veio, em qualquer coluna). */
+.reports-detail__table-search {
+  max-width: 320px;
+}
+
+.reports-detail__table-search .form-field__label,
+.reports-detail__table-search .form-field__hint {
+  color: var(--text-primary);
+}
+
 .reports-detail__warning {
   color: var(--amber, #e0a800);
   background: rgba(224, 168, 0, 0.12);
