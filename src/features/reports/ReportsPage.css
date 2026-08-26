@@ -14,9 +14,29 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 100%;
-  min-height: 0;
-  padding: 16px 20px;
+  /* `min-height: 100%`, não `height: 100%`: com `height` fixo, um relatório
+     com muitas linhas (mais alto que a viewport) estoura essa altura e, como
+     `overflow` aqui é o padrão (`visible`), o conteúdo que passa do limite
+     simplesmente atravessa o padding-bottom abaixo sem respeitá-lo — a folga
+     nunca aparecia, por mais que o padding crescesse. `min-height` mantém o
+     canvas preenchendo a tela em relatórios curtos (o motivo do 100% original)
+     sem capar os longos. (`.app-content`, o pai, não é flex container, então
+     o `min-height: 0` que existia aqui antes não fazia nada — não é um caso
+     de flex item precisando encolher.) */
+  min-height: 100%;
+  /* Padding-bottom bem maior que o resto da tela (16px): o rodapé só entra
+     em jogo aqui porque `.reports-detail .registry`, logo abaixo, desliga a
+     rolagem interna do RegistryTable e deixa a tabela (agora terminando nos
+     botões "Exportar EXCEL"/"Imprimir/PDF") crescer até a altura natural,
+     e é `.app-content--fit` quem rola a página inteira. Isso é exatamente o
+     caso que tokens.css chama de "tela que rola normalmente" — só que essa
+     tela usa `fillViewport` (por causa do cabeçalho travado), então herda
+     `--content-bottom-clearance-fit` (108px, calibrado para o OUTRO caso:
+     lista interna rolando, onde só a borda do painel precisa de folga). Os
+     64px extras aqui cobrem essa diferença, para o rodapé da tabela não
+     ficar embaixo da aba Suporte (~84px de altura, ver .floating-tab--support
+     em FloatingTabs.css) quando a rolagem chega ao fim. */
+  padding: 16px 20px 80px;
 }
 
 /* Cabeçalho e filtros na mesma linha (quando cabem) — em telas baixas,
@@ -191,4 +211,27 @@
   flex: none;
   min-height: 0;
   overflow: visible;
+}
+
+/* Impressão/PDF (botão "Imprimir/PDF", que só chama window.print()) — some
+   com a moldura do sistema (cabeçalho, abas flutuantes de Voltar/Suporte,
+   dock de janelas) e com os controles que não fazem sentido no papel
+   (voltar, filtros, busca da tabela, os próprios botões de rodapé),
+   deixando só o título do relatório e a tabela. Escopado com :has() a
+   `.reports-detail` (em vez de mirar `.app-header` direto) para não vazar
+   para outras telas que carreguem este CSS no mesmo documento. */
+@media print {
+  body:has(.reports-detail) .app-header,
+  body:has(.reports-detail) .floating-tab,
+  body:has(.reports-detail) .window-dock {
+    display: none !important;
+  }
+
+  .reports-detail__back,
+  .reports-detail__filters,
+  .reports-detail__entity-filter,
+  .reports-detail__table-search,
+  .registry-table__footer {
+    display: none !important;
+  }
 }
