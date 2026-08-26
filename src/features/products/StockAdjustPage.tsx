@@ -66,6 +66,23 @@ function validateAdjustmentRow(values: Record<string, string>): string | null {
   return null;
 }
 
+/**
+ * Limpa "Saldo contado" ao digitar em "Alteração" e vice-versa — os dois são
+ * jeitos alternativos de informar a mesma coisa, nunca os dois juntos. A
+ * validação de submit (`validateAdjustmentRow`) continua sendo a rede de
+ * segurança; isto é só a conveniência de não deixar o outro campo com um
+ * valor que não vai ser usado.
+ */
+function clearOppositeQuantityField(
+  _rowId: string,
+  accessorKey: string,
+  value: string,
+): Record<string, string> | void {
+  if (!value.trim()) return;
+  if (accessorKey === "change") return { countedBalance: "" };
+  if (accessorKey === "countedBalance") return { change: "" };
+}
+
 type ProductBatchPickerProps = {
   branchId: string | null;
   onPick: (item: BatchItem) => void;
@@ -295,6 +312,7 @@ export default function StockAdjustPage() {
           emptyHint="Clique nos produtos ao lado — ou arraste-os para cá — para montar a lista de contagem. Em cada linha, informe a alteração (+/-) ou o saldo contado."
           submitLabel="Confirmar ajustes"
           validateRow={validateAdjustmentRow}
+          onFieldChange={clearOppositeQuantityField}
           renderItemPicker={(onPick) => (
             <ProductBatchPicker branchId={currentBranchId} onPick={onPick} />
           )}

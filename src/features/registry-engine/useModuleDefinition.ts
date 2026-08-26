@@ -57,6 +57,7 @@ export function useModuleDefinition(moduleId: string) {
         fieldKey: field.field_key,
         accessorKey: snakeToCamel(field.field_key),
         label: field.label,
+        hint: field.hint,
         dataType: field.data_type as ModuleFieldDefinition["dataType"],
         isRequired: field.is_required,
         sortOrder: field.sort_order,

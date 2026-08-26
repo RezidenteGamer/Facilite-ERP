@@ -75,6 +75,21 @@ type RegistryBatchFormModalProps = {
    * motor já cobre. Retorna a mensagem de erro ou `null`.
    */
   validateRow?: (values: Record<string, string>) => string | null;
+  /**
+   * Reação específica do módulo a uma digitação numa linha, além do valor em
+   * si — ex.: dois campos mutuamente exclusivos, onde preencher um deve
+   * limpar o outro. Chamado depois de aplicar o valor digitado, com os
+   * valores da linha já atualizados. Se devolver um objeto, essas chaves são
+   * mescladas por cima dos valores da linha; devolver `undefined`/`void` não
+   * muda nada além do valor já digitado. Nenhuma lógica de campo específica
+   * mora aqui dentro — o motor só chama a função que o módulo passar.
+   */
+  onFieldChange?: (
+    rowId: string,
+    accessorKey: string,
+    value: string,
+    currentRowValues: Record<string, string>,
+  ) => Record<string, string> | void;
   onSubmit: (rows: BatchRow[]) => Promise<void>;
   onCancel: () => void;
 };
@@ -129,6 +144,7 @@ export default function RegistryBatchFormModal({
   emptyHint = "Escolha os itens ao lado para montar o lote.",
   submitLabel = "Confirmar lote",
   validateRow,
+  onFieldChange,
   onSubmit,
   onCancel,
 }: RegistryBatchFormModalProps) {
@@ -176,9 +192,12 @@ export default function RegistryBatchFormModal({
 
   function setRowValue(itemId: string, accessorKey: string, value: string) {
     setRows((current) =>
-      current.map((row) =>
-        row.item.id === itemId ? { ...row, values: { ...row.values, [accessorKey]: value } } : row,
-      ),
+      current.map((row) => {
+        if (row.item.id !== itemId) return row;
+        const values = { ...row.values, [accessorKey]: value };
+        const extra = onFieldChange?.(itemId, accessorKey, value, values);
+        return { ...row, values: extra ? { ...values, ...extra } : values };
+      }),
     );
   }
 
@@ -274,6 +293,7 @@ export default function RegistryBatchFormModal({
                               label={field.isRequired ? `${field.label} *` : field.label}
                               type={field.dataType === "date" ? "date" : "text"}
                               value={row.values[field.accessorKey] ?? ""}
+                              hint={field.hint ?? undefined}
                               disabled={submitting}
                               onChange={(value) => setRowValue(row.item.id, field.accessorKey, value)}
                             />

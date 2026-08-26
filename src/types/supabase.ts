@@ -724,6 +724,7 @@ export type Database = {
         Row: {
           data_type: string
           field_key: string
+          hint: string | null
           id: string
           is_required: boolean
           label: string
@@ -739,6 +740,7 @@ export type Database = {
         Insert: {
           data_type?: string
           field_key: string
+          hint?: string | null
           id?: string
           is_required?: boolean
           label: string
@@ -754,6 +756,7 @@ export type Database = {
         Update: {
           data_type?: string
           field_key?: string
+          hint?: string | null
           id?: string
           is_required?: boolean
           label?: string

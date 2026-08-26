@@ -10,6 +10,8 @@ export type ModuleFieldDefinition = {
   /** Chave equivalente em camelCase, usada para ler o valor no objeto JS. */
   accessorKey: string;
   label: string;
+  /** Texto curto de apoio abaixo do campo, exibido só onde o formulário optar por mostrá-lo. */
+  hint?: string | null;
   dataType: "text" | "date" | "boolean" | "phone" | "email";
   isRequired: boolean;
   sortOrder: number;
