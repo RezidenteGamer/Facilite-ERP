@@ -175,7 +175,7 @@ export async function fetchSaleForInvoice(saleId: string): Promise<SaleForInvoic
   const { data, error } = await client
     .from("sales")
     .select(
-      `code, issue_date, subtotal_amount, total_amount, discount_amount, freight_amount,
+      `code, issue_date, subtotal_amount, total_amount, discount_amount, freight_amount, operation_type,
        branch:branches(cnpj, name, inscricao_estadual, regime_tributario, logradouro, numero, bairro, municipio, uf, cep),
        contact:contacts(name, document, inscricao_estadual, indicador_ie, logradouro, numero, bairro, municipio, uf, cep, phone),
        items:sale_items(quantity, unit_price, discount_amount, total_amount,
@@ -195,6 +195,7 @@ export async function fetchSaleForInvoice(saleId: string): Promise<SaleForInvoic
     totalAmount: data.total_amount,
     discountAmount: data.discount_amount,
     freightAmount: data.freight_amount,
+    operationType: data.operation_type ?? undefined,
     branch: {
       cnpj: data.branch.cnpj,
       name: data.branch.name,

@@ -111,6 +111,8 @@ export type SaleForInvoice = {
   contact: SaleForInvoiceContact | null;
   items: SaleForInvoiceItem[];
   payments: SaleForInvoicePayment[];
+  /** Texto livre digitado pelo usuário em "Tipo de operação" — vai literal na `natureza_operacao` da nota. Não usar para casar regra fiscal. */
+  operationType?: string;
 };
 
 export type BuildPayloadResult =
@@ -298,7 +300,7 @@ export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[
   const localDestino = branch.uf === contact.uf ? 1 : 2;
 
   const payload: NfePayload = {
-    natureza_operacao: "Venda de mercadoria",
+    natureza_operacao: sale.operationType?.trim() || "Venda de mercadoria",
     data_emissao: new Date(`${sale.issueDate}T12:00:00-03:00`).toISOString(),
     tipo_documento: 1,
     finalidade_emissao: 1,
@@ -431,7 +433,7 @@ export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow
   const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, pisValorTotal, cofinsValorTotal } = resolved.data;
 
   const payload: NfePayload = {
-    natureza_operacao: "Venda de mercadoria",
+    natureza_operacao: sale.operationType?.trim() || "Venda de mercadoria",
     data_emissao: new Date(`${sale.issueDate}T12:00:00-03:00`).toISOString(),
     tipo_documento: 1,
     finalidade_emissao: 1,
