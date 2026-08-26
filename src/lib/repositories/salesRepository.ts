@@ -67,6 +67,14 @@ export type CreateSaleInput = {
   discountAmount?: number;
   items: SaleItemInput[];
   payments: SalePaymentInput[];
+  /**
+   * Vencimento da 1ª parcela e intervalo entre parcelas, aplicados pela RPC
+   * às formas parceladas (`credito`/`boleto`). Opcionais de propósito: quando
+   * não vêm — PDV, venda à vista, qualquer chamador antigo — a RPC mantém o
+   * padrão dela de 30 dias para o primeiro vencimento e 30 de intervalo.
+   */
+  firstDueDate?: string;
+  intervalDays?: number;
 };
 
 export function toPayload(input: CreateSaleInput) {
@@ -94,6 +102,8 @@ export function toPayload(input: CreateSaleInput) {
       amount: payment.amount,
       installments: payment.installments ?? 1,
     })),
+    first_due_date: input.firstDueDate || null,
+    interval_days: input.intervalDays ?? null,
   };
 }
 

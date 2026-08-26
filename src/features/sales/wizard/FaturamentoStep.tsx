@@ -1,9 +1,17 @@
+import FormField from "../../../components/form/FormField";
 import { AlertIcon, CheckIcon } from "../../../components/icons";
 import { formatMoney, SALE_PAYMENT_METHOD_LABEL, type SalePaymentMethod } from "../sales";
 import type { useSaleDraft } from "../useSaleDraft";
 import "../SalePage.css";
 
 const PAYMENT_METHODS: SalePaymentMethod[] = ["dinheiro", "debito", "credito", "pix", "boleto", "outro"];
+
+/**
+ * As formas que a RPC `create_sale` recebe depois, em N parcelas — as duas
+ * ganham o campo de nº de parcelas. Boleto só não tinha por omissão da tela:
+ * o banco sempre soube parcelá-lo igual ao crédito.
+ */
+const INSTALLMENT_METHODS: SalePaymentMethod[] = ["credito", "boleto"];
 
 type FaturamentoStepProps = {
   draft: ReturnType<typeof useSaleDraft>;
@@ -66,14 +74,15 @@ export default function FaturamentoStep({ draft }: FaturamentoStepProps) {
                   </select>
                   <input
                     className="sale__cart-line-input"
-                    type="number"
-                    min={0}
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     aria-label={`Valor do pagamento ${index + 1}`}
                     value={payment.amount}
-                    onChange={(e) => draft.updatePayment(payment.lineId, { amount: Number(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      draft.updatePayment(payment.lineId, { amount: Number(e.target.value.replace(",", ".")) || 0 })
+                    }
                   />
-                  {payment.method === "credito" && (
+                  {INSTALLMENT_METHODS.includes(payment.method) && (
                     <input
                       className="sale__cart-line-input sale__cart-line-input--narrow"
                       type="number"
@@ -99,6 +108,33 @@ export default function FaturamentoStep({ draft }: FaturamentoStepProps) {
             </>
           )}
         </div>
+
+        {/* Só faz sentido para venda parcelada: à vista nasce baixada na hora,
+            não há vencimento a agendar. Espelha os mesmos dois campos de
+            Compras (`PurchaseFormPage.tsx`), que já resolveu este problema. */}
+        {draft.hasInstallmentPayment && (
+          <div className="sale__who">
+            <FormField
+              id="venda-vencimento"
+              label="Vencimento da 1ª parcela"
+              type="date"
+              value={draft.header.firstDueDate}
+              onChange={(v) => draft.setField("firstDueDate", v)}
+              hint="Sugerido em 30 dias — ajuste pelo prazo combinado com o cliente."
+            />
+            <label className="form-field">
+              <span className="form-field__label">Intervalo entre parcelas (dias)</span>
+              <input
+                className="sale__cart-line-input"
+                type="number"
+                min={1}
+                step="1"
+                value={draft.header.intervalDays}
+                onChange={(e) => draft.setField("intervalDays", Number(e.target.value) || 1)}
+              />
+            </label>
+          </div>
+        )}
 
         {draft.lastRemoved?.kind === "payment" && (
           <div className="sale__undo" role="status">

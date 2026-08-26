@@ -19,7 +19,19 @@ export type SaleHeaderForm = {
   centroCustos: string;
   dataEmissao: string;
   dataSaida: string;
+  /** Vencimento da 1ª parcela e intervalo entre elas — só usados quando há pagamento parcelado (crédito/boleto). */
+  firstDueDate: string;
+  intervalDays: number;
 };
+
+function addDaysIso(daysFromToday: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromToday);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Formas que a RPC trata como "recebe depois", com N parcelas — ver `create_sale`. */
+const INSTALLMENT_METHODS: SalePaymentMethod[] = ["credito", "boleto"];
 
 /**
  * O vendedor nasce preenchido com quem está logado — na prática é quase
@@ -42,6 +54,8 @@ function buildHeaderInicial(defaultSeller?: SaleSeller | null): SaleHeaderForm {
     centroCustos: "",
     dataEmissao: new Date().toISOString().slice(0, 10),
     dataSaida: "",
+    firstDueDate: addDaysIso(30),
+    intervalDays: 30,
   };
 }
 
@@ -355,7 +369,26 @@ export function useSaleDraft(
   const paymentsTotal = useMemo(() => payments.reduce((sum, p) => sum + p.amount, 0), [payments]);
   const paymentsMatch = cart.length > 0 && Math.abs(paymentsTotal - total) < 0.01;
 
-  const canConfirm = headerValid && cart.length > 0 && payments.length > 0 && paymentsMatch && !submitting;
+  /**
+   * Só uma venda com alguma forma parcelada (crédito/boleto em mais de uma
+   * vez) precisa de vencimento e intervalo — venda à vista nasce baixada na
+   * hora e não tem o que agendar. É esta condição que mostra os dois campos
+   * no Faturamento e que decide se eles vão no payload da RPC.
+   */
+  const hasInstallmentPayment = useMemo(
+    () => payments.some((p) => INSTALLMENT_METHODS.includes(p.method) && p.installments > 1),
+    [payments],
+  );
+
+  const canConfirm =
+    headerValid &&
+    cart.length > 0 &&
+    payments.length > 0 &&
+    paymentsMatch &&
+    // O campo de data pode ser apagado; sem ele a RPC voltaria para os 30
+    // dias padrão em silêncio, escondendo do operador o que foi gravado.
+    (!hasInstallmentPayment || header.firstDueDate.trim() !== "") &&
+    !submitting;
 
   async function confirmSale(options?: { emitirNota?: boolean }) {
     if (!branchId) {
@@ -388,6 +421,11 @@ export function useSaleDraft(
           discountAmount: line.discountAmount,
         })),
         payments: payments.map((p) => ({ method: p.method, amount: p.amount, installments: p.installments })),
+        // Omitidos quando não há parcelamento: a RPC mantém o padrão dela
+        // (30 dias / 30 dias) para quem não manda esses campos — é o caso do
+        // PDV e de qualquer venda à vista.
+        firstDueDate: hasInstallmentPayment ? header.firstDueDate : undefined,
+        intervalDays: hasInstallmentPayment ? header.intervalDays : undefined,
       };
       const sale = await createSale(input);
       setConfirmedSale(sale);
@@ -442,6 +480,7 @@ export function useSaleDraft(
     total,
     paymentsTotal,
     paymentsMatch,
+    hasInstallmentPayment,
     canConfirm,
     submitting,
     submitError,
