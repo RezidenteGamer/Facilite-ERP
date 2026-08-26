@@ -13,10 +13,22 @@
 .reports-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   height: 100%;
   min-height: 0;
-  padding: 24px;
+  padding: 16px 20px;
+}
+
+/* Cabeçalho e filtros na mesma linha (quando cabem) — em telas baixas,
+   isso devolve a maior parte da altura desses blocos para a tabela, que
+   é o conteúdo principal da tela. Quebra para duas linhas em telas
+   estreitas via flex-wrap, sem cortar nenhum controle. */
+.reports-detail__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .reports-detail__header {
@@ -28,7 +40,7 @@
 .reports-detail__back {
   border: 0;
   background: none;
-  color: var(--white);
+  color: var(--accent);
   font-family: var(--font-ui);
   font-size: 14px;
   font-weight: 600;
@@ -38,11 +50,11 @@
 }
 
 .reports-detail__back:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--accent-soft);
 }
 
 .reports-detail__title {
-  color: var(--white);
+  color: var(--text-primary);
   font-size: 20px;
   font-weight: 700;
   margin: 0;
@@ -53,6 +65,16 @@
   flex-wrap: wrap;
   gap: 16px;
   max-width: 480px;
+  margin-left: auto;
+}
+
+/* FormField (form/FormField.css) usa var(--white) fixo no rótulo/hint —
+   certo quando o campo fica sobre um painel azul, mas aqui os filtros
+   ficam direto sobre o canvas neutro (.app-content--blue), que no tema
+   claro é claro. Sem isso o rótulo "De"/"Até" fica quase invisível. */
+.reports-detail__filters .form-field__label,
+.reports-detail__filters .form-field__hint {
+  color: var(--text-primary);
 }
 
 .reports-detail__warning {
@@ -70,7 +92,27 @@
 }
 
 .reports-detail__loading {
-  color: var(--white);
+  color: var(--text-primary);
   opacity: 0.8;
   margin: 0;
+}
+
+/* RegistryTable normalmente rola por dentro (RegistryTable.css: cadeia de
+   flex:1 + min-height:0 + overflow-y:auto em __panel/__scroll/__rows), o
+   que é certo para telas com ações/ficha ao lado que precisam caber na
+   janela. Relatórios não tem essas colunas — aqui o pedido é o oposto:
+   mostrar todas as linhas de uma vez, sem scrollbar interna. As regras
+   abaixo, escopadas a esta tela, quebram essa cadeia: cada nível cresce
+   com o próprio conteúdo em vez de encolher, e quem rola (se precisar) é
+   a página inteira, via .app-content--fit (AppShell.css). */
+.reports-detail .registry {
+  height: auto;
+}
+
+.reports-detail .registry-table__panel,
+.reports-detail .registry-table__scroll,
+.reports-detail .registry-table__rows {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
 }

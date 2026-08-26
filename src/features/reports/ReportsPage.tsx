@@ -454,40 +454,42 @@ export default function ReportsPage() {
   return (
     <AppShell navItems={navItems} secondaryText="Relatórios" contentTone="blue" fillViewport onBack={() => setActiveId(null)}>
       <div className="reports-detail">
-        <div className="reports-detail__header">
-          <button type="button" className="reports-detail__back" onClick={() => setActiveId(null)}>
-            ← Voltar
-          </button>
-          <h2 className="reports-detail__title">{active.label}</h2>
+        <div className="reports-detail__toolbar">
+          <div className="reports-detail__header">
+            <button type="button" className="reports-detail__back" onClick={() => setActiveId(null)}>
+              ← Voltar
+            </button>
+            <h2 className="reports-detail__title">{active.label}</h2>
+          </div>
+
+          {(active.filterKind === "period" || active.filterKind === "entity") && (
+            <div className="reports-detail__filters">
+              <FormField id="report-from" label="De" type="date" value={range.from} onChange={(value) => setRange((r) => ({ ...r, from: value }))} />
+              <FormField id="report-to" label="Até" type="date" value={range.to} onChange={(value) => setRange((r) => ({ ...r, to: value }))} />
+            </div>
+          )}
+
+          {active.filterKind === "status" && (
+            <div className="reports-detail__filters">
+              <FormField
+                id="report-model"
+                label="Modelo"
+                type="select"
+                value={fiscalModel}
+                options={FISCAL_MODEL_OPTIONS}
+                onChange={setFiscalModel}
+              />
+              <FormField
+                id="report-status"
+                label="Status"
+                type="select"
+                value={fiscalStatus}
+                options={FISCAL_STATUS_OPTIONS}
+                onChange={setFiscalStatus}
+              />
+            </div>
+          )}
         </div>
-
-        {(active.filterKind === "period" || active.filterKind === "entity") && (
-          <div className="reports-detail__filters">
-            <FormField id="report-from" label="De" type="date" value={range.from} onChange={(value) => setRange((r) => ({ ...r, from: value }))} />
-            <FormField id="report-to" label="Até" type="date" value={range.to} onChange={(value) => setRange((r) => ({ ...r, to: value }))} />
-          </div>
-        )}
-
-        {active.filterKind === "status" && (
-          <div className="reports-detail__filters">
-            <FormField
-              id="report-model"
-              label="Modelo"
-              type="select"
-              value={fiscalModel}
-              options={FISCAL_MODEL_OPTIONS}
-              onChange={setFiscalModel}
-            />
-            <FormField
-              id="report-status"
-              label="Status"
-              type="select"
-              value={fiscalStatus}
-              options={FISCAL_STATUS_OPTIONS}
-              onChange={setFiscalStatus}
-            />
-          </div>
-        )}
 
         {!sourceViewAllowed && (
           <p className="reports-detail__warning">
