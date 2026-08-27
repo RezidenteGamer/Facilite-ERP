@@ -105,6 +105,68 @@ export default function SaleOrderPreviewModal({ saleOrderId, onClose }: SaleOrde
                 </div>
 
                 <p className="sale-order-preview-modal__total">Total do pedido: {formatOrderTotal(order.totalAmount)}</p>
+
+                <div className="sale-order-preview-modal__print" aria-hidden="true">
+                  <div className="sale-order-preview-modal__print-header">
+                    <span className="sale-order-preview-modal__print-brand">Facilite</span>
+                    <div className="sale-order-preview-modal__print-meta">
+                      <span>Orçamento {order.code}</span>
+                      <span>Emitido em {formatOrderDate(order.issueDate)}</span>
+                    </div>
+                  </div>
+
+                  <div className="sale-order-preview-modal__print-info">
+                    <div>
+                      <span className="sale-order-preview-modal__label">Cliente</span>
+                      <span>{order.contactName}</span>
+                    </div>
+                    <div>
+                      <span className="sale-order-preview-modal__label">Vendedor</span>
+                      <span>{order.sellerName}</span>
+                    </div>
+                    <div>
+                      <span className="sale-order-preview-modal__label">Forma de pagamento</span>
+                      <span>
+                        {SALE_PAYMENT_METHOD_LABEL[order.paymentMethod]} ({order.installments}x)
+                      </span>
+                    </div>
+                    <div>
+                      <span className="sale-order-preview-modal__label">Situação</span>
+                      <span>{SALE_ORDER_STATUS_LABEL[order.status]}</span>
+                    </div>
+                  </div>
+
+                  <table className="sale-order-preview-modal__print-table">
+                    <thead>
+                      <tr>
+                        <th>Produto</th>
+                        <th>Qtd.</th>
+                        <th>Preço unit.</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {order.items.map((item) => (
+                        <tr key={item.id}>
+                          <td>
+                            {item.productCode} — {item.productDescription}
+                          </td>
+                          <td>{item.quantity.toLocaleString("pt-BR", { maximumFractionDigits: 3 })}</td>
+                          <td>{formatOrderTotal(item.unitPrice)}</td>
+                          <td>{formatOrderTotal(item.totalAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <p className="sale-order-preview-modal__print-total">
+                    Total do pedido: {formatOrderTotal(order.totalAmount)}
+                  </p>
+
+                  <p className="sale-order-preview-modal__print-footer">
+                    Orçamento válido conforme condições combinadas.
+                  </p>
+                </div>
               </>
             )}
 
@@ -116,6 +178,15 @@ export default function SaleOrderPreviewModal({ saleOrderId, onClose }: SaleOrde
               >
                 Fechar
               </button>
+              {order && !loading && (
+                <button
+                  className="registry-form-modal__btn registry-form-modal__btn--confirm"
+                  type="button"
+                  onClick={() => window.print()}
+                >
+                  Imprimir orçamento
+                </button>
+              )}
             </div>
           </Dialog.Content>
         </Dialog.Overlay>

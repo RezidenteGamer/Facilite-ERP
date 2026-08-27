@@ -73,6 +73,124 @@
   text-align: right;
 }
 
+.sale-order-preview-modal__print {
+  display: none;
+}
+
+/* Impressão/PDF (botão "Imprimir orçamento" — window.print()). Mesmo
+   mecanismo do botão "Imprimir/PDF" de Relatórios (ver ReportsPage.css):
+   esconde a moldura do sistema e o chrome do modal, mostrando só o
+   documento de orçamento (bloco dedicado `__print`, não a área de tela). */
+@media print {
+  body:has(.sale-order-preview-modal) .app-header,
+  body:has(.sale-order-preview-modal) .floating-tab,
+  body:has(.sale-order-preview-modal) .window-dock {
+    display: none !important;
+  }
+
+  .registry-form-modal__overlay {
+    position: static;
+    display: block;
+    padding: 0;
+    background: none;
+  }
+
+  .sale-order-preview-modal {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    box-shadow: none;
+    background: none;
+    padding: 0;
+  }
+
+  .registry-form-modal__title,
+  .registry-form-modal__actions,
+  .sale-order-preview-modal__header,
+  .sale-order-preview-modal__lines,
+  .sale-order-preview-modal__total {
+    display: none !important;
+  }
+
+  .sale-order-preview-modal__print {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    color: #111;
+  }
+
+  .sale-order-preview-modal__print-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 2px solid #111;
+    padding-bottom: 10px;
+  }
+
+  .sale-order-preview-modal__print-brand {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+  }
+
+  .sale-order-preview-modal__print-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-size: 13px;
+  }
+
+  .sale-order-preview-modal__print-info {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 20px;
+    font-size: 13px;
+  }
+
+  .sale-order-preview-modal__print-info > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sale-order-preview-modal__print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .sale-order-preview-modal__print-table th,
+  .sale-order-preview-modal__print-table td {
+    border: 1px solid #ccc;
+    padding: 6px 8px;
+    text-align: left;
+  }
+
+  .sale-order-preview-modal__print-table th:nth-child(2),
+  .sale-order-preview-modal__print-table th:nth-child(3),
+  .sale-order-preview-modal__print-table th:nth-child(4),
+  .sale-order-preview-modal__print-table td:nth-child(2),
+  .sale-order-preview-modal__print-table td:nth-child(3),
+  .sale-order-preview-modal__print-table td:nth-child(4) {
+    text-align: right;
+  }
+
+  .sale-order-preview-modal__print-total {
+    margin: 0;
+    text-align: right;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .sale-order-preview-modal__print-footer {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: #555;
+    border-top: 1px solid #ccc;
+    padding-top: 8px;
+  }
+}
+
 @media (max-width: 760px) {
   .sale-order-preview-modal__header {
     grid-template-columns: 1fr;
