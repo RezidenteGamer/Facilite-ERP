@@ -169,7 +169,10 @@ export async function saveModuleSituation(
   input: SituationInput,
 ): Promise<string> {
   const { data, error } = await assertSupabase().rpc("save_module_situation", {
-    p_id: input.id ?? null,
+    // Os tipos gerados marcam este parâmetro como `string` não-nulo, mas a RPC
+    // aceita null (cria em vez de atualizar) — o gerador de tipos não capta
+    // parâmetros opcionais/nuláveis do Postgres.
+    p_id: (input.id ?? null) as string,
     p_module_id: moduleId,
     p_label: input.label,
     p_sort_order: input.sortOrder,
@@ -220,7 +223,7 @@ export async function saveModuleTransition(
   input: TransitionInput,
 ): Promise<string> {
   const { data, error } = await assertSupabase().rpc("save_module_transition", {
-    p_id: input.id ?? null,
+    p_id: (input.id ?? null) as string,
     p_module_id: moduleId,
     p_from_situation_id: input.fromSituationId,
     p_to_situation_id: input.toSituationId,
@@ -252,14 +255,14 @@ export async function saveTransitionAction(
   input: TransitionActionInput,
 ): Promise<string> {
   const { data, error } = await assertSupabase().rpc("save_module_transition_action", {
-    p_id: input.id ?? null,
+    p_id: (input.id ?? null) as string,
     p_transition_id: transitionId,
     p_target_kind: input.targetKind,
     p_target_field_key: input.targetFieldKey,
-    p_via_reference_field_key: input.viaReferenceFieldKey,
+    p_via_reference_field_key: input.viaReferenceFieldKey as string,
     p_value_kind: input.valueKind,
-    p_value: input.value,
-    p_source_field_key: input.sourceFieldKey,
+    p_value: input.value as string,
+    p_source_field_key: input.sourceFieldKey as string,
     p_sort_order: input.sortOrder,
   });
   if (error) throw error;

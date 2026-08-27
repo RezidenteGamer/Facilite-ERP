@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useOpenWindows } from "../../components/openWindows";
 import WizardProgressBar from "./wizard/WizardProgressBar";
 import ClienteStep from "./wizard/ClienteStep";
 import ProdutosStep from "./wizard/ProdutosStep";
@@ -19,12 +20,34 @@ type SaleWizardProps = {
   branchId: string | null;
   canCreate: boolean;
   onConfirmed: (intent: SaleIntent) => void;
+  /** Mesmo id passado a `openWindow`; sem ele o wizard não guarda a etapa. */
+  windowId?: string | null;
 };
 
+/** Slot da etapa dentro do estado da janela — irmão do slot do rascunho (`useSaleDraft`). */
+const STEP_SLOT = "sale-wizard-step";
+
+type PersistedStep = { currentStep: StepId; visitedSteps: Set<StepId> };
+
 /** Casca do wizard: dona da etapa atual, decide quando dá pra avançar, monta a barra de progresso + a etapa ativa. */
-export default function SaleWizard({ draft, branchId, canCreate, onConfirmed }: SaleWizardProps) {
-  const [currentStep, setCurrentStep] = useState<StepId>("cliente");
-  const [visitedSteps, setVisitedSteps] = useState<Set<StepId>>(() => new Set(["cliente"]));
+export default function SaleWizard({ draft, branchId, canCreate, onConfirmed, windowId }: SaleWizardProps) {
+  /* Onde o operador parou é parte do rascunho tanto quanto o carrinho:
+     voltar da janela de Produtos e cair de novo na etapa "Cliente", com o
+     carrinho cheio, seria só um jeito diferente de perder o lugar. Slot
+     separado do rascunho porque quem grava é outro componente — ver o
+     porquê dos slots em `openWindows.tsx`. */
+  const { getWindowState, setWindowState } = useOpenWindows();
+  const [restored] = useState(() => (windowId ? getWindowState<PersistedStep>(windowId, STEP_SLOT) : undefined));
+
+  const [currentStep, setCurrentStep] = useState<StepId>(() => restored?.currentStep ?? "cliente");
+  const [visitedSteps, setVisitedSteps] = useState<Set<StepId>>(
+    () => restored?.visitedSteps ?? new Set(["cliente"]),
+  );
+
+  useEffect(() => {
+    if (!windowId) return;
+    setWindowState<PersistedStep>(windowId, STEP_SLOT, { currentStep, visitedSteps });
+  }, [windowId, currentStep, visitedSteps, setWindowState]);
 
   const currentIndex = WIZARD_STEPS.findIndex((step) => step.id === currentStep);
 
