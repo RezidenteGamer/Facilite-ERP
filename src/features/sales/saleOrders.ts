@@ -42,7 +42,15 @@ export type SaleOrder = {
   createdAt?: string;
 };
 
-/** Formato monetário do sistema (pt-BR, sem símbolo — a coluna já diz "Valor total"). */
+/** Formato monetário do sistema (pt-BR, com "R$" — mesmo padrão de `formatPrice` em Produtos). */
 export function formatOrderTotal(value: number) {
-  return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Data ISO (`yyyy-mm-dd`) no formato pt-BR, sem `Date` — evita o deslize de fuso, mesmo padrão de `formatReturnDate`. */
+export function formatOrderDate(iso: string | null | undefined) {
+  if (!iso) return "";
+  const [year, month, day] = iso.split("-");
+  if (!year || !month || !day) return iso;
+  return `${day}/${month}/${year}`;
 }

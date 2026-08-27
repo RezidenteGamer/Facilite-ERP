@@ -1,0 +1,96 @@
+/* Complemento ao RegistryFormModal.css (a moldura, a cor e a animação vêm de
+   lá — aqui só o cabeçalho e a grade de itens, somente leitura). */
+
+.sale-order-preview-modal {
+  width: min(680px, 100%);
+}
+
+.sale-order-preview-modal__hint {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.sale-order-preview-modal__header {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 20px;
+  margin-bottom: 6px;
+}
+
+.sale-order-preview-modal__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.sale-order-preview-modal__label {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.sale-order-preview-modal__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(50vh, calc(100vh - 380px));
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sale-order-preview-modal__line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 110px 110px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sale-order-preview-modal__line--head {
+  background: none;
+  font-weight: 700;
+  opacity: 0.8;
+  padding-bottom: 0;
+}
+
+.sale-order-preview-modal__product {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sale-order-preview-modal__total {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .sale-order-preview-modal__header {
+    grid-template-columns: 1fr;
+  }
+
+  .sale-order-preview-modal__line {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 6px;
+    text-align: right;
+  }
+
+  .sale-order-preview-modal__line--head {
+    display: none;
+  }
+
+  .sale-order-preview-modal__product {
+    grid-column: 1 / -1;
+    white-space: normal;
+    text-align: left;
+  }
+}

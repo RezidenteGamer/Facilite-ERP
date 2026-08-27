@@ -10,6 +10,7 @@ import { normalizeSearchText } from "../../lib/searchText";
 import { SaleOrdersIcon } from "../home/icons";
 import { SALE_PAYMENT_METHOD_LABEL } from "./sales";
 import { SALE_ORDER_STATUS_LABEL, formatOrderTotal, type SaleOrder } from "./saleOrders";
+import SaleOrderPreviewModal from "./SaleOrderPreviewModal";
 import { useSaleOrdersData } from "./useSaleOrdersData";
 
 const COLUNAS: RegistryColumn<SaleOrder>[] = [
@@ -46,6 +47,7 @@ export default function SaleOrdersPage() {
   const [converting, setConverting] = useState(false);
   const [convertError, setConvertError] = useState<string | null>(null);
   const [convertedMessage, setConvertedMessage] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
 
   useEffect(() => {
     openWindow({
@@ -173,7 +175,12 @@ export default function SaleOrdersPage() {
               onClick: () => setConfirmingConvert(true),
             },
             { id: "gerar-nf", label: "Gerar NF", disabled: true },
-            { id: "pre-visualizar", label: "Pré visualizar", disabled: true },
+            {
+              id: "pre-visualizar",
+              label: "Pré visualizar",
+              disabled: !selected,
+              onClick: () => selected && setPreviewingId(selected.id),
+            },
             { id: "trocar", label: "Trocar", disabled: true },
             { id: "financeiro", label: "Financeiro", disabled: true },
             { id: "editar", label: "Editar", disabled: true },
@@ -181,6 +188,8 @@ export default function SaleOrdersPage() {
           ]}
         />
       </RegistryLayout>
+
+      {previewingId && <SaleOrderPreviewModal saleOrderId={previewingId} onClose={() => setPreviewingId(null)} />}
 
       {confirmingConvert && selected && (
         <ConfirmDialog

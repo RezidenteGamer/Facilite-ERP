@@ -119,3 +119,54 @@ export async function convertSaleOrderToSale(saleOrderId: string): Promise<{ id:
   if (error) throw error;
   return { id: data.id, code: data.code };
 }
+
+export type SaleOrderDetailItem = {
+  id: string;
+  productCode: string;
+  productDescription: string;
+  quantity: number;
+  unitPrice: number;
+  discountAmount: number;
+  totalAmount: number;
+};
+
+export type SaleOrderDetail = SaleOrder & { items: SaleOrderDetailItem[] };
+
+type SaleOrderDetailRow = SaleOrderRow & {
+  items?: Array<{
+    id: string;
+    quantity: number;
+    unit_price: number;
+    discount_amount: number;
+    total_amount: number;
+    product?: { code: string; description: string } | null;
+  }> | null;
+};
+
+/** Busca um pedido com os itens (produto, quantidade, preço, total) — usado pela pré-visualização. */
+export async function fetchSaleOrderWithItems(id: string): Promise<SaleOrderDetail> {
+  const client = assertSupabase();
+  const { data, error } = await client
+    .from("sale_orders")
+    .select(
+      `*, contact:contacts(name), seller:profiles!sale_orders_seller_id_fkey(name),
+       items:sale_order_items(id, quantity, unit_price, discount_amount, total_amount,
+         product:products(code, description))`,
+    )
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  const row = data as SaleOrderDetailRow;
+  return {
+    ...toSaleOrder(row),
+    items: (row.items ?? []).map((item) => ({
+      id: item.id,
+      productCode: item.product?.code ?? "",
+      productDescription: item.product?.description ?? "",
+      quantity: item.quantity,
+      unitPrice: item.unit_price,
+      discountAmount: item.discount_amount,
+      totalAmount: item.total_amount,
+    })),
+  };
+}
