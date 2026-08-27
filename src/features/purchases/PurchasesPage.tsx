@@ -121,10 +121,16 @@ export default function PurchasesPage() {
           ]}
           actionsTitle="Opções para compras"
           actions={[
-            { id: "nova-compra", label: "Nova Compra", disabled: !canCreate, onClick: () => navigate("/compras/nova") },
+            {
+              id: "nova-compra",
+              label: "Nova Compra",
+              disabled: !canCreate,
+              tone: "positive" as const,
+              onClick: () => navigate("/compras/nova"),
+            },
             { id: "importar-xml", label: "Importar XML", disabled: true },
             { id: "devolver-compra", label: "Devolver Compra", disabled: true },
-            { id: "excluir", label: "Excluir", disabled: true },
+            { id: "excluir", label: "Excluir", disabled: true, tone: "danger" as const },
           ]}
         />
       </RegistryLayout>

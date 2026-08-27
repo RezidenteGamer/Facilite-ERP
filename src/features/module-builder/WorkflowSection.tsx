@@ -318,6 +318,7 @@ export default function WorkflowSection({
           title={`Excluir a situação “${modal.situation.label}”?`}
           message="Só sai se nenhum registro estiver nela e nenhuma transição a usar — o banco recusa nos dois casos, e diz qual é o impedimento."
           confirmLabel="Excluir"
+          tone="danger"
           onConfirm={() =>
             run(async () => {
               await removeSituation(modal.situation.id);
@@ -369,6 +370,7 @@ export default function WorkflowSection({
           title={`Excluir a transição “${modal.transition.label}”?`}
           message="As ações automáticas configuradas nela vão junto. Os registros continuam nas situações onde já estão."
           confirmLabel="Excluir"
+          tone="danger"
           onConfirm={() =>
             run(async () => {
               await removeTransition(modal.transition.id);
@@ -395,6 +397,7 @@ export default function WorkflowSection({
           title="Remover esta ação automática?"
           message="A transição continua existindo; ela só deixa de preencher esse campo."
           confirmLabel="Remover"
+          tone="danger"
           onConfirm={() => run(() => removeAction(modal.action.id))}
           onCancel={() => setModal({ kind: "none" })}
         />

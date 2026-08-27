@@ -18,6 +18,19 @@ import { useContactsData } from "./useContactsData";
 
 const MODULE_ID = "clientes-fornecedores";
 
+/**
+ * Códigos padrão do `indIEDest` da NF-e/NFC-e — mesmos três valores que
+ * `resolveIndicadorIeCodigo` (`invoiceMapping.ts`) já trata (1/2/qualquer
+ * coisa=9). Opção vazia porque o campo é opcional e contatos já cadastrados
+ * podem não ter esse dado preenchido.
+ */
+const INDICADOR_IE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Não informado" },
+  { value: "1", label: "1 — Contribuinte ICMS" },
+  { value: "2", label: "2 — Contribuinte isento de inscrição" },
+  { value: "9", label: "9 — Não contribuinte" },
+];
+
 type ModalState = "none" | "new" | "edit";
 
 /** Módulo "Clientes e Fornecedores" — piloto do motor genérico de metadados. */
@@ -38,6 +51,7 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>("none");
+  const [formIndicadorIe, setFormIndicadorIe] = useState("");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
   const [pendingPhotoPreview, setPendingPhotoPreview] = useState<string | null>(null);
@@ -81,10 +95,21 @@ export default function CustomersPage() {
 
   const selected: Contact | null = visibleContacts.find((contact) => contact.id === selectedId) ?? null;
 
-  const columns = useMemo(
-    () => (definition ? buildTableColumns<Contact>(definition.fields) : []),
-    [definition],
-  );
+  const columns = useMemo(() => {
+    if (!definition) return [];
+    const built = buildTableColumns<Contact>(definition.fields);
+    // Mesmo padrão de override local que Produtos/Financeiro já usam para
+    // "Valor venda"/"Valor total": indicador visual, não um botão — o clique
+    // que favorita/desfavorita mora na ação "Favoritar" ao lado de Editar.
+    return built.map((column) =>
+      column.key === "name"
+        ? {
+            ...column,
+            render: (row: Contact) => (row.isFavorite ? `★ ${row.name}` : row.name),
+          }
+        : column,
+    );
+  }, [definition]);
   const detailFields = useMemo(
     () => (definition ? buildDetailFields<Contact>(definition.fields, selected) : []),
     [definition, selected],
@@ -94,6 +119,12 @@ export default function CustomersPage() {
   async function toggleActive() {
     if (!selected) return;
     await updateContact(selected.id, { active: !selected.active });
+  }
+
+  /** Um clique, sem abrir o formulário — favoritos sobem para o topo de qualquer lista/busca de contato. */
+  async function toggleFavorite() {
+    if (!selected) return;
+    await updateContact(selected.id, { isFavorite: !selected.isFavorite });
   }
 
   function clearPendingPhoto() {
@@ -125,8 +156,18 @@ export default function CustomersPage() {
     }
   }
 
+  const indicadorIeSelect = {
+    key: "indicadorIe",
+    label: "Indicador IE",
+    value: formIndicadorIe,
+    options: INDICADOR_IE_OPTIONS,
+    onChange: setFormIndicadorIe,
+  };
+
   async function handleCreateSubmit(values: Record<string, string>) {
-    const created = await createContact(contactInputFromFormValues(values));
+    const created = await createContact(
+      contactInputFromFormValues({ ...values, indicadorIe: formIndicadorIe }),
+    );
 
     if (pendingPhotoFile) {
       try {
@@ -158,7 +199,7 @@ export default function CustomersPage() {
       email: values.email || undefined,
       whatsapp: values.whatsapp || undefined,
       inscricaoEstadual: values.inscricaoEstadual || undefined,
-      indicadorIe: values.indicadorIe || undefined,
+      indicadorIe: formIndicadorIe || undefined,
       codigoIbgeMunicipio: values.codigoIbgeMunicipio || undefined,
     });
     setModal("none");
@@ -215,18 +256,32 @@ export default function CustomersPage() {
               id: "novo",
               label: `Novo ${termo}`,
               disabled: !canCreate,
-              onClick: () => setModal("new"),
+              tone: "positive" as const,
+              onClick: () => {
+                setFormIndicadorIe("");
+                setModal("new");
+              },
             },
             {
               id: "editar",
               label: "Editar",
               disabled: !selected || !canEdit,
-              onClick: () => setModal("edit"),
+              onClick: () => {
+                setFormIndicadorIe(selected?.indicadorIe ?? "");
+                setModal("edit");
+              },
+            },
+            {
+              id: "favoritar",
+              label: selected?.isFavorite ? "Desfavoritar" : "Favoritar",
+              disabled: !selected || !canEdit,
+              onClick: toggleFavorite,
             },
             {
               id: "excluir",
               label: "Excluir",
               disabled: !selected || !canDelete,
+              tone: "danger" as const,
               onClick: () => selected && setConfirmingDeleteId(selected.id),
             },
           ]}
@@ -281,6 +336,7 @@ export default function CustomersPage() {
             imageUrl: pendingPhotoPreview,
             onFileSelected: handleNewPhotoSelected,
           }}
+          selectFields={[indicadorIeSelect]}
           onSubmit={handleCreateSubmit}
           onCancel={() => {
             clearPendingPhoto();
@@ -299,6 +355,7 @@ export default function CustomersPage() {
             uploading: photoUploading,
             onFileSelected: (file) => handleExistingPhotoSelected(selected.id, file),
           }}
+          selectFields={[indicadorIeSelect]}
           initialValues={{
             name: selected.name,
             document: selected.document,
@@ -314,7 +371,6 @@ export default function CustomersPage() {
             email: selected.email ?? "",
             whatsapp: selected.whatsapp ?? "",
             inscricaoEstadual: selected.inscricaoEstadual ?? "",
-            indicadorIe: selected.indicadorIe ?? "",
             codigoIbgeMunicipio: selected.codigoIbgeMunicipio ?? "",
           }}
           onSubmit={handleEditSubmit}
@@ -326,6 +382,7 @@ export default function CustomersPage() {
         <ConfirmDialog
           title={`Excluir ${termo}?`}
           message="Essa ação não pode ser desfeita."
+          tone="danger"
           onConfirm={handleConfirmDelete}
           onCancel={() => setConfirmingDeleteId(null)}
         />

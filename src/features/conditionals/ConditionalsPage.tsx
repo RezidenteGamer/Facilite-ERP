@@ -178,7 +178,13 @@ export default function ConditionalsPage() {
               : []
           }
           actions={[
-            { id: "nova-condicional", label: "Nova condicional", disabled: !canCreate, onClick: () => navigate("/condicionais/nova") },
+            {
+              id: "nova-condicional",
+              label: "Nova condicional",
+              disabled: !canCreate,
+              tone: "positive" as const,
+              onClick: () => navigate("/condicionais/nova"),
+            },
             {
               id: "registrar-devolucao",
               label: "Registrar devolução",
@@ -250,6 +256,7 @@ export default function ConditionalsPage() {
           message={`A condicional ${selected.code} volta com todo o estoque enviado — só possível porque nenhum item foi devolvido ou convertido ainda.`}
           confirmLabel={cancelling ? "Cancelando..." : "Cancelar condicional"}
           cancelLabel="Voltar"
+          tone="danger"
           onConfirm={handleCancel}
           onCancel={() => setConfirmingCancel(false)}
         />

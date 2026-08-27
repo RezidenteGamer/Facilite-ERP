@@ -40,6 +40,7 @@ export default function SaleOrdersPage() {
   const { orders, loading, error, convertToSale } = useSaleOrdersData(currentBranchId);
 
   const canCreate = hasPermission("pedidos-venda", "create");
+  const canEdit = hasPermission("pedidos-venda", "edit");
 
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -167,7 +168,13 @@ export default function SaleOrdersPage() {
               : undefined
           }
           actions={[
-            { id: "novo-pedido", label: "Novo pedido", disabled: !canCreate, onClick: () => navigate("/pedidos-venda/novo") },
+            {
+              id: "novo-pedido",
+              label: "Novo pedido",
+              disabled: !canCreate,
+              tone: "positive" as const,
+              onClick: () => navigate("/pedidos-venda/novo"),
+            },
             {
               id: "converter-venda",
               label: "Converter em venda",
@@ -183,8 +190,16 @@ export default function SaleOrdersPage() {
             },
             { id: "trocar", label: "Trocar", disabled: true },
             { id: "financeiro", label: "Financeiro", disabled: true },
-            { id: "editar", label: "Editar", disabled: true },
-            { id: "excluir", label: "Excluir", disabled: true },
+            {
+              id: "editar",
+              // Mesma condição de "Converter em venda": pedido convertido ou
+              // cancelado é dado histórico. A `update_sale_order` recusa do
+              // mesmo jeito — esta é a barreira de fora, não a única.
+              label: "Editar",
+              disabled: !selected || selected.status !== "aberto" || !canEdit,
+              onClick: () => selected && navigate(`/pedidos-venda/${selected.id}/editar`),
+            },
+            { id: "excluir", label: "Excluir", disabled: true, tone: "danger" as const },
           ]}
         />
       </RegistryLayout>

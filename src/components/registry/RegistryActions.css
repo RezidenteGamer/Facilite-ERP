@@ -154,6 +154,14 @@
   background: var(--danger-hover);
 }
 
+.registry-actions__btn--positive {
+  background: var(--positive-soft);
+}
+
+.registry-actions__btn--positive:hover:not(:disabled) {
+  background: var(--positive-soft-hover);
+}
+
 .registry-actions__btn:disabled {
   opacity: .55;
   cursor: default;

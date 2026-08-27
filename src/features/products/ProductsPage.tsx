@@ -408,7 +408,13 @@ export default function ProductsPage() {
         <RegistryActions
           title="Cadastrar um novo produto"
           actions={[
-            { id: "novo", label: "Novo produto", disabled: !canCreate, onClick: () => openModal("new") },
+            {
+              id: "novo",
+              label: "Novo produto",
+              disabled: !canCreate,
+              tone: "positive" as const,
+              onClick: () => openModal("new"),
+            },
             { id: "editar", label: "Editar", disabled: !selected || !canEdit, onClick: () => openModal("edit") },
             { id: "clonar", label: "Clonar", disabled: !selected || !canCreate, onClick: () => openModal("clone") },
             {
@@ -416,6 +422,7 @@ export default function ProductsPage() {
               label: "Excluir",
               disabled: !selected || !canDelete,
               detached: true,
+              tone: "danger" as const,
               onClick: () => selected && setConfirmingDeleteId(selected.id),
             },
           ]}
@@ -548,6 +555,7 @@ export default function ProductsPage() {
         <ConfirmDialog
           title="Excluir produto?"
           message="Essa ação não pode ser desfeita."
+          tone="danger"
           onConfirm={handleConfirmDelete}
           onCancel={() => setConfirmingDeleteId(null)}
         />

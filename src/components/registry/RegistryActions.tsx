@@ -9,8 +9,9 @@ export type RegistryAction = {
   onClick?: () => void;
   /** Abre um espaço maior antes do botão — separa ações destrutivas das demais. */
   detached?: boolean;
-  /** "danger" pinta o botão de vermelho (ex.: "Cancelar", "Excluir definitivo"). */
-  tone?: "default" | "danger";
+  /** "danger" pinta o botão de vermelho (ex.: "Cancelar", "Excluir definitivo").
+   *  "positive" pinta de verde claro (ex.: "Novo produto", "Nova compra"). */
+  tone?: "default" | "danger" | "positive";
 };
 
 export type RegistryActionField = {
@@ -122,7 +123,7 @@ export default function RegistryActions({
           key={action.id}
           className={`registry-actions__btn${action.detached ? " registry-actions__btn--detached" : ""}${
             action.tone === "danger" ? " registry-actions__btn--danger" : ""
-          }`}
+          }${action.tone === "positive" ? " registry-actions__btn--positive" : ""}`}
           type="button"
           data-action={action.id}
           disabled={action.disabled}

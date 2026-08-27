@@ -1,4 +1,4 @@
-import { isValidElement, useMemo, useState, type ReactNode } from "react";
+import { isValidElement, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import "./RegistryTable.css";
 
 export type RegistryColumn<T> = {
@@ -129,6 +129,34 @@ function sortRows<T>(rows: T[], columns: RegistryColumn<T>[], sort: SortState): 
   return indexed.map((item) => item.row);
 }
 
+/** Liga um gradiente sutil no rodapé de um contêiner que rola por dentro
+    enquanto ainda houver conteúdo abaixo da área visível — some assim que a
+    pessoa rola até o fim (ver .registry-table__scroll-hint em
+    RegistryTable.css). Recalcula ao rolar, ao trocar de dados e ao
+    redimensionar a janela. */
+function useScrollBottomHint(deps: unknown[]) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [hasMore, setHasMore] = useState(false);
+
+  function check() {
+    const el = ref.current;
+    if (!el) return;
+    setHasMore(el.scrollHeight > el.clientHeight + el.scrollTop + 1);
+  }
+
+  useEffect(() => {
+    check();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  useEffect(() => {
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  return { ref, hasMore, onScroll: check };
+}
+
 function pickPrimaryColumn<T>(columns: RegistryColumn<T>[]): RegistryColumn<T> {
   const marked = columns.find((column) => column.primary);
   if (marked) return marked;
@@ -179,6 +207,8 @@ export default function RegistryTable<T>({
       return null;
     });
   }
+
+  const rowsHint = useScrollBottomHint([sortedRows, placeholders]);
 
   const primaryColumn = pickPrimaryColumn(columns);
   const codeColumn = columns.find((column) => column.key === "code" && column !== primaryColumn);
@@ -231,7 +261,11 @@ export default function RegistryTable<T>({
         {/* Tablet/desktop: grade original, com rolagem horizontal própria
             se a soma das colunas não couber — nunca aparece em mobile
             (ver breakpoint em RegistryTable.css), onde vira cards. */}
-        <div className="registry-table__scroll">
+        <div
+          className={`registry-table__scroll${
+            rowsHint.hasMore ? " registry-table__scroll--has-more" : ""
+          }`}
+        >
           <div
             className="registry-table__header"
             style={{ gridTemplateColumns: gridTemplate, minWidth: tableMinWidth }}
@@ -256,7 +290,7 @@ export default function RegistryTable<T>({
             })}
           </div>
 
-          <div className="registry-table__rows">
+          <div className="registry-table__rows" ref={rowsHint.ref} onScroll={rowsHint.onScroll}>
             {sortedRows.map((row) => {
               const id = getRowId(row);
               return (
@@ -289,6 +323,8 @@ export default function RegistryTable<T>({
               </div>
             ))}
           </div>
+
+          <div className="registry-table__scroll-hint" aria-hidden="true" />
         </div>
 
         {/* Mobile: um card por registro — título (+ código, se houver)

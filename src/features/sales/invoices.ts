@@ -1,9 +1,9 @@
 import type { FiscalArtifact } from "../../lib/fiscal/types";
 import type { InvoiceDocument } from "../../lib/repositories/fiscalDocumentsRepository";
 
-/** Formato monetário do sistema (pt-BR, sem símbolo — a coluna já diz "Valor"). */
+/** Formato monetário do sistema (pt-BR, com "R$" — mesmo padrão de `formatPrice` em Produtos). */
 export function formatInvoiceTotal(value: number) {
-  return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `R$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const FISCAL_STATUS_LABEL: Record<InvoiceDocument["status"], string> = {
@@ -29,7 +29,7 @@ export function invoiceStatusLabel(document: FiscalStatusHolder | null): string 
 
 export function invoiceStatusColor(document: FiscalStatusHolder | null): string {
   if (!document) return "var(--muted, #8a8a8a)";
-  if (document.status === "autorizado") return "var(--positive)";
+  if (document.status === "autorizado") return "var(--positive-soft)";
   if (document.status === "erro_autorizacao" || document.status === "denegado") return "var(--danger)";
   return "var(--muted, #8a8a8a)";
 }

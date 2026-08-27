@@ -119,7 +119,7 @@ export default function FinancePage() {
           render: (entry: FinanceEntry) => {
             const isOut = entry.type === "a_pagar";
             return (
-              <span style={{ color: isOut ? "var(--danger)" : "var(--positive)", fontWeight: 600 }}>
+              <span style={{ color: isOut ? "var(--danger)" : "var(--positive-soft)", fontWeight: 600 }}>
                 {isOut ? "−" : "+"} {entry.totalFormatted}
               </span>
             );
@@ -289,7 +289,13 @@ export default function FinancePage() {
             ...(isBaixados
               ? []
               : [
-                  { id: "adicionar", label: "Adicionar", disabled: !canCreate, onClick: openNewModal },
+                  {
+                    id: "adicionar",
+                    label: "Adicionar",
+                    disabled: !canCreate,
+                    tone: "positive" as const,
+                    onClick: openNewModal,
+                  },
                   {
                     id: "baixar",
                     label: "Baixar",
@@ -379,6 +385,7 @@ export default function FinancePage() {
         <ConfirmDialog
           title="Excluir lançamento?"
           message="Essa ação não pode ser desfeita."
+          tone="danger"
           onConfirm={async () => {
             await run(() => deleteEntry(confirmingDeleteId));
             setConfirmingDeleteId(null);

@@ -206,7 +206,7 @@ const MOVEMENT_COLUMNS: RegistryColumn<StockMovement>[] = [
     render: (m) => {
       const isOut = m.quantityDelta < 0;
       return (
-        <span style={{ color: isOut ? "var(--danger)" : "var(--positive)", fontWeight: 600 }}>
+        <span style={{ color: isOut ? "var(--danger)" : "var(--positive-soft)", fontWeight: 600 }}>
           {isOut ? "−" : "+"} {formatMovementQuantity(m.quantityDelta)}
         </span>
       );
@@ -474,6 +474,7 @@ export default function StockAdjustPage() {
               id: "ajuste",
               label: "Ajuste de estoque",
               disabled: !canCreate,
+              tone: "positive" as const,
               onClick: () => setModalOpen(true),
             },
           ]}

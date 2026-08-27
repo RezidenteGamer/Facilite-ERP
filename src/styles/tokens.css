@@ -177,6 +177,14 @@
   --positive:       #1E8E3E;
   --positive-hover: #167530;
 
+  /* Verde claro — usado (1) em botões de ação "criar" (Novo produto, Nova
+     compra, Adicionar...) para diferenciar de --danger sem competir com o
+     verde escuro de lucro, e (2) como texto de valores positivos sobre o
+     azul saturado do --blue-panel, onde --positive (escuro) quase some por
+     ficar perto demais em luminância do azul de fundo. */
+  --positive-soft:       #39B96B;
+  --positive-soft-hover: #2E9A58;
+
   /* Grade de módulos (telas internas do ERP) */
   --tile-yellow:       #FFC331;
   --tile-yellow-hover: #FFB800;
@@ -253,6 +261,12 @@
   --positive:       #3DDC84;
   --positive-hover: #57E397;
 
+  /* No escuro o --positive já nasce claro o bastante para contrastar com o
+     --blue-panel escuro — o "soft" reaproveita o mesmo par em vez de criar
+     um terceiro tom de verde. */
+  --positive-soft:       #3DDC84;
+  --positive-soft-hover: #57E397;
+
   --tile-yellow:       #FFC331;
   --tile-yellow-hover: #FFD35C;
   --badge-blue:        #5B9CFF;
@@ -278,4 +292,37 @@
   --shadow-4: 0 10px 30px rgba(0, 0, 0, .55);
   --shadow-8: 0 26px 64px rgba(0, 0, 0, .60);
   --shadow-card: var(--shadow-8);
+}
+
+/* =============================================================
+   Scrollbar global — a barra do navegador (larga, cinza-padrão) some em
+   favor de algo fino e discreto, usando --border-strong (já pensado para
+   contraste sutil sobre qualquer superfície) como cor da "thumb". Vale
+   para toda a aplicação; superfícies específicas (ex.: RegistryTable
+   sobre --blue-panel) podem sobrescrever com uma cor própria — um
+   seletor de classe é mais específico que o `*` abaixo, então não há
+   conflito. */
+:root {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
 }

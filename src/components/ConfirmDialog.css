@@ -89,6 +89,14 @@
   transform: translateY(-1px);
 }
 
+.confirm-dialog__btn--confirm-danger {
+  background: var(--danger);
+}
+
+.confirm-dialog__btn--confirm-danger:hover {
+  background: var(--danger-hover);
+}
+
 /* Em mobile o diálogo ancora embaixo em vez de centralizar — com uma mão
    só ocupada, o polegar alcança o rodapé da tela muito mais fácil que o
    meio dela. */

@@ -107,8 +107,11 @@
   color: var(--white);
 }
 
+/* var(--positive-soft), não var(--positive): o verde escuro de lucro some
+   contra o azul saturado do painel — o "soft" tem mais contraste aqui sem
+   virar brilho/glow. */
 .registry-table__summary-item--positive .registry-table__summary-value {
-  color: var(--positive);
+  color: var(--positive-soft);
 }
 
 .registry-table__summary-item--negative .registry-table__summary-value {
@@ -116,12 +119,33 @@
 }
 
 .registry-table__scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* Indicativo de "tem mais embaixo": um gradiente sutil que só aparece
+   enquanto a rolagem da lista não chegou ao fim (ver useScrollBottomHint em
+   RegistryTable.tsx) — nada de brilho, só a cor do próprio painel sumindo
+   por cima da última linha visível. */
+.registry-table__scroll-hint {
+  position: absolute;
+  left: 0;
+  right: 6px;
+  bottom: 0;
+  height: 32px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--blue-panel));
+  opacity: 0;
+  transition: opacity .15s var(--ease);
+}
+
+.registry-table__scroll--has-more .registry-table__scroll-hint {
+  opacity: 1;
 }
 
 .registry-table__header,

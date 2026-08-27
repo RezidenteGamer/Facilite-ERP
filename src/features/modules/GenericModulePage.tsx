@@ -217,7 +217,13 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
         <RegistryActions
           title={`Cadastrar um novo registro em ${title}`}
           actions={[
-            { id: "novo", label: "Novo", disabled: !canCreate, onClick: () => setModal("new") },
+            {
+              id: "novo",
+              label: "Novo",
+              disabled: !canCreate,
+              tone: "positive" as const,
+              onClick: () => setModal("new"),
+            },
             {
               id: "editar",
               label: "Editar",
@@ -230,6 +236,7 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
               label: "Excluir",
               disabled: !selected || !canDelete,
               detached: true,
+              tone: "danger" as const,
               onClick: () => selected && setConfirmingDeleteId(selected.id),
             },
           ]}
@@ -286,6 +293,7 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
         <ConfirmDialog
           title="Excluir registro?"
           message="Essa ação não pode ser desfeita."
+          tone="danger"
           onConfirm={() =>
             run(async () => {
               await removeRow(confirmingDeleteId);

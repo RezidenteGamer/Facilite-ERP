@@ -7,6 +7,11 @@ type ConfirmDialogProps = {
   message?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** "danger" pinta o botão de confirmar de vermelho — só para ações que
+   *  destroem ou desfazem algo (excluir, cancelar, remover). Confirmações
+   *  neutras (ex.: "Converter pedido em venda?", "Sair?") ficam no âmbar
+   *  padrão. */
+  tone?: "default" | "danger";
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -21,6 +26,7 @@ export default function ConfirmDialog({
   message,
   confirmLabel = "Sim",
   cancelLabel = "Cancelar",
+  tone = "default",
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -53,7 +59,9 @@ export default function ConfirmDialog({
               </button>
               <button
                 ref={confirmRef}
-                className="confirm-dialog__btn confirm-dialog__btn--confirm"
+                className={`confirm-dialog__btn confirm-dialog__btn--confirm${
+                  tone === "danger" ? " confirm-dialog__btn--confirm-danger" : ""
+                }`}
                 type="button"
                 onClick={onConfirm}
               >

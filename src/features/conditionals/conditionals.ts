@@ -37,6 +37,6 @@ export function parseConditionalQuantity(value: string): number | null {
 /** Cor da coluna "Status" — mesmo padrão de patch de `render` já usado no Financeiro. */
 export function conditionalStatusColor(status: ConditionalStatus): string | undefined {
   if (status === "Vencida" || status === "Cancelada") return "var(--danger)";
-  if (status === "Convertida em venda") return "var(--positive)";
+  if (status === "Convertida em venda") return "var(--positive-soft)";
   return undefined;
 }

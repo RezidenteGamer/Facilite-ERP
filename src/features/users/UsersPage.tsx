@@ -144,7 +144,7 @@ export default function UsersPage() {
         <RegistryActions
           title="Cadastrar um novo usuário"
           actions={[
-            { id: "novo", label: "Novo usuario", onClick: () => setModal("new") },
+            { id: "novo", label: "Novo usuario", tone: "positive" as const, onClick: () => setModal("new") },
             { id: "editar", label: "Editar", disabled: !selected, onClick: () => setModal("edit") },
             {
               id: "resetar-senha",

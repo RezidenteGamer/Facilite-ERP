@@ -298,6 +298,7 @@ export default function ModuleBuilderPage() {
           title={`Remover o campo “${modal.field.label}”?`}
           message="Ele some da tabela, da ficha e do formulário. O valor já gravado nos registros existentes continua no banco — remover um campo para de mostrar o dado, não o apaga."
           confirmLabel="Remover"
+          tone="danger"
           onConfirm={() => run(() => dropField(modal.field.id))}
           onCancel={() => setModal({ kind: "none" })}
         />
