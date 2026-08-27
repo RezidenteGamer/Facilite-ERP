@@ -50,6 +50,16 @@ type OpenWindowsValue = {
   getWindowState: <T>(windowId: string, slot: string) => T | undefined;
   setWindowState: <T>(windowId: string, slot: string, state: T) => void;
   clearWindowState: (windowId: string) => void;
+  /**
+   * Página atual do WindowDock. Mora aqui, não em `useState` do próprio
+   * `WindowDock`, porque o componente do dock é remontado a cada navegação
+   * (cada página do sistema monta seu próprio `<AppShell>`, que renderiza
+   * `<WindowDock>` de novo) — inclusive a navegação disparada pelos atalhos
+   * 1-9/0. Sem isto, apertar um atalho na página 2 do dock navegava e o dock
+   * "esquecia" que estava na página 2, voltando para a primeira.
+   */
+  dockPage: number;
+  setDockPage: (page: number | ((current: number) => number)) => void;
 };
 
 const OpenWindowsContext = createContext<OpenWindowsValue | null>(null);
@@ -77,6 +87,7 @@ const OpenWindowsContext = createContext<OpenWindowsValue | null>(null);
 export function OpenWindowsProvider({ children }: { children: ReactNode }) {
   const { byId } = useModuleCatalog();
   const [windows, setWindows] = useState<OpenWindow[]>([]);
+  const [dockPage, setDockPage] = useState(0);
   /* `useRef`, não `useState`: gravar o rascunho a cada tecla digitada não
      pode re-renderizar o app inteiro (o provider está acima de todas as
      rotas). Quem lê só precisa do valor uma vez, na montagem — e nessa hora
@@ -158,8 +169,19 @@ export function OpenWindowsProvider({ children }: { children: ReactNode }) {
       getWindowState,
       setWindowState,
       clearWindowState,
+      dockPage,
+      setDockPage,
     }),
-    [windows, openWindow, updateWindowPath, closeWindow, getWindowState, setWindowState, clearWindowState],
+    [
+      windows,
+      openWindow,
+      updateWindowPath,
+      closeWindow,
+      getWindowState,
+      setWindowState,
+      clearWindowState,
+      dockPage,
+    ],
   );
 
   return <OpenWindowsContext.Provider value={value}>{children}</OpenWindowsContext.Provider>;
