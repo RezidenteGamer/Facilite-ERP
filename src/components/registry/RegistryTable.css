@@ -142,6 +142,31 @@
   padding: 0 8px;
 }
 
+.registry-table__sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.registry-table__sort-btn:hover {
+  opacity: .85;
+}
+
+.registry-table__sort-btn--active {
+  font-weight: 700;
+}
+
+.registry-table__sort-icon {
+  font-size: .7em;
+  min-width: 8px;
+}
+
 .registry-table__rows {
   flex: 1;
   min-height: 0;

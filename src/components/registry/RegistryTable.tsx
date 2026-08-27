@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { isValidElement, useMemo, useState, type ReactNode } from "react";
 import "./RegistryTable.css";
 
 export type RegistryColumn<T> = {
@@ -76,6 +76,59 @@ function columnMinWidth(width: string): number {
   return px ? parseFloat(px[1]) : FLEX_COLUMN_MIN_WIDTH;
 }
 
+/** Extrai o texto puro de um ReactNode (string, número, ou elemento com
+    filhos simples) para poder comparar valores de célula na ordenação —
+    o mesmo conteúdo renderizado, sem markup. */
+function extractText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (isValidElement(node)) return extractText((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
+/** Interpreta um texto como número (aceita formato BR "1.234,56" e o
+    formato simples "1234.56"). Retorna null se o texto não for numérico. */
+function parseNumericText(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.replace(/[^\d,.\-]/g, "");
+  if (!cleaned || !/\d/.test(cleaned)) return null;
+  const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+type SortState = { key: string; direction: "asc" | "desc" };
+
+/** Ordena as linhas já carregadas por uma coluna, sem nova consulta ao
+    banco. Se todos os valores não-vazios da coluna parecerem numéricos,
+    compara como número; senão, compara como texto (localeCompare). */
+function sortRows<T>(rows: T[], columns: RegistryColumn<T>[], sort: SortState): T[] {
+  const column = columns.find((c) => c.key === sort.key);
+  if (!column) return rows;
+
+  const texts = rows.map((row) => extractText(column.render(row)));
+  const numbers = texts.map(parseNumericText);
+  const isNumeric = numbers.every((n, i) => n !== null || texts[i].trim() === "");
+
+  const indexed = rows.map((row, index) => ({ row, index }));
+  indexed.sort((a, b) => {
+    let cmp: number;
+    if (isNumeric) {
+      const na = numbers[a.index] ?? -Infinity;
+      const nb = numbers[b.index] ?? -Infinity;
+      cmp = na - nb;
+    } else {
+      cmp = texts[a.index].localeCompare(texts[b.index], "pt-BR", { sensitivity: "base" });
+    }
+    return sort.direction === "asc" ? cmp : -cmp;
+  });
+
+  return indexed.map((item) => item.row);
+}
+
 function pickPrimaryColumn<T>(columns: RegistryColumn<T>[]): RegistryColumn<T> {
   const marked = columns.find((column) => column.primary);
   if (marked) return marked;
@@ -110,7 +163,22 @@ export default function RegistryTable<T>({
 }: RegistryTableProps<T>) {
   const gridTemplate = columns.map((column) => column.width).join(" ");
   const tableMinWidth = columns.reduce((sum, column) => sum + columnMinWidth(column.width), 0);
-  const placeholders = Math.max(0, minRows - rows.length);
+
+  const [sort, setSort] = useState<SortState | null>(null);
+  const sortedRows = useMemo(
+    () => (sort ? sortRows(rows, columns, sort) : rows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, sort],
+  );
+  const placeholders = Math.max(0, minRows - sortedRows.length);
+
+  function handleSort(key: string) {
+    setSort((current) => {
+      if (!current || current.key !== key) return { key, direction: "asc" };
+      if (current.direction === "asc") return { key, direction: "desc" };
+      return null;
+    });
+  }
 
   const primaryColumn = pickPrimaryColumn(columns);
   const codeColumn = columns.find((column) => column.key === "code" && column !== primaryColumn);
@@ -168,15 +236,28 @@ export default function RegistryTable<T>({
             className="registry-table__header"
             style={{ gridTemplateColumns: gridTemplate, minWidth: tableMinWidth }}
           >
-            {columns.map((column) => (
-              <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
-                {column.label}
-              </span>
-            ))}
+            {columns.map((column) => {
+              const active = sort?.key === column.key;
+              return (
+                <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
+                  <button
+                    type="button"
+                    className={`registry-table__sort-btn${active ? " registry-table__sort-btn--active" : ""}`}
+                    onClick={() => handleSort(column.key)}
+                    aria-sort={active ? (sort!.direction === "asc" ? "ascending" : "descending") : "none"}
+                  >
+                    {column.label}
+                    <span className="registry-table__sort-icon" aria-hidden="true">
+                      {active ? (sort!.direction === "asc" ? "▲" : "▼") : ""}
+                    </span>
+                  </button>
+                </span>
+              );
+            })}
           </div>
 
           <div className="registry-table__rows">
-            {rows.map((row) => {
+            {sortedRows.map((row) => {
               const id = getRowId(row);
               return (
                 <button
@@ -214,7 +295,7 @@ export default function RegistryTable<T>({
             sempre visível, o resto dos campos num grid compacto de
             rótulo/valor. Só aparece abaixo do breakpoint mobile. */}
         <div className="registry-table__cards">
-          {rows.map((row) => {
+          {sortedRows.map((row) => {
             const id = getRowId(row);
             return (
               <button

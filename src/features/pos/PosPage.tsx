@@ -71,6 +71,7 @@ export default function PosPage() {
 
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
+  const [sortMode, setSortMode] = useState<"recent" | "az" | "za">("recent");
   /* O texto digitado no campo de cliente e do campo, nao do contato
      escolhido: os dois so coincidem enquanto ninguem estiver buscando outro. */
   const [clientQuery, setClientQuery] = useState("");
@@ -144,12 +145,17 @@ export default function PosPage() {
   // exemplo) — ver AGENTS.md. Filtra só por busca e produto ativo.
   const visibleProducts = useMemo(() => {
     const term = normalizeSearchText(search.trim());
-    return products.filter((product) => {
+    const filtered = products.filter((product) => {
       if (!product.active) return false;
       if (!term) return true;
       return normalizeSearchText(product.description).includes(term) || normalizeSearchText(product.code).includes(term);
     });
-  }, [products, search]);
+    if (sortMode === "recent") return filtered;
+    const sorted = [...filtered].sort((a, b) =>
+      a.description.localeCompare(b.description, "pt-BR", { sensitivity: "base" }),
+    );
+    return sortMode === "za" ? sorted.reverse() : sorted;
+  }, [products, search, sortMode]);
 
   const canConfirm =
     canCreate && !sessionLoading && !!openSession && sale.cart.length > 0 && sale.paymentValid && !sale.submitting;
@@ -219,6 +225,16 @@ export default function PosPage() {
           </div>
 
           <div className="pos__filters">
+            <select
+              className="pos__sort-select"
+              aria-label="Ordenar produtos"
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as "recent" | "az" | "za")}
+            >
+              <option value="recent">Mais recentes</option>
+              <option value="az">A-Z</option>
+              <option value="za">Z-A</option>
+            </select>
             <div className="pos__view-toggle">
               <button
                 className={`pos__view-btn${view === "grid" ? " pos__view-btn--active" : ""}`}
@@ -325,7 +341,7 @@ export default function PosPage() {
                           setShowPausedList(false);
                         }}
                       >
-                        <span className="pos__resume-item-name">{paused.contact?.name ?? "Sem cliente"}</span>
+                        <span className="pos__resume-item-name">{paused.contact?.name ?? "Consumidor final"}</span>
                         <span className="pos__resume-item-meta">
                           {paused.cart.reduce((sum, line) => sum + line.quantity, 0)} itens ·{" "}
                           {formatMoney(paused.total)} · {formatPausedTime(paused.pausedAt)}
