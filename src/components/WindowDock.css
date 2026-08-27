@@ -207,6 +207,16 @@
   line-height: 1;
   pointer-events: none;
   z-index: 1;
+  transition: background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease);
+}
+
+/* Janela ativa: fundo branco + número preto no lugar do ponto que existia
+   antes — o número já está sempre visível, então virou o próprio indicador
+   de "essa é a janela aberta agora", sem precisar de um elemento a mais. */
+.window-dock__shortcut--active {
+  background: var(--white);
+  border-color: var(--white);
+  color: var(--ink);
 }
 
 /* ---------- Fechar ---------- */
@@ -242,20 +252,6 @@
 .window-dock__close svg {
   width: 10px;
   height: 10px;
-}
-
-/* ---------- Ponto de janela ativa ---------- */
-.window-dock__dot {
-  width: 5px;
-  height: 5px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: transparent;
-  transition: background-color .15s var(--ease);
-}
-
-.window-dock__dot--on {
-  background: var(--white);
 }
 
 @media (prefers-reduced-motion: reduce) {

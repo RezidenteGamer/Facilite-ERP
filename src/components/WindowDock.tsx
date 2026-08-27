@@ -126,7 +126,10 @@ export default function WindowDock() {
                   parado, senão ficam para trás quando o quadrado cresce. */}
               <div className="window-dock__icon-wrap">
                 {shortcutDigit && (
-                  <span className="window-dock__shortcut" aria-hidden="true">
+                  <span
+                    className={`window-dock__shortcut${ativa ? " window-dock__shortcut--active" : ""}`}
+                    aria-hidden="true"
+                  >
                     {shortcutDigit}
                   </span>
                 )}
@@ -172,8 +175,6 @@ export default function WindowDock() {
                   <CloseIcon />
                 </button>
               </div>
-
-              <span className={`window-dock__dot${ativa ? " window-dock__dot--on" : ""}`} aria-hidden="true" />
             </li>
           );
         })}
