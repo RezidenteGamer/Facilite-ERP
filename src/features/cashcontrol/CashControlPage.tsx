@@ -23,7 +23,7 @@ import {
 } from "./cashControl";
 import CloseCashSessionModal from "./CloseCashSessionModal";
 import OpenCashSessionModal from "./OpenCashSessionModal";
-import { useCashControlData, useCashSessionLedger, useOrphanCashSales } from "./useCashControlData";
+import { useCashControlData, useCashSessionLedger } from "./useCashControlData";
 
 const MODULE_ID = "controle-caixa";
 
@@ -96,7 +96,6 @@ export default function CashControlPage() {
   const [openModalOpen, setOpenModalOpen] = useState(false);
   const [closingSession, setClosingSession] = useState<CashSession | null>(null);
   const [movementType, setMovementType] = useState<CashMovementType | null>(null);
-  const [movementSession, setMovementSession] = useState<CashSession | null>(null);
 
   useEffect(() => {
     openWindow({ id: "controle-caixa", label: "Controle de caixa", path: "/controle-caixa", icon: CashControlIcon });
@@ -113,15 +112,9 @@ export default function CashControlPage() {
   const gerencialSession = selectedSession ?? openSessionInBranch;
 
   const { entries: ledgerEntries, reload: reloadLedger } = useCashSessionLedger(gerencialSession?.id ?? null);
-  // Sem sessão selecionada/aberta, a aba mostra as vendas em dinheiro que não
-  // caem em nenhuma sessão da filial, em vez de ficar vazia (ver AGENTS.md).
-  const { entries: orphanEntries } = useOrphanCashSales(gerencialSession ? null : currentBranchId);
 
   const gerencialSummary = useMemo((): RegistrySummaryItem[] => {
-    if (!gerencialSession) {
-      const total = orphanEntries.reduce((sum, e) => sum + e.amount, 0);
-      return [{ label: "Total vendas sem sessão", value: formatCashTotal(total), tone: "neutral" }];
-    }
+    if (!gerencialSession) return [];
     const entradasVenda = ledgerEntries.filter((e) => e.kind === "venda").reduce((sum, e) => sum + e.amount, 0);
     const suprimentos = ledgerEntries.filter((e) => e.kind === "suprimento").reduce((sum, e) => sum + e.amount, 0);
     const sangrias = ledgerEntries.filter((e) => e.kind === "sangria").reduce((sum, e) => sum + e.amount, 0);
@@ -134,9 +127,7 @@ export default function CashControlPage() {
       { label: "Suprimentos", value: formatCashTotal(suprimentos), tone: "positive" },
       { label: "Valor do saldo atual", value: formatCashTotal(saldoAtual), tone: saldoAtual >= 0 ? "positive" : "negative" },
     ];
-  }, [gerencialSession, ledgerEntries, orphanEntries]);
-
-  const gerencialRows = gerencialSession ? ledgerEntries : orphanEntries;
+  }, [gerencialSession, ledgerEntries]);
 
   function changeTab(id: string) {
     setTab(id as CashTab);
@@ -145,12 +136,6 @@ export default function CashControlPage() {
   function openCloseModalFor(session: CashSession | null) {
     if (!session) return;
     setClosingSession(session);
-  }
-
-  function openMovementModalFor(session: CashSession | null, type: CashMovementType) {
-    if (!session) return;
-    setMovementSession(session);
-    setMovementType(type);
   }
 
   const navItems: HeaderNavItem[] = [
@@ -204,13 +189,11 @@ export default function CashControlPage() {
           />
         ) : (
           <RegistryTable
-            title={!gerencialSession ? "Sem sessão de caixa aberta" : undefined}
-            titleVariant="plain"
             tabs={TABS}
             activeTab={tab}
             onTabChange={changeTab}
             columns={LEDGER_COLUMNS}
-            rows={gerencialRows}
+            rows={ledgerEntries}
             getRowId={(e) => e.id}
             selectedId={ledgerSelectedId}
             onSelect={setLedgerSelectedId}
@@ -249,18 +232,6 @@ export default function CashControlPage() {
                 disabled: !selectedSession || selectedSession.status !== "aberto" || !canEdit,
                 onClick: () => openCloseModalFor(selectedSession),
               },
-              {
-                id: "suprimentos",
-                label: "Suprimentos",
-                disabled: !selectedSession || selectedSession.status !== "aberto" || !canCreate,
-                onClick: () => openMovementModalFor(selectedSession, "suprimento"),
-              },
-              {
-                id: "sangria",
-                label: "Sangria",
-                disabled: !selectedSession || selectedSession.status !== "aberto" || !canCreate,
-                onClick: () => openMovementModalFor(selectedSession, "sangria"),
-              },
               { id: "transferir", label: "Transferir", disabled: true },
               { id: "manutencao", label: "Manutenção", disabled: true },
             ]}
@@ -269,20 +240,12 @@ export default function CashControlPage() {
           <RegistryActions
             title="Informações"
             titleVariant="brand"
-            fieldsTitle={
-              gerencialSession
-                ? `Caixa ${gerencialSession.code}`
-                : "Sem sessão de caixa aberta — vendas em dinheiro registradas fora de uma sessão de caixa aparecem aqui."
-            }
-            fields={
-              gerencialSession
-                ? [
-                    { label: "Caixa", value: gerencialSession.registerName },
-                    { label: "Situação", value: CASH_SESSION_STATUS_LABEL[gerencialSession.status] },
-                    { label: "Operador", value: gerencialSession.openedByName },
-                  ]
-                : []
-            }
+            fieldsTitle={gerencialSession ? `Caixa ${gerencialSession.code}` : undefined}
+            fields={[
+              { label: "Caixa", value: gerencialSession?.registerName },
+              { label: "Situação", value: gerencialSession ? CASH_SESSION_STATUS_LABEL[gerencialSession.status] : undefined },
+              { label: "Operador", value: gerencialSession?.openedByName },
+            ]}
             actions={[
               {
                 id: "abrir-caixa",
@@ -301,13 +264,13 @@ export default function CashControlPage() {
                 id: "suprimentos",
                 label: "Suprimentos",
                 disabled: !gerencialSession || gerencialSession.status !== "aberto" || !canCreate,
-                onClick: () => openMovementModalFor(gerencialSession, "suprimento"),
+                onClick: () => setMovementType("suprimento"),
               },
               {
                 id: "sangria",
                 label: "Sangria",
                 disabled: !gerencialSession || gerencialSession.status !== "aberto" || !canCreate,
-                onClick: () => openMovementModalFor(gerencialSession, "sangria"),
+                onClick: () => setMovementType("sangria"),
               },
               { id: "manutencao", label: "Manutenção", disabled: true },
             ]}
@@ -337,25 +300,20 @@ export default function CashControlPage() {
         />
       )}
 
-      {movementType && movementSession && (
+      {movementType && gerencialSession && (
         <CashMovementModal
           type={movementType}
-          sessionLabel={`Caixa ${movementSession.code} — ${movementSession.registerName}`}
           onSubmit={async (input) => {
             await addMovement({
-              sessionId: movementSession.id,
+              sessionId: gerencialSession.id,
               type: movementType,
               amount: input.amount,
               description: input.description,
             });
-            if (movementSession.id === gerencialSession?.id) await reloadLedger();
+            await reloadLedger();
             setMovementType(null);
-            setMovementSession(null);
           }}
-          onCancel={() => {
-            setMovementType(null);
-            setMovementSession(null);
-          }}
+          onCancel={() => setMovementType(null)}
         />
       )}
     </AppShell>
