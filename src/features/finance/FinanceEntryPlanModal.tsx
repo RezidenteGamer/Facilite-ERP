@@ -133,28 +133,31 @@ export default function FinanceEntryPlanModal({
               </p>
             ))}
 
-            <div className="registry-form-modal__fields">
-              <SearchCombobox<Contact>
-                id="finance-plan-contact"
-                label={contactLabel}
-                placeholder="Digite o nome ou o documento..."
-                value={contactQuery}
-                onChange={(text) => {
-                  setContactQuery(text);
-                  /* Digitar por cima do contato escolhido desfaz a escolha - o
-                     campo tem que mostrar o que vai ser lancado. */
-                  if (contact) setContact(null);
-                }}
-                fetchItems={fetchContacts}
-                getKey={(c) => c.id}
-                renderItem={(c) => ({ primary: c.name, secondary: c.document })}
-                onSelect={(c) => {
-                  setContact(c);
-                  setContactQuery(c.name);
-                }}
-                onCreateNew={canCreateContact ? (query) => setCreatingContactName(query) : undefined}
-                createNewLabel={`Cadastrar novo ${contactLabel.toLowerCase()}`}
-              />
+            <div className="registry-form-modal__fields finance-entry-plan__fields">
+              <div className="finance-entry-plan__full">
+                <SearchCombobox<Contact>
+                  id="finance-plan-contact"
+                  label={contactLabel}
+                  placeholder="Digite o nome ou o documento..."
+                  value={contactQuery}
+                  onChange={(text) => {
+                    setContactQuery(text);
+                    /* Digitar por cima do contato escolhido desfaz a escolha - o
+                       campo tem que mostrar o que vai ser lancado. */
+                    if (contact) setContact(null);
+                  }}
+                  fetchItems={fetchContacts}
+                  getKey={(c) => c.id}
+                  renderItem={(c) => ({ primary: c.name, secondary: c.document })}
+                  onSelect={(c) => {
+                    setContact(c);
+                    setContactQuery(c.name);
+                  }}
+                  onCreateNew={canCreateContact ? (query) => setCreatingContactName(query) : undefined}
+                  createNewLabel={`Cadastrar novo ${contactLabel.toLowerCase()}`}
+                />
+              </div>
+
               <FormField
                 id="finance-plan-payment-method"
                 label="Forma de pagamento"
@@ -162,14 +165,22 @@ export default function FinanceEntryPlanModal({
                 onChange={setPaymentMethod}
               />
               <FormField id="finance-plan-document" label="Documento" value={documentText} onChange={setDocumentText} />
+
               <FormField
                 id="finance-plan-total"
                 label="Valor total da operação *"
                 value={totalText}
                 onChange={setTotalText}
               />
+              <FormField
+                id="finance-plan-first-due"
+                label="Vencimento da 1ª parcela *"
+                type="date"
+                value={firstDueDate}
+                onChange={setFirstDueDate}
+              />
 
-              <div className="finance-entry-plan__row">
+              <div className="finance-entry-plan__row finance-entry-plan__full">
                 <FormField
                   id="finance-plan-installments"
                   label="Parcelas *"
@@ -185,15 +196,7 @@ export default function FinanceEntryPlanModal({
                 />
               </div>
 
-              <FormField
-                id="finance-plan-first-due"
-                label="Vencimento da 1ª parcela *"
-                type="date"
-                value={firstDueDate}
-                onChange={setFirstDueDate}
-              />
-
-              <label className="finance-entry-plan__checkbox">
+              <label className="finance-entry-plan__checkbox finance-entry-plan__full">
                 <input
                   type="checkbox"
                   checked={settled}
@@ -203,7 +206,7 @@ export default function FinanceEntryPlanModal({
               </label>
 
               {preview.length > 0 && (
-                <div className="finance-entry-plan__preview">
+                <div className="finance-entry-plan__preview finance-entry-plan__full">
                   <p className="finance-entry-plan__preview-title">Prévia das parcelas</p>
                   <ul className="finance-entry-plan__preview-list">
                     {preview.map((installment) => (

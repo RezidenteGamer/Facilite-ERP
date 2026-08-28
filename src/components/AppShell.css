@@ -63,7 +63,13 @@
 .app-header__row {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  /* Antes era space-between: com só 4 itens (marca, nav, busca,
+     alterna-tema) isso espalhava TODO o espaço sobrando em partes iguais
+     entre cada par — o vão entre a busca e o botão de tema ficava enorme
+     mesmo sem a busca ter crescido. Agora o espaço sobrando vai só entre
+     nav e busca (via margin-left:auto em .app-search, abaixo); busca e
+     tema ficam com o mesmo gap fixo de qualquer outro par de itens. */
+  justify-content: flex-start;
   gap: 24px;
   flex-wrap: wrap;
   transition: align-items .25s var(--ease);
@@ -158,6 +164,10 @@
   gap: var(--search-gap);
   padding-top: 2px;
   transition: padding-top .25s var(--ease);
+  /* Empurra o grupo busca+tema pro canto direito, agora que a linha não
+     usa mais space-between (ver .app-header__row) — o espaço sobrando
+     vai só aqui, entre a navegação e a busca, não mais espalhado. */
+  margin-left: auto;
 }
 
 .app-search__label {
@@ -365,6 +375,14 @@
      viewport, não só quando a tela é alta o bastante para nunca
      precisar rolar. */
   padding-bottom: var(--content-bottom-clearance-fit);
+  /* Menos folga em cima também, só neste modo: a altura já é travada na
+     viewport (min-height:0 + rolagem interna), então cada pixel de topo
+     "roubado" é espaço que o painel (RegistryLayout/RegistryTable) nunca
+     recupera — diferente do modo de rolagem de página normal, onde sobra
+     espaço embaixo do fold. Pedido do usuário: aproximar o painel da
+     barra de cima em telas com esse layout (Financeiro, Relatórios,
+     Produtos, etc.). */
+  padding-top: 18px;
 }
 
 @media (max-width: 900px) {

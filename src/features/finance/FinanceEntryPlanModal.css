@@ -1,7 +1,26 @@
+/* Layout em duas colunas do formulário inteiro — pedido do usuário depois
+   de alargar o modal genérico (registry-form-modal, 460px→660px): com mais
+   largura disponível, empilhar um campo por linha desperdiça espaço.
+   `.finance-entry-plan__full` marca os itens que precisam da largura toda
+   (busca de contato com dropdown, checkbox, prévia de parcelas). */
+.finance-entry-plan__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  align-items: start;
+}
+
+.finance-entry-plan__full {
+  grid-column: 1 / -1;
+}
+
 .finance-entry-plan__row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  /* Dentro de uma célula do grid de duas colunas acima, então continua
+     valendo mesmo sem span — dois campos pequenos lado a lado dentro de
+     uma coluna só (parcelas/intervalo). */
 }
 
 .finance-entry-plan__checkbox {
