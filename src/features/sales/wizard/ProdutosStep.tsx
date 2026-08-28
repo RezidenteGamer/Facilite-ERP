@@ -1,6 +1,11 @@
 import { useDroppable } from "@dnd-kit/core";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import ProductPickerPanel from "../../../components/product-picker/ProductPickerPanel";
+import {
+  fetchUnitsOfMeasure,
+  unitAllowsFraction,
+  type UnitOfMeasure,
+} from "../../../lib/repositories/unitsOfMeasureLookups";
 import { formatMoney } from "../sales";
 import type { useSaleDraft } from "../useSaleDraft";
 import "../SalePage.css";
@@ -28,6 +33,24 @@ function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }
 
 /** Etapa 2: produtos à esquerda (clique ou arraste), carrinho à direita — mesmo esquema de antes. */
 export default function ProdutosStep({ draft, branchId }: ProdutosStepProps) {
+  // Lista curta, buscada uma vez — decide se a quantidade de cada linha pode
+  // ser fracionada (ver `unitAllowsFraction`). Produto sem unidade definida
+  // continua fracionável.
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchUnitsOfMeasure()
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="sale__step-body sale__step-body--produtos">
       <div className="sale__products-panel">
@@ -61,31 +84,38 @@ export default function ProdutosStep({ draft, branchId }: ProdutosStepProps) {
                         </div>
                         <input
                           className="sale__cart-line-input"
-                          type="number"
-                          min={0.001}
-                          step="0.001"
+                          type="text"
+                          inputMode="decimal"
                           aria-label={`Quantidade — ${line.product.description}`}
                           value={line.quantity}
-                          onChange={(e) => draft.updateLine(line.lineId, { quantity: Number(e.target.value) || 0 })}
+                          onChange={(e) => {
+                            const raw = Number(e.target.value.replace(",", ".")) || 0;
+                            const quantity = unitAllowsFraction(line.product.unidadeComercial, units)
+                              ? raw
+                              : Math.round(raw);
+                            draft.updateLine(line.lineId, { quantity });
+                          }}
                         />
                         <input
                           className="sale__cart-line-input"
-                          type="number"
-                          min={0}
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           aria-label={`Preço unitário — ${line.product.description}`}
                           value={line.unitPrice}
-                          onChange={(e) => draft.updateLine(line.lineId, { unitPrice: Number(e.target.value) || 0 })}
+                          onChange={(e) =>
+                            draft.updateLine(line.lineId, { unitPrice: Number(e.target.value.replace(",", ".")) || 0 })
+                          }
                         />
                         <input
                           className="sale__cart-line-input"
-                          type="number"
-                          min={0}
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           aria-label={`Desconto — ${line.product.description}`}
                           value={line.discountAmount}
                           onChange={(e) =>
-                            draft.updateLine(line.lineId, { discountAmount: Number(e.target.value) || 0 })
+                            draft.updateLine(line.lineId, {
+                              discountAmount: Number(e.target.value.replace(",", ".")) || 0,
+                            })
                           }
                         />
                         <span className="sale__cart-line-total">{formatMoney(draft.lineTotal(line))}</span>

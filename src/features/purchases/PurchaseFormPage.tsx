@@ -23,6 +23,11 @@ import QuickContactFormModal from "../customers/QuickContactFormModal";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
+import {
+  fetchUnitsOfMeasure,
+  unitAllowsFraction,
+  type UnitOfMeasure,
+} from "../../lib/repositories/unitsOfMeasureLookups";
 import { PurchasesIcon } from "../home/icons";
 import { formatMoney, SALE_PAYMENT_METHOD_LABEL, type SalePaymentMethod } from "../sales/sales";
 import { usePurchaseDraft } from "./usePurchaseDraft";
@@ -60,6 +65,24 @@ export default function PurchaseFormPage() {
   const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
+
+  // Lista curta, buscada uma vez — decide se a quantidade de cada item pode
+  // ser fracionada (ver `unitAllowsFraction`). Produto sem unidade definida
+  // continua fracionável.
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchUnitsOfMeasure()
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const canCreate = hasPermission("compras", "create");
   /* Sem permissao de criar contato o atalho some - oferecer um cadastro que a
@@ -282,13 +305,17 @@ export default function PurchaseFormPage() {
                               <input
                                 className="sale__cart-line-input"
                                 type="number"
-                                min={0.001}
-                                step="0.001"
+                                min={unitAllowsFraction(line.product.unidadeComercial, units) ? 0.001 : 1}
+                                step={unitAllowsFraction(line.product.unidadeComercial, units) ? "0.001" : "1"}
                                 aria-label={`Quantidade — ${line.product.description}`}
                                 value={line.quantity}
-                                onChange={(e) =>
-                                  draft.updateLine(line.lineId, { quantity: Number(e.target.value) || 0 })
-                                }
+                                onChange={(e) => {
+                                  const raw = Number(e.target.value) || 0;
+                                  const quantity = unitAllowsFraction(line.product.unidadeComercial, units)
+                                    ? raw
+                                    : Math.round(raw);
+                                  draft.updateLine(line.lineId, { quantity });
+                                }}
                               />
                               <input
                                 className="sale__cart-line-input"
