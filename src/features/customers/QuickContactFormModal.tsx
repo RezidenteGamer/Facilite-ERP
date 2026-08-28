@@ -4,6 +4,7 @@ import { createContactsRepository } from "../../lib/repositories/contactsReposit
 import { buildFormFields } from "../registry-engine/moduleView";
 import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
+import CnpjLookupField from "./CnpjLookupField";
 import { contactInputFromFormValues } from "./contactForm";
 import type { Contact, ContactKind } from "./contacts";
 import "../../components/ConfirmDialog.css";
@@ -38,6 +39,16 @@ export default function QuickContactFormModal({
   const formFields = useMemo(() => (definition ? buildFormFields(definition.fields) : []), [definition]);
 
   const termo = kind === "clientes" ? "cliente" : "fornecedor";
+
+  const fieldExtras = {
+    document: ({
+      values,
+      setValue,
+    }: {
+      values: Record<string, string>;
+      setValue: (accessorKey: string, value: string) => void;
+    }) => <CnpjLookupField values={values} setValue={setValue} />,
+  };
 
   async function handleSubmit(values: Record<string, string>) {
     setSubmitError(null);
@@ -86,6 +97,7 @@ export default function QuickContactFormModal({
       title={`Novo ${termo}`}
       fields={formFields}
       initialValues={initialName ? { name: initialName } : undefined}
+      fieldExtras={fieldExtras}
       submitError={submitError}
       onSubmit={handleSubmit}
       onCancel={onCancel}

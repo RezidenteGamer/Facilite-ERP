@@ -1,0 +1,36 @@
+.cnpj-lookup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.cnpj-lookup__btn {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  border: 0;
+  background: var(--amber);
+  color: var(--white);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cnpj-lookup__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cnpj-lookup__hint {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--white);
+  opacity: 0.85;
+}

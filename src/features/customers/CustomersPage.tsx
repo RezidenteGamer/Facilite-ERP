@@ -12,6 +12,7 @@ import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { useAuth } from "../auth/AuthContext";
 import { ClientsIcon } from "../home/icons";
+import CnpjLookupField from "./CnpjLookupField";
 import { contactInputFromFormValues } from "./contactForm";
 import type { Contact, ContactKind } from "./contacts";
 import { useContactsData } from "./useContactsData";
@@ -124,6 +125,20 @@ export default function CustomersPage() {
       setPhotoUploading(false);
     }
   }
+
+  /**
+   * Busca de CNPJ (BrasilAPI) logo abaixo de "Documento" — atalho opcional,
+   * mesmo padrão de `fieldExtras` da calculadora de margem de Produtos.
+   */
+  const contactFieldExtras = {
+    document: ({
+      values,
+      setValue,
+    }: {
+      values: Record<string, string>;
+      setValue: (accessorKey: string, value: string) => void;
+    }) => <CnpjLookupField values={values} setValue={setValue} />,
+  };
 
   async function handleCreateSubmit(values: Record<string, string>) {
     const created = await createContact(contactInputFromFormValues(values));
@@ -283,6 +298,7 @@ export default function CustomersPage() {
             imageUrl: pendingPhotoPreview,
             onFileSelected: handleNewPhotoSelected,
           }}
+          fieldExtras={contactFieldExtras}
           onSubmit={handleCreateSubmit}
           onCancel={() => {
             clearPendingPhoto();
@@ -301,6 +317,7 @@ export default function CustomersPage() {
             uploading: photoUploading,
             onFileSelected: (file) => handleExistingPhotoSelected(selected.id, file),
           }}
+          fieldExtras={contactFieldExtras}
           initialValues={{
             name: selected.name,
             document: selected.document,
