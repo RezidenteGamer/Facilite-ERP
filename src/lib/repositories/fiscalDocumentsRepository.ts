@@ -160,7 +160,7 @@ export async function fetchInvoiceSales(branchId: string): Promise<InvoiceSaleRo
     return {
       saleId: sale.id,
       saleCode: sale.code,
-      clientName: sale.contact?.name ?? "Sem cliente",
+      clientName: sale.contact?.name ?? "Consumidor final",
       paymentMethod,
       installments,
       total: sale.total_amount,

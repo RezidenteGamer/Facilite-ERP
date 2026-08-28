@@ -124,7 +124,7 @@ export async function fetchConditionals(branchId: string): Promise<ConditionalLi
     return {
       id: row.id,
       code: row.code,
-      clientName: row.contact?.name ?? "Sem cliente",
+      clientName: row.contact?.name ?? "Consumidor final",
       issueDate: row.issue_date,
       dueDate: row.due_date,
       totalAmount: row.total_amount,
@@ -208,7 +208,7 @@ export async function fetchConditionalDetail(conditionalId: string): Promise<Con
   return {
     conditionalId: conditional.id,
     code: conditional.code,
-    clientName: conditional.contact?.name ?? "Sem cliente",
+    clientName: conditional.contact?.name ?? "Consumidor final",
     issueDate: conditional.issue_date,
     dueDate: conditional.due_date,
     headerStatus: conditional.status,

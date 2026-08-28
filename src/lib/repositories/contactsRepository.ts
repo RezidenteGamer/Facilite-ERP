@@ -21,6 +21,7 @@ function toContact(row: ContactRow): Contact {
     name: row.name,
     document: row.document,
     active: row.active,
+    isFavorite: row.is_favorite,
     logradouro: row.logradouro ?? undefined,
     numero: row.numero ?? undefined,
     bairro: row.bairro ?? undefined,
@@ -46,6 +47,7 @@ function toUpdateRow(patch: Partial<Contact>): TablesUpdate<"contacts"> {
     ...(patch.name !== undefined && { name: patch.name }),
     ...(patch.document !== undefined && { document: patch.document }),
     ...(patch.active !== undefined && { active: patch.active }),
+    ...(patch.isFavorite !== undefined && { is_favorite: patch.isFavorite }),
     ...(patch.logradouro !== undefined && { logradouro: patch.logradouro || null }),
     ...(patch.numero !== undefined && { numero: patch.numero || null }),
     ...(patch.bairro !== undefined && { bairro: patch.bairro || null }),
@@ -95,6 +97,7 @@ export function createContactsRepository(kind: ContactKind): ModuleDataRepositor
         .from("contacts")
         .select("*")
         .eq("kind", kind)
+        .order("is_favorite", { ascending: false })
         .order("code", { ascending: true });
       if (error) throw error;
       return (data ?? []).map(toContact);
@@ -109,6 +112,7 @@ export function createContactsRepository(kind: ContactKind): ModuleDataRepositor
         name: input.name,
         document: input.document,
         active: input.active,
+        is_favorite: input.isFavorite,
         logradouro: input.logradouro || null,
         numero: input.numero || null,
         bairro: input.bairro || null,

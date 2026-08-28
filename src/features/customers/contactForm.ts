@@ -14,6 +14,7 @@ export function contactInputFromFormValues(values: Record<string, string>): NewC
     name: values.name ?? "",
     document: values.document ?? "",
     active: true,
+    isFavorite: false,
     logradouro: values.logradouro || undefined,
     numero: values.numero || undefined,
     bairro: values.bairro || undefined,

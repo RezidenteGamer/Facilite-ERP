@@ -6,6 +6,7 @@ export type Contact = {
   name: string;
   document: string;
   active: boolean;
+  isFavorite: boolean;
   logradouro?: string;
   numero?: string;
   bairro?: string;

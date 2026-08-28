@@ -68,7 +68,7 @@ export async function fetchSaleReturns(branchId: string): Promise<SaleReturnList
     code: row.code,
     saleId: row.sale_id,
     saleCode: row.sale?.code ?? "—",
-    clientName: row.sale?.contact?.name ?? "Sem cliente",
+    clientName: row.sale?.contact?.name ?? "Consumidor final",
     reason: row.reason,
     status: row.status,
     total: row.total_amount,
@@ -186,7 +186,7 @@ export async function fetchReturnableSaleDetail(saleId: string): Promise<Returna
   return {
     saleId: sale.id,
     saleCode: sale.code,
-    clientName: sale.contact?.name ?? "Sem cliente",
+    clientName: sale.contact?.name ?? "Consumidor final",
     issueDate: sale.issue_date,
     saleSubtotal: sale.subtotal_amount,
     saleDiscount: sale.discount_amount,

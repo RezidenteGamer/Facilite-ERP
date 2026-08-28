@@ -25,6 +25,7 @@ export async function fetchContactsByKind(kind: ContactKind, query: string): Pro
     name: row.name,
     document: row.document,
     active: row.active,
+    isFavorite: row.is_favorite,
     logradouro: row.logradouro ?? undefined,
     numero: row.numero ?? undefined,
     bairro: row.bairro ?? undefined,
