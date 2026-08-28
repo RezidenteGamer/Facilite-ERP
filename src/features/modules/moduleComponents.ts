@@ -58,6 +58,13 @@ export const MODULE_SUBROUTES: ModuleSubroute[] = [
     component: lazy(() => import("../sales/SaleOrderFormPage")),
   },
   {
+    // Mesma tela do "novo": o `:id` é o que a coloca em modo edição — ver
+    // `SaleOrderFormPage.tsx`.
+    moduleId: "pedidos-venda",
+    path: "/pedidos-venda/:id/editar",
+    component: lazy(() => import("../sales/SaleOrderFormPage")),
+  },
+  {
     moduleId: "compras",
     path: "/compras/nova",
     component: lazy(() => import("../purchases/PurchaseFormPage")),

@@ -10,7 +10,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import AppShell, { type HeaderNavItem } from "../../components/AppShell";
 import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components/icons";
 import SearchCombobox from "../../components/form/SearchCombobox";
@@ -22,7 +22,13 @@ import type { Contact } from "../customers/contacts";
 import QuickContactFormModal from "../customers/QuickContactFormModal";
 import type { Product } from "../products/products";
 import { fetchSaleContacts, fetchSaleSellers, type SaleSeller } from "../../lib/repositories/salesLookups";
+import {
+  fetchUnitsOfMeasure,
+  unitAllowsFraction,
+  type UnitOfMeasure,
+} from "../../lib/repositories/unitsOfMeasureLookups";
 import { SaleOrdersIcon } from "../home/icons";
+import { SALE_ORDER_STATUS_LABEL } from "./saleOrders";
 import { formatMoney, SALE_PAYMENT_METHOD_LABEL, type SalePaymentMethod } from "./sales";
 import { useSaleOrderDraft } from "./useSaleOrderDraft";
 import "./SalePage.css";
@@ -52,22 +58,54 @@ function CartDropzone({ children }: { children: (isOver: boolean) => ReactNode }
   );
 }
 
-/** Tela de criação de um novo Pedido de venda: espelha `SalePage.tsx`, mas em uma etapa só. */
+/**
+ * Formulário de Pedido de venda: espelha `SalePage.tsx`, mas em uma etapa só.
+ *
+ * A **mesma** tela serve para criar (`/pedidos-venda/novo`) e para editar
+ * (`/pedidos-venda/:id/editar`) — o que muda é a presença do `:id` na rota.
+ * Duplicar a tela para o modo edição significaria manter dois formulários em
+ * sincronia para sempre; aqui o que difere é o rascunho nascer carregado e o
+ * submit chamar `update_sale_order` em vez de `create_sale_order`, e as duas
+ * coisas moram em `useSaleOrderDraft`.
+ */
 export default function SaleOrderFormPage() {
   const navigate = useNavigate();
+  const { id: editingOrderId } = useParams<{ id: string }>();
+  const isEditing = Boolean(editingOrderId);
+  const formPath = editingOrderId ? `/pedidos-venda/${editingOrderId}/editar` : "/pedidos-venda/novo";
   const { openWindow, updateWindowPath } = useOpenWindows();
   const { hasPermission, currentBranchId, profile } = useAuth();
   const defaultSeller = useMemo(
     () => (profile ? { id: profile.id, name: profile.name, operatorCode: profile.operatorCode } : null),
     [profile],
   );
-  const draft = useSaleOrderDraft(currentBranchId, defaultSeller, SALE_ORDER_WINDOW_ID);
+  const draft = useSaleOrderDraft(currentBranchId, defaultSeller, SALE_ORDER_WINDOW_ID, editingOrderId ?? null);
   /** Nome digitado que originou o "Cadastrar novo" — `null` = modal fechado. */
   const [creatingContactName, setCreatingContactName] = useState<string | null>(null);
   const [draggingProduct, setDraggingProduct] = useState<Product | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, POINTER_SENSOR_OPTIONS));
 
-  const canCreate = hasPermission("pedidos-venda", "create");
+  // Lista curta, buscada uma vez — decide se a quantidade de cada item pode
+  // ser fracionada (ver `unitAllowsFraction`). Produto sem unidade definida
+  // continua fracionável.
+  const [units, setUnits] = useState<UnitOfMeasure[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchUnitsOfMeasure()
+      .then((rows) => {
+        if (!cancelled) setUnits(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setUnits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* Criar e editar são ações diferentes no RBAC — e a RPC de cada uma cobra a
+     sua. Quem só tem `create` não edita pedido nenhum. */
+  const canSave = hasPermission("pedidos-venda", isEditing ? "edit" : "create");
   /* Sem permissão de criar contato o atalho some — oferecer um cadastro que a
      RLS vai recusar só produz erro. */
   const canCreateContact = hasPermission("clientes-fornecedores", "create");
@@ -90,14 +128,14 @@ export default function SaleOrderFormPage() {
     openWindow({
       id: SALE_ORDER_WINDOW_ID,
       label: "Pedidos de venda",
-      path: "/pedidos-venda/novo",
+      path: formPath,
       icon: SaleOrdersIcon,
     });
     // Garante que a janela aponte para o formulário mesmo quando a lista já
     // a registrou primeiro (`openWindow` não sobrescreve rota de janela
     // existente) — ver `updateWindowPath` em `openWindows.tsx`.
-    updateWindowPath(SALE_ORDER_WINDOW_ID, "/pedidos-venda/novo");
-  }, [openWindow, updateWindowPath]);
+    updateWindowPath(SALE_ORDER_WINDOW_ID, formPath);
+  }, [openWindow, updateWindowPath, formPath]);
 
   const navItems: HeaderNavItem[] = [
     { id: "inicio", label: "Inicio", icon: HouseIcon, onClick: () => navigate("/inicio") },
@@ -112,12 +150,58 @@ export default function SaleOrderFormPage() {
         <div className="sale">
           <div className="sale__panel">
             <div className="sale__card sale__card--success">
-              <p className="sale__success-title">Pedido {draft.confirmedOrder.code} salvo!</p>
+              <p className="sale__success-title">
+                Pedido {draft.confirmedOrder.code} {isEditing ? "atualizado" : "salvo"}!
+              </p>
               <p className="sale__success-total">Total: {formatMoney(draft.confirmedOrder.totalAmount)}</p>
               <div className="sale__success-actions">
-                <button className="sale__continue" type="button" onClick={() => draft.reset()}>
-                  Novo pedido
+                {/* "Novo pedido" só faz sentido em quem acabou de criar: em
+                    modo edição a tela está presa a um pedido existente. */}
+                {!isEditing && (
+                  <button className="sale__continue" type="button" onClick={() => draft.reset()}>
+                    Novo pedido
+                  </button>
+                )}
+                <button className="sale__back" type="button" onClick={() => navigate("/pedidos-venda")}>
+                  Ver pedidos
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (isEditing && draft.loading) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Pedidos de venda">
+        <div className="sale">
+          <div className="sale__panel">
+            <div className="sale__card">
+              <p className="sale__cart-empty">Carregando o pedido...</p>
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  /* Segunda barreira da regra "só pedido em aberto se edita" — a primeira é a
+     própria `update_sale_order`, e a lista já desabilita "Editar". Esta cobre
+     quem chegou pela URL direto, ou quem deixou a tela aberta enquanto o
+     pedido era convertido em outra janela. */
+  if (isEditing && (draft.loadError || !draft.editable)) {
+    return (
+      <AppShell navItems={navItems} secondaryText="Pedidos de venda">
+        <div className="sale">
+          <div className="sale__panel">
+            <div className="sale__card">
+              <p className="sale__error">
+                {draft.loadError ??
+                  `Este pedido está ${SALE_ORDER_STATUS_LABEL[draft.editingOrder?.status ?? "cancelado"].toLowerCase()} e não pode mais ser editado.`}
+              </p>
+              <div className="sale__confirm-actions">
                 <button className="sale__back" type="button" onClick={() => navigate("/pedidos-venda")}>
                   Ver pedidos
                 </button>
@@ -140,7 +224,11 @@ export default function SaleOrderFormPage() {
         <div className="sale">
           <div className="sale__panel">
             <div className="sale__card">
-              <p className="sale__cart-title">Quem é o cliente?</p>
+              <p className="sale__cart-title">
+                {isEditing && draft.editingOrder
+                  ? `Editando o pedido ${draft.editingOrder.code}`
+                  : "Quem é o cliente?"}
+              </p>
               <div className="sale__who">
                 <SearchCombobox<Contact>
                   id="pedido-cliente"
@@ -250,13 +338,17 @@ export default function SaleOrderFormPage() {
                               <input
                                 className="sale__cart-line-input"
                                 type="number"
-                                min={0.001}
-                                step="0.001"
+                                min={unitAllowsFraction(line.product.unidadeComercial, units) ? 0.001 : 1}
+                                step={unitAllowsFraction(line.product.unidadeComercial, units) ? "0.001" : "1"}
                                 aria-label={`Quantidade — ${line.product.description}`}
                                 value={line.quantity}
-                                onChange={(e) =>
-                                  draft.updateLine(line.lineId, { quantity: Number(e.target.value) || 0 })
-                                }
+                                onChange={(e) => {
+                                  const raw = Number(e.target.value) || 0;
+                                  const quantity = unitAllowsFraction(line.product.unidadeComercial, units)
+                                    ? raw
+                                    : Math.round(raw);
+                                  draft.updateLine(line.lineId, { quantity });
+                                }}
                               />
                               <input
                                 className="sale__cart-line-input"
@@ -336,16 +428,25 @@ export default function SaleOrderFormPage() {
                     </div>
 
                     {draft.submitError && <p className="sale__error">{draft.submitError}</p>}
-                    {!canCreate && <p className="sale__error">Você não tem permissão para criar pedidos de venda.</p>}
+                    {!canSave && (
+                      <p className="sale__error">
+                        Você não tem permissão para {isEditing ? "editar" : "criar"} pedidos de venda.
+                      </p>
+                    )}
 
                     <div className="sale__confirm-actions">
+                      {isEditing && (
+                        <button className="sale__back" type="button" onClick={() => navigate("/pedidos-venda")}>
+                          Cancelar
+                        </button>
+                      )}
                       <button
                         className="sale__continue"
                         type="button"
-                        disabled={!draft.canConfirm || !canCreate}
+                        disabled={!draft.canConfirm || !canSave}
                         onClick={() => draft.confirmOrder()}
                       >
-                        {draft.submitting ? "Salvando..." : "Salvar pedido"}
+                        {draft.submitting ? "Salvando..." : isEditing ? "Salvar alterações" : "Salvar pedido"}
                       </button>
                     </div>
                   </>

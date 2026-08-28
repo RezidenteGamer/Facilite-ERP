@@ -160,3 +160,25 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
     },
   };
 }
+
+/**
+ * Busca produtos por id, dentro de uma filial. Existe para reidratar um
+ * carrinho a partir de itens já gravados (ex.: abrir um pedido de venda em
+ * modo edição) — a linha do carrinho guarda o `Product` inteiro (unidade,
+ * preço, código), e o item gravado guarda só o `product_id`.
+ *
+ * O filtro por filial não é redundante com a RLS: ele garante que um id
+ * apontando para produto de outra filial simplesmente não volte, em vez de
+ * voltar e ser recusado depois pela RPC.
+ */
+export async function fetchProductsByIds(branchId: string, ids: string[]): Promise<Product[]> {
+  if (ids.length === 0) return [];
+  const client = assertSupabase();
+  const { data, error } = await client
+    .from("products")
+    .select(PRODUCT_SELECT)
+    .eq("branch_id", branchId)
+    .in("id", ids);
+  if (error) throw error;
+  return (data ?? []).map(toProduct);
+}

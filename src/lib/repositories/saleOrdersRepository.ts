@@ -112,6 +112,22 @@ export async function createSaleOrder(input: CreateSaleOrderInput): Promise<Sale
   return toSaleOrder(data as SaleOrderRow);
 }
 
+/**
+ * Edita um pedido **em aberto** (cabeçalho + substituição dos itens),
+ * atomicamente via RPC. A própria `update_sale_order` recusa pedido que já
+ * virou venda ou foi cancelado — a UI desabilita "Editar" nesses casos, mas a
+ * barreira que vale é a do banco.
+ *
+ * O payload é o mesmo de `createSaleOrder` por simetria; a RPC ignora
+ * `branch_id` de propósito (filial e código de um pedido não mudam).
+ */
+export async function updateSaleOrder(id: string, input: CreateSaleOrderInput): Promise<SaleOrder> {
+  const client = assertSupabase();
+  const { data, error } = await client.rpc("update_sale_order", { p_id: id, payload: toPayload(input) });
+  if (error) throw error;
+  return toSaleOrder(data as SaleOrderRow);
+}
+
 /** Converte um pedido em aberto numa venda de verdade (via `create_sale`) — é aí que o estoque baixa. */
 export async function convertSaleOrderToSale(saleOrderId: string): Promise<{ id: string; code: string }> {
   const client = assertSupabase();
@@ -122,6 +138,8 @@ export async function convertSaleOrderToSale(saleOrderId: string): Promise<{ id:
 
 export type SaleOrderDetailItem = {
   id: string;
+  /** Necessário para reidratar o carrinho no modo edição — ver `fetchProductsByIds`. */
+  productId: string;
   productCode: string;
   productDescription: string;
   quantity: number;
@@ -135,6 +153,7 @@ export type SaleOrderDetail = SaleOrder & { items: SaleOrderDetailItem[] };
 type SaleOrderDetailRow = SaleOrderRow & {
   items?: Array<{
     id: string;
+    product_id: string;
     quantity: number;
     unit_price: number;
     discount_amount: number;
@@ -150,7 +169,7 @@ export async function fetchSaleOrderWithItems(id: string): Promise<SaleOrderDeta
     .from("sale_orders")
     .select(
       `*, contact:contacts(name), seller:profiles!sale_orders_seller_id_fkey(name),
-       items:sale_order_items(id, quantity, unit_price, discount_amount, total_amount,
+       items:sale_order_items(id, product_id, quantity, unit_price, discount_amount, total_amount,
          product:products(code, description))`,
     )
     .eq("id", id)
@@ -161,6 +180,7 @@ export async function fetchSaleOrderWithItems(id: string): Promise<SaleOrderDeta
     ...toSaleOrder(row),
     items: (row.items ?? []).map((item) => ({
       id: item.id,
+      productId: item.product_id,
       productCode: item.product?.code ?? "",
       productDescription: item.product?.description ?? "",
       quantity: item.quantity,
