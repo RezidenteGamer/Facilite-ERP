@@ -2826,6 +2826,37 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      list_orphan_cash_sales: {
+        Args: { p_branch_id: string }
+        Returns: {
+          branch_id: string
+          code: string
+          contact_id: string | null
+          created_at: string
+          created_by: string | null
+          document: string | null
+          due_date: string
+          id: string
+          installment_group_id: string
+          installment_number: number
+          installment_total: number
+          issue_date: string
+          origin_id: string | null
+          origin_kind: Database["public"]["Enums"]["financial_entry_origin_kind"]
+          payment_method: string | null
+          settled_at: string | null
+          status: Database["public"]["Enums"]["financial_entry_status"]
+          total: number
+          type: Database["public"]["Enums"]["financial_entry_type"]
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "financial_entries"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       module_field_key: { Args: { p_label: string }; Returns: string }
       open_cash_session: {
         Args: { p_opening_amount: number; p_register_id: string }
