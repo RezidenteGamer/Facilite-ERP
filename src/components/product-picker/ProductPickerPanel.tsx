@@ -125,6 +125,7 @@ export default function ProductPickerPanel({
         allowNegativeStockToOption(editingProduct.allowNegativeStock),
         editingProduct.unidadeComercial ?? "",
         editingProduct.unidadeTributavel ?? "",
+        editingProduct.ncm ?? "",
       ),
     );
     setEditingProduct(null);

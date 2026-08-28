@@ -21,11 +21,14 @@ export type ModuleFieldDefinition = {
   showInDetails: boolean;
   showInForm: boolean;
   /**
-   * Quando preenchido, o valor deste campo (dentro de `module_records.data`)
-   * é o `id` de um registro de outro módulo genérico — a base tanto para
-   * mostrar dado relacionado quanto para uma ação de transição alcançar "em
-   * qual registro do outro módulo" escrever. Só desenvolvedor do Facilite
-   * define (trigger `module_fields_guard_reference` no banco).
+   * Quando preenchido, o valor deste campo é o `id` de um registro de outro
+   * módulo — a base tanto para mostrar dado relacionado quanto (nos módulos
+   * `generic`) para uma ação de transição alcançar "em qual registro do
+   * outro módulo" escrever. O módulo referenciado e o dono do campo têm
+   * sempre o mesmo `storage_kind`: `generic` aponta para um `module_records.id`,
+   * `table` aponta para o `id` de uma linha na tabela dedicada (ex.:
+   * Tributações → `ufs`/`cfop`/etc.). Só desenvolvedor do Facilite define
+   * (trigger `module_fields_guard_reference` no banco).
    */
   referenceModuleId: string | null;
 };

@@ -68,12 +68,15 @@ export default function GenericModulePage({ module }: { module: CatalogModule })
     enabled: canView && (module.storageKind === "generic" || Boolean(definition?.dataTable)),
   });
 
-  /* Workflow e campos de referência só existem no armazenamento genérico:
-     um módulo `table` guarda o dado numa tabela dedicada, que não tem coluna
-     `status` nem chave de referência para `module_records`. */
+  /* Workflow só existe no armazenamento genérico: um módulo `table` guarda o
+     dado numa tabela dedicada, que não tem coluna `status`. Campos de
+     referência não têm essa restrição — `useModuleReferences` resolve tanto
+     `generic` (module_records) quanto `table` (a tabela dedicada), então um
+     módulo `table` como Tributações também pode referenciar outro `table`
+     como os catálogos de UF/CFOP/etc. (ver `module_fields_guard_reference`). */
   const isGeneric = module.storageKind === "generic";
   const workflow = useModuleWorkflow(module.id, canView && isGeneric);
-  const references = useModuleReferences(fields, canView && isGeneric);
+  const references = useModuleReferences(fields, canView);
 
   useEffect(() => {
     if (!module.path) return;

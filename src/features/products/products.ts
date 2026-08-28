@@ -93,9 +93,9 @@ export function validateProductFormValues(values: Record<string, string>): strin
 
 /**
  * Monta o input de create/update de Produto a partir dos valores (texto) do
- * `RegistryFormModal`. O grupo tributário vem à parte porque é escolhido pelo
- * `lookupField` (um id, não um campo de texto do formulário) — mesmo formato
- * do contato no Financeiro.
+ * `RegistryFormModal`. O grupo tributário e o NCM vêm à parte porque são
+ * escolhidos pelo `lookupFields` (um `SearchCombobox` cada, não um campo de
+ * texto do formulário) — mesmo formato do contato no Financeiro.
  */
 /** Valores do `<select>` de três estados — texto porque o formulário genérico só lida com strings. */
 export type AllowNegativeStockOption = "" | "true" | "false";
@@ -124,6 +124,7 @@ export function buildProductInput(
   allowNegativeStockOption: AllowNegativeStockOption,
   unidadeComercial: string,
   unidadeTributavel: string,
+  ncm: string,
 ): Omit<Product, "id" | "code" | "createdAt"> {
   return {
     description: values.description ?? "",
@@ -133,7 +134,7 @@ export function buildProductInput(
     type: values.type || undefined,
     costPrice: parseAmount(values.costPrice) ?? undefined,
     wholesalePrice: parseAmount(values.wholesalePrice) ?? undefined,
-    ncm: values.ncm || undefined,
+    ncm: ncm || undefined,
     location: values.location || undefined,
     subLocation: values.subLocation || undefined,
     cest: values.cest || undefined,

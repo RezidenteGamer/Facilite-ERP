@@ -353,7 +353,7 @@ export default function FinancePage() {
       )}
 
       {editModalOpen && selected && (
-        <RegistryFormModal<Contact>
+        <RegistryFormModal
           title="Editar lançamento"
           fields={editFormFields}
           initialValues={{
@@ -363,18 +363,21 @@ export default function FinancePage() {
             dueDate: selected.dueDate,
             issueDate: selected.issueDate,
           }}
-          lookupField={{
-            label: lookupLabel,
-            value: formContact?.name ?? "",
-            searchPlaceholder: "Digite o nome ou o documento...",
-            fetchItems: fetchLookupContacts,
-            getKey: (contact) => contact.id,
-            renderItem: (contact) => ({ primary: contact.name, secondary: contact.document }),
-            onSelect: setFormContact,
-            /* Digitar por cima do contato escolhido desfaz a escolha - o campo
-               tem que mostrar o que vai ser gravado. */
-            onClear: () => setFormContact(null),
-          }}
+          lookupFields={[
+            {
+              key: "contact",
+              label: lookupLabel,
+              value: formContact?.name ?? "",
+              searchPlaceholder: "Digite o nome ou o documento...",
+              fetchItems: fetchLookupContacts,
+              getKey: (contact: Contact) => contact.id,
+              renderItem: (contact: Contact) => ({ primary: contact.name, secondary: contact.document }),
+              onSelect: setFormContact,
+              /* Digitar por cima do contato escolhido desfaz a escolha - o campo
+                 tem que mostrar o que vai ser gravado. */
+              onClear: () => setFormContact(null),
+            },
+          ]}
           validate={validateFinanceEntryEditValues}
           onSubmit={handleEditSubmit}
           onCancel={() => setEditModalOpen(false)}

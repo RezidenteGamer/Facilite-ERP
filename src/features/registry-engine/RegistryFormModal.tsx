@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useState, type ReactNode } from "react";
 import FormField from "../../components/form/FormField";
 import SearchCombobox from "../../components/form/SearchCombobox";
+import { normalizeSearchText } from "../../lib/searchText";
 import PhotoDropzone from "./PhotoDropzone";
 import type { ModuleFieldDefinition } from "./types";
 import "./RegistryFormModal.css";
@@ -16,14 +17,20 @@ type RegistryFormModalMediaField = {
 
 /**
  * Ponte para um campo de consulta a outro cadastro (ex.: o grupo tributário
- * de um produto) dentro do formulário genérico.
+ * ou o NCM de um produto) dentro do formulário genérico.
  *
  * Mesmo papel de `mediaField`: `module_fields` não tem um `dataType` de
  * consulta, e criar um seria generalizar o motor inteiro por causa de um
  * campo. O formulário renderiza o `SearchCombobox` e cuida do texto digitado;
  * quem consome só diz o que buscar e o que fazer com o escolhido.
+ *
+ * É lista (`lookupFields`, não `lookupField`) porque Produtos passou a
+ * precisar de dois ao mesmo tempo (Grupo tributário e NCM) — mesmo salto que
+ * `selectFields` já deu antes por motivo parecido. `key` só precisa ser único
+ * dentro do formulário.
  */
-type RegistryFormModalLookupField<TItem> = {
+type RegistryFormModalLookupField<TItem = unknown> = {
+  key: string;
   label: string;
   /** Descrição do item já escolhido. Vazio = nada escolhido ainda. */
   value: string;
@@ -60,21 +67,102 @@ type RegistryFormModalSelectField = {
   onChange: (value: string) => void;
 };
 
-type RegistryFormModalProps<TItem> = {
+/**
+ * `secondary` é o segundo campo `show_in_table` do módulo referenciado
+ * (quando existe) — ex.: a descrição do CFOP, o nome da UF. Só existe para
+ * dar contexto na busca; `label` continua sendo o que fica gravado como
+ * rótulo curto em `references.labels` (tabela/ficha de quem referencia).
+ */
+type ReferenceOption = { value: string; label: string; secondary?: string };
+
+/**
+ * Campo de referência (`module_fields.reference_module_id`) — mesmo
+ * `SearchCombobox` do `lookupFields`, mas sem busca em rede: as opções já
+ * vieram inteiras em `referenceOptions` (`useModuleReferences`), então
+ * `fetchItems` só filtra em memória. Existe porque um `<select>` nativo com
+ * centenas de opções (ex.: os 601 códigos de CFOP) não é pesquisável — o
+ * operador tinha que rolar a lista inteira procurando. Vale para qualquer
+ * campo de referência, não só os grandes: um catálogo de 3 opções também
+ * fica pesquisável, só que a busca some rápido demais para importar.
+ */
+/** "5101 — Venda de produção do estabelecimento", ou só "5101" sem `secondary`. */
+function referenceDisplayText(option: ReferenceOption): string {
+  return option.secondary ? `${option.label} — ${option.secondary}` : option.label;
+}
+
+function ReferenceField({
+  field,
+  options,
+  value,
+  onChange,
+}: {
+  field: ModuleFieldDefinition;
+  options: ReferenceOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  /* Estado local, não sincronizado de fora: ao contrário de `lookupFields`
+     (cujo valor mora em quem chama o modal), o valor de um campo de
+     referência já vive em `values` deste mesmo componente — não há como ele
+     mudar por fora enquanto o modal está aberto. */
+  const [query, setQuery] = useState(() => {
+    const selected = options.find((option) => option.value === value);
+    return selected ? referenceDisplayText(selected) : "";
+  });
+
+  async function fetchItems(term: string): Promise<ReferenceOption[]> {
+    const normalized = normalizeSearchText(term.trim());
+    if (!normalized) return options.slice(0, 50);
+    return options
+      .filter(
+        (option) =>
+          normalizeSearchText(option.label).includes(normalized) ||
+          (option.secondary && normalizeSearchText(option.secondary).includes(normalized)),
+      )
+      .slice(0, 50);
+  }
+
+  return (
+    <SearchCombobox<ReferenceOption>
+      id={`registry-form-reference-${field.accessorKey}`}
+      label={field.isRequired ? `${field.label} *` : field.label}
+      placeholder="Digite o código ou a descrição..."
+      value={query}
+      onChange={(text) => {
+        setQuery(text);
+        /* Digitar por cima da opção escolhida desfaz a escolha — o campo tem
+           que mostrar o que vai ser gravado (mesma regra de `lookupFields`). */
+        if (value) onChange("");
+      }}
+      fetchItems={fetchItems}
+      getKey={(option) => option.value}
+      renderItem={(option) => ({ primary: option.label, secondary: option.secondary })}
+      onSelect={(option) => {
+        onChange(option.value);
+        setQuery(referenceDisplayText(option));
+      }}
+    />
+  );
+}
+
+type RegistryFormModalProps = {
   title: string;
   fields: ModuleFieldDefinition[];
   initialValues?: Record<string, string>;
   submitLabel?: string;
   mediaField?: RegistryFormModalMediaField;
-  lookupField?: RegistryFormModalLookupField<TItem>;
+  lookupFields?: RegistryFormModalLookupField<any>[];
   selectFields?: RegistryFormModalSelectField[];
   /**
    * Opções dos campos de referência (`module_fields.reference_module_id`),
    * por `accessorKey`. Quando um campo tem lista aqui, ele deixa de ser
-   * `<input>` de texto e vira `<select>` de registros do módulo apontado —
-   * senão o formulário estaria pedindo que alguém colasse um uuid à mão.
+   * `<input>` de texto e vira um `SearchCombobox` pesquisável sobre os
+   * registros do módulo apontado (`ReferenceField` abaixo) — senão o
+   * formulário estaria pedindo que alguém colasse um uuid à mão, ou rolasse
+   * um `<select>` nativo de centenas de opções (caso do CFOP) procurando a
+   * certa.
    */
-  referenceOptions?: Record<string, { value: string; label: string }[]>;
+  referenceOptions?: Record<string, ReferenceOption[]>;
   /**
    * Conteúdo extra renderizado logo depois de um campo específico, por
    * `accessorKey` — ex.: a calculadora de margem de Produtos, que fica junto
@@ -112,13 +200,13 @@ type RegistryFormModalProps<TItem> = {
  * de metadados do módulo (`showInForm`), sem conhecer o domínio do módulo.
  * Usada tanto para "Novo" quanto "Editar" — a diferença é só `initialValues`.
  */
-export default function RegistryFormModal<TItem = unknown>({
+export default function RegistryFormModal({
   title,
   fields,
   initialValues,
   submitLabel = "Salvar",
   mediaField,
-  lookupField,
+  lookupFields,
   selectFields,
   referenceOptions,
   fieldExtras,
@@ -126,7 +214,7 @@ export default function RegistryFormModal<TItem = unknown>({
   submitError,
   onSubmit,
   onCancel,
-}: RegistryFormModalProps<TItem>) {
+}: RegistryFormModalProps) {
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const field of fields) {
@@ -135,22 +223,28 @@ export default function RegistryFormModal<TItem = unknown>({
     return initial;
   });
   const [formErrors, setFormErrors] = useState<string[]>([]);
-  /* O texto digitado no campo de consulta é do formulário, não de quem
-     consome: `lookupField.value` descreve o item **escolhido**, e os dois só
-     coincidem enquanto ninguém estiver digitando uma busca nova. */
-  const [lookupQuery, setLookupQuery] = useState(lookupField?.value ?? "");
+  /* O texto digitado em cada campo de consulta é do formulário, não de quem
+     consome: `field.value` descreve o item **escolhido**, e os dois só
+     coincidem enquanto ninguém estiver digitando uma busca nova. Uma
+     assinatura estável (chave:valor de todos os lookups) como dependência do
+     efeito, pelo mesmo motivo de `useModuleReferences`: o array é recriado a
+     cada render de quem chama. */
+  const [lookupQueries, setLookupQueries] = useState<Record<string, string>>(() =>
+    Object.fromEntries((lookupFields ?? []).map((field) => [field.key, field.value])),
+  );
 
-  const lookupValue = lookupField?.value ?? "";
+  const lookupSignature = (lookupFields ?? []).map((field) => `${field.key}:${field.value}`).join("|");
   useEffect(() => {
-    setLookupQuery(lookupValue);
-  }, [lookupValue]);
+    setLookupQueries(Object.fromEntries((lookupFields ?? []).map((field) => [field.key, field.value])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookupSignature]);
 
   function handleSubmit() {
     const missing = fields
       .filter((field) => field.isRequired && !values[field.accessorKey]?.trim())
       .map((field) => field.label);
-    if (lookupField?.isRequired && !lookupField.value.trim()) {
-      missing.unshift(lookupField.label);
+    for (const field of lookupFields ?? []) {
+      if (field.isRequired && !field.value.trim()) missing.unshift(field.label);
     }
 
     const errors: string[] = [];
@@ -197,25 +291,26 @@ export default function RegistryFormModal<TItem = unknown>({
             )}
 
             <div className="registry-form-modal__fields">
-              {lookupField && (
-                <SearchCombobox<TItem>
-                  id="registry-form-lookup"
-                  label={lookupField.isRequired ? `${lookupField.label} *` : lookupField.label}
-                  placeholder={lookupField.searchPlaceholder}
-                  value={lookupQuery}
+              {lookupFields?.map((field) => (
+                <SearchCombobox
+                  key={field.key}
+                  id={`registry-form-lookup-${field.key}`}
+                  label={field.isRequired ? `${field.label} *` : field.label}
+                  placeholder={field.searchPlaceholder}
+                  value={lookupQueries[field.key] ?? field.value}
                   onChange={(text) => {
-                    setLookupQuery(text);
-                    if (lookupField.value) lookupField.onClear?.();
+                    setLookupQueries((current) => ({ ...current, [field.key]: text }));
+                    if (field.value) field.onClear?.();
                   }}
-                  fetchItems={lookupField.fetchItems}
-                  getKey={lookupField.getKey}
-                  renderItem={lookupField.renderItem}
+                  fetchItems={field.fetchItems}
+                  getKey={field.getKey}
+                  renderItem={field.renderItem}
                   onSelect={(item) => {
-                    lookupField.onSelect(item);
-                    setLookupQuery(lookupField.renderItem(item).primary);
+                    field.onSelect(item);
+                    setLookupQueries((current) => ({ ...current, [field.key]: field.renderItem(item).primary }));
                   }}
                 />
-              )}
+              ))}
 
               {selectFields?.map((select) => (
                 <FormField
@@ -237,20 +332,26 @@ export default function RegistryFormModal<TItem = unknown>({
 
                 return (
                   <div key={field.accessorKey}>
-                    <FormField
-                      id={`registry-form-${field.accessorKey}`}
-                      label={field.isRequired ? `${field.label} *` : field.label}
-                      type={options ? "select" : field.dataType === "date" ? "date" : "text"}
-                      options={
-                        options
-                          ? [{ value: "", label: "— nenhum —" }, ...options]
-                          : undefined
-                      }
-                      value={values[field.accessorKey] ?? ""}
-                      onChange={(value) =>
-                        setValues((current) => ({ ...current, [field.accessorKey]: value }))
-                      }
-                    />
+                    {options ? (
+                      <ReferenceField
+                        field={field}
+                        options={options}
+                        value={values[field.accessorKey] ?? ""}
+                        onChange={(value) =>
+                          setValues((current) => ({ ...current, [field.accessorKey]: value }))
+                        }
+                      />
+                    ) : (
+                      <FormField
+                        id={`registry-form-${field.accessorKey}`}
+                        label={field.isRequired ? `${field.label} *` : field.label}
+                        type={field.dataType === "date" ? "date" : "text"}
+                        value={values[field.accessorKey] ?? ""}
+                        onChange={(value) =>
+                          setValues((current) => ({ ...current, [field.accessorKey]: value }))
+                        }
+                      />
+                    )}
                     {fieldExtras?.[field.accessorKey]?.({
                       values,
                       setValue: (accessorKey, value) =>

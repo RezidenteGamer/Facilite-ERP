@@ -231,6 +231,27 @@ export type Database = {
           },
         ]
       }
+      cfop_codes: {
+        Row: {
+          codigo: string
+          created_at: string
+          descricao: string
+          id: string
+        }
+        Insert: {
+          codigo: string
+          created_at?: string
+          descricao: string
+          id?: string
+        }
+        Update: {
+          codigo?: string
+          created_at?: string
+          descricao?: string
+          id?: string
+        }
+        Relationships: []
+      }
       conditional_item_conversions: {
         Row: {
           conditional_item_id: string
@@ -1060,6 +1081,27 @@ export type Database = {
         }
         Relationships: []
       }
+      ncm_codes: {
+        Row: {
+          codigo: string
+          created_at: string
+          descricao: string
+          id: string
+        }
+        Insert: {
+          codigo: string
+          created_at?: string
+          descricao: string
+          id?: string
+        }
+        Update: {
+          codigo?: string
+          created_at?: string
+          descricao?: string
+          id?: string
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           active: boolean
@@ -1323,6 +1365,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      regimes_tributarios: {
+        Row: {
+          chave: string
+          created_at: string
+          id: string
+          rotulo: string
+        }
+        Insert: {
+          chave: string
+          created_at?: string
+          id?: string
+          rotulo: string
+        }
+        Update: {
+          chave?: string
+          created_at?: string
+          id?: string
+          rotulo?: string
+        }
+        Relationships: []
       }
       role_permissions: {
         Row: {
@@ -2034,6 +2097,48 @@ export type Database = {
           tipo_cliente?: string
           uf_destino?: string
           uf_origem?: string
+        }
+        Relationships: []
+      }
+      tipos_cliente: {
+        Row: {
+          chave: string
+          created_at: string
+          id: string
+          rotulo: string
+        }
+        Insert: {
+          chave: string
+          created_at?: string
+          id?: string
+          rotulo: string
+        }
+        Update: {
+          chave?: string
+          created_at?: string
+          id?: string
+          rotulo?: string
+        }
+        Relationships: []
+      }
+      ufs: {
+        Row: {
+          created_at: string
+          id: string
+          nome: string
+          sigla: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          nome: string
+          sigla: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          nome?: string
+          sigla?: string
         }
         Relationships: []
       }
@@ -2868,6 +2973,21 @@ export type Database = {
           operator_code: string
         }[]
       }
+      search_ncm_codes: {
+        Args: { p_term?: string }
+        Returns: {
+          codigo: string
+          created_at: string
+          descricao: string
+          id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ncm_codes"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       search_tax_groups: {
         Args: { p_term?: string }
         Returns: {
@@ -2900,6 +3020,39 @@ export type Database = {
       transition_module_record: {
         Args: { p_record_id: string; p_to_situation_id: string }
         Returns: string
+      }
+      update_sale_order: {
+        Args: { p_id: string; payload: Json }
+        Returns: {
+          address: string | null
+          branch_id: string
+          code: string
+          contact_id: string
+          converted_sale_id: string | null
+          cost_center: string | null
+          created_at: string
+          created_by: string | null
+          delivery_address: string | null
+          department: string | null
+          discount_amount: number
+          freight_amount: number
+          id: string
+          installments: number
+          issue_date: string
+          operation_type: string | null
+          payment_method: Database["public"]["Enums"]["sale_payment_method"]
+          seller_id: string
+          status: Database["public"]["Enums"]["sale_order_status"]
+          subtotal_amount: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "sale_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {

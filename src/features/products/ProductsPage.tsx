@@ -6,6 +6,7 @@ import { BuildingIcon, GearIcon, HeadsetIcon, HouseIcon } from "../../components
 import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryDetails, RegistryLayout, RegistryTable } from "../../components/registry";
 import { uploadProductPhoto } from "../../lib/repositories/productPhotos";
+import { fetchNcmCodes, type NcmCode } from "../../lib/repositories/ncmLookups";
 import { fetchTaxGroups } from "../../lib/repositories/taxGroupLookups";
 import { fetchUnitsOfMeasure, type UnitOfMeasure } from "../../lib/repositories/unitsOfMeasureLookups";
 import { normalizeSearchText } from "../../lib/searchText";
@@ -40,6 +41,14 @@ type ModalState = "none" | "new" | "edit" | "clone";
 /** O que o formulário precisa saber do grupo escolhido: o id que ele grava e o nome que ele mostra. */
 type SelectedTaxGroup = { id: string; name: string };
 
+/**
+ * O que o formulário precisa saber do NCM escolhido: `codigo` é o que
+ * `products.ncm` grava; `descricao` só existe quando veio de uma busca nesta
+ * sessão (ao abrir "Editar"/"Clonar" com um produto que já tem NCM, só o
+ * código é conhecido — o combobox mostra só ele até o operador buscar de novo).
+ */
+type SelectedNcm = { codigo: string; descricao?: string };
+
 /** Módulo "Produtos" — segundo módulo sobre o motor genérico de metadados, isolado por filial. */
 export default function ProductsPage() {
   const navigate = useNavigate();
@@ -57,6 +66,7 @@ export default function ProductsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>("none");
   const [formTaxGroup, setFormTaxGroup] = useState<SelectedTaxGroup | null>(null);
+  const [formNcm, setFormNcm] = useState<SelectedNcm | null>(null);
   const [formAllowNegativeStock, setFormAllowNegativeStock] = useState<AllowNegativeStockOption>("");
   const [formUnidadeComercial, setFormUnidadeComercial] = useState("");
   const [formUnidadeTributavel, setFormUnidadeTributavel] = useState("");
@@ -228,6 +238,7 @@ export default function ProductsPage() {
     setFormTaxGroup(
       source?.taxGroupId ? { id: source.taxGroupId, name: source.taxGroupName ?? "" } : null,
     );
+    setFormNcm(source?.ncm ? { codigo: source.ncm } : null);
     setFormAllowNegativeStock(allowNegativeStockToOption(source?.allowNegativeStock));
     setFormUnidadeComercial(source?.unidadeComercial ?? "");
     setFormUnidadeTributavel(source?.unidadeTributavel ?? "");
@@ -243,6 +254,7 @@ export default function ProductsPage() {
         formAllowNegativeStock,
         formUnidadeComercial,
         formUnidadeTributavel,
+        formNcm?.codigo ?? "",
       ),
     );
 
@@ -269,19 +281,21 @@ export default function ProductsPage() {
         formAllowNegativeStock,
         formUnidadeComercial,
         formUnidadeTributavel,
+        formNcm?.codigo ?? "",
       ),
     );
     setModal("none");
   }
 
   /**
-   * O grupo tributário entra pelo `lookupField` do `RegistryFormModal`, que
-   * desde a etapa do `SearchCombobox` é um campo digitável com sugestão em
-   * vez de um modal aberto pela lupa. `module_fields`
+   * O grupo tributário e o NCM entram pelo `lookupFields` do
+   * `RegistryFormModal`, que desde a etapa do `SearchCombobox` é um campo
+   * digitável com sugestão em vez de um modal aberto pela lupa. `module_fields`
    * continua sem um `data_type: 'lookup'`: criar um generalizaria o motor
    * inteiro por causa de um campo (mesma disciplina já registrada lá).
    */
   const taxGroupLookup = {
+    key: "taxGroup",
     label: "Grupo tributário",
     value: formTaxGroup?.name ?? "",
     searchPlaceholder: "Digite o código ou o nome...",
@@ -292,6 +306,25 @@ export default function ProductsPage() {
     /* Digitar por cima do grupo escolhido desfaz a escolha — o campo tem que
        mostrar o que vai ser gravado. */
     onClear: () => setFormTaxGroup(null),
+  };
+
+  /**
+   * NCM: deixou de ser texto livre (`module_fields.show_in_form` desligado
+   * na migration) e passou a ser uma busca em `ncm_codes` (~10,5 mil códigos
+   * oficiais da Receita/Siscomex) — texto livre não tem como validar contra
+   * uma lista desse tamanho, e um `<select>` simples (como os catálogos
+   * pequenos de UF/CFOP/etc.) não caberia. Mesmo mecanismo de `taxGroupLookup`.
+   */
+  const ncmLookup = {
+    key: "ncm",
+    label: "NCM",
+    value: formNcm ? (formNcm.descricao ? `${formNcm.codigo} — ${formNcm.descricao}` : formNcm.codigo) : "",
+    searchPlaceholder: "Digite o código ou parte da descrição...",
+    fetchItems: fetchNcmCodes,
+    getKey: (item: NcmCode) => item.codigo,
+    renderItem: (item: NcmCode) => ({ primary: item.codigo, secondary: item.descricao }),
+    onSelect: (item: NcmCode) => setFormNcm({ codigo: item.codigo, descricao: item.descricao }),
+    onClear: () => setFormNcm(null),
   };
 
   /** Mesmo papel de `taxGroupLookup`, via `selectField` — três estados, ver `AllowNegativeStockOption`. */
@@ -460,7 +493,7 @@ export default function ProductsPage() {
       {photoError && <p style={{ color: "var(--amber)", padding: "0 24px" }}>{photoError}</p>}
 
       {modal === "new" && (
-        <RegistryFormModal<TaxGroup>
+        <RegistryFormModal
           title="Novo produto"
           fields={formFields}
           mediaField={{
@@ -468,7 +501,7 @@ export default function ProductsPage() {
             imageUrl: pendingPhotoPreview,
             onFileSelected: handleNewPhotoSelected,
           }}
-          lookupField={taxGroupLookup}
+          lookupFields={[taxGroupLookup, ncmLookup]}
           selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
           fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
@@ -481,7 +514,7 @@ export default function ProductsPage() {
       )}
 
       {modal === "edit" && selected && (
-        <RegistryFormModal<TaxGroup>
+        <RegistryFormModal
           title="Editar produto"
           fields={formFields}
           mediaField={{
@@ -490,7 +523,7 @@ export default function ProductsPage() {
             uploading: photoUploading,
             onFileSelected: (file) => handleExistingPhotoSelected(selected.id, file),
           }}
-          lookupField={taxGroupLookup}
+          lookupFields={[taxGroupLookup, ncmLookup]}
           selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
           fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
@@ -501,7 +534,6 @@ export default function ProductsPage() {
             type: selected.type ?? "",
             costPrice: selected.costPrice !== undefined ? String(selected.costPrice) : "",
             wholesalePrice: selected.wholesalePrice !== undefined ? String(selected.wholesalePrice) : "",
-            ncm: selected.ncm ?? "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",
@@ -515,7 +547,7 @@ export default function ProductsPage() {
       )}
 
       {modal === "clone" && selected && (
-        <RegistryFormModal<TaxGroup>
+        <RegistryFormModal
           title="Clonar produto"
           fields={formFields}
           mediaField={{
@@ -523,7 +555,7 @@ export default function ProductsPage() {
             imageUrl: pendingPhotoPreview,
             onFileSelected: handleNewPhotoSelected,
           }}
-          lookupField={taxGroupLookup}
+          lookupFields={[taxGroupLookup, ncmLookup]}
           selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
           fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
@@ -534,7 +566,6 @@ export default function ProductsPage() {
             type: selected.type ?? "",
             costPrice: selected.costPrice !== undefined ? String(selected.costPrice) : "",
             wholesalePrice: selected.wholesalePrice !== undefined ? String(selected.wholesalePrice) : "",
-            ncm: selected.ncm ?? "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",
