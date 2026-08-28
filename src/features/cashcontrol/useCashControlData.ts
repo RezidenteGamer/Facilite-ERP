@@ -4,6 +4,7 @@ import {
   listCashRegisters,
   listCashSessionLedger,
   listCashSessions,
+  listOrphanCashSales,
   openCashSession,
   registerCashMovement,
 } from "../../lib/repositories/cashControlRepository";
@@ -86,6 +87,43 @@ export function useCashSessionLedger(sessionId: string | null) {
       setLoading(false);
     }
   }, [sessionId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { entries, loading, error, reload };
+}
+
+/**
+ * Vendas em dinheiro sem sessão de caixa nenhuma (aberta ou fechada) de uma
+ * filial — alimenta a aba "Caixa gerencial" quando não há sessão
+ * selecionada/aberta (ver AGENTS.md). Passe `null` quando houver uma sessão
+ * (`gerencialSession`) pra não fazer round-trip à toa — mesmo padrão do
+ * `useCashSessionLedger` acima.
+ */
+export function useOrphanCashSales(branchId: string | null) {
+  const [entries, setEntries] = useState<CashLedgerEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!branchId) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const rows = await listOrphanCashSales(branchId);
+      setEntries(rows);
+    } catch (err) {
+      setError(extractErrorMessage(err, "Erro ao carregar vendas sem sessão de caixa."));
+    } finally {
+      setLoading(false);
+    }
+  }, [branchId]);
 
   useEffect(() => {
     reload();

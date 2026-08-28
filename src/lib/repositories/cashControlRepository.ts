@@ -195,3 +195,27 @@ export async function listCashSessionLedger(sessionId: string): Promise<CashLedg
 
   return [...movementEntries, ...cashSaleEntries].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
+
+/**
+ * Vendas em dinheiro que não caem na janela de nenhuma sessão de caixa da
+ * filial (aberta ou fechada) — o complemento do que
+ * `financial_entries_cash_sales_in_window` resolve para uma sessão
+ * específica. Alimenta a aba "Caixa gerencial" quando não há sessão
+ * selecionada/aberta, só pra dar visibilidade — não é extrato de sessão
+ * nenhuma, não tem sangria/suprimento contra ela (ver AGENTS.md).
+ */
+export async function listOrphanCashSales(branchId: string): Promise<CashLedgerEntry[]> {
+  const client = assertSupabase();
+  const { data, error } = await client.rpc("list_orphan_cash_sales", { p_branch_id: branchId });
+  if (error) throw error;
+  return ((data as Tables<"financial_entries">[] | null) ?? []).map((row) => ({
+    id: row.id,
+    kind: "venda" as const,
+    label: "Venda",
+    description: row.document ?? "",
+    createdAt: row.created_at,
+    createdAtFormatted: formatTimestamp(row.created_at),
+    amount: row.total,
+    amountFormatted: formatCashTotal(row.total),
+  }));
+}

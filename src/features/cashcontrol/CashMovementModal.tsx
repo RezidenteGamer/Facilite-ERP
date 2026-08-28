@@ -8,12 +8,13 @@ import { CASH_MOVEMENT_TYPE_LABEL, type CashMovementType } from "./cashControl";
 
 type CashMovementModalProps = {
   type: CashMovementType;
+  sessionLabel: string;
   onSubmit: (input: { amount: number; description: string }) => Promise<void>;
   onCancel: () => void;
 };
 
 /** Modal de sangria/suprimento — mesmo componente para os dois, só troca o rótulo pelo `type`. */
-export default function CashMovementModal({ type, onSubmit, onCancel }: CashMovementModalProps) {
+export default function CashMovementModal({ type, sessionLabel, onSubmit, onCancel }: CashMovementModalProps) {
   const [amountText, setAmountText] = useState("");
   const [description, setDescription] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
@@ -50,6 +51,8 @@ export default function CashMovementModal({ type, onSubmit, onCancel }: CashMove
             <Dialog.Title className="registry-form-modal__title" asChild>
               <p>{title}</p>
             </Dialog.Title>
+
+            <p style={{ margin: "-8px 0 12px", fontSize: 13, opacity: 0.75 }}>{sessionLabel}</p>
 
             {errors.map((message, index) => (
               <p key={index} className="registry-form-modal__error">
