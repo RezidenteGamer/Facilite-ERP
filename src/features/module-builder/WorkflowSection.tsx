@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import {
   isCrossModuleAction,
@@ -13,6 +13,13 @@ import SituationFormModal from "./SituationFormModal";
 import TransitionFormModal from "./TransitionFormModal";
 import { useModuleWorkflowBuilder, type ReferenceTarget } from "./useModuleWorkflowBuilder";
 import WorkflowCanvas, { type Selection } from "./WorkflowCanvas";
+import {
+  planWorkflowJson,
+  workflowPlanHasWork,
+  workflowToJson,
+  type WorkflowPlan,
+  type WorkflowSnapshot,
+} from "./workflowJsonPlan";
 import "./ModuleBuilderPage.css";
 
 type WorkflowSectionProps = {
@@ -109,11 +116,18 @@ export default function WorkflowSection({
     removeTransition,
     saveAction,
     removeAction,
+    applyWorkflowPlan,
   } = useModuleWorkflowBuilder(moduleId, fields, moduleLabels);
 
   const [modal, setModal] = useState<ModalState>({ kind: "none" });
   const [actionError, setActionError] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
+  const [view, setView] = useState<"diagram" | "json">("diagram");
+
+  const snapshot = useMemo<WorkflowSnapshot>(
+    () => ({ situations, transitions, actionsByTransition }),
+    [situations, transitions, actionsByTransition],
+  );
 
   /* Camada 2 escondida, não desabilitada: sem a característica de
      desenvolvedor do Facilite os saltos de referência simplesmente não
@@ -263,12 +277,40 @@ export default function WorkflowSection({
             que as transições criam na ficha.
           </p>
         </div>
+        {/* Só no diagrama: com o textarea aberto, criar uma situação por modal
+            recarregaria o workflow e o rascunho colado seria perdido. */}
+        {view === "diagram" && (
+          <button
+            className="module-builder__btn module-builder__btn--small"
+            type="button"
+            onClick={() => setModal({ kind: "situation" })}
+          >
+            Nova situação
+          </button>
+        )}
+      </div>
+
+      {/* O mesmo alternador que a seção de campos usa, com o mesmo desenho: o
+          diagrama continua sendo a alternativa visual, e o JSON é a de texto.
+          Nenhum dos dois substitui o outro. */}
+      <div className="module-builder__view-tabs">
         <button
-          className="module-builder__btn module-builder__btn--small"
           type="button"
-          onClick={() => setModal({ kind: "situation" })}
+          className={`module-builder__view-tab${
+            view === "diagram" ? " module-builder__view-tab--on" : ""
+          }`}
+          onClick={() => setView("diagram")}
         >
-          Nova situação
+          Diagrama
+        </button>
+        <button
+          type="button"
+          className={`module-builder__view-tab${
+            view === "json" ? " module-builder__view-tab--on" : ""
+          }`}
+          onClick={() => setView("json")}
+        >
+          Ver como JSON
         </button>
       </div>
 
@@ -276,7 +318,16 @@ export default function WorkflowSection({
         <p className="module-builder__error">{actionError ?? error}</p>
       )}
 
-      {situations.length === 0 ? (
+      {view === "json" ? (
+        <WorkflowJsonView
+          key={moduleId}
+          snapshot={snapshot}
+          fields={fields}
+          references={availableReferences}
+          isFaciliteDeveloper={isFaciliteDeveloper}
+          onApply={applyWorkflowPlan}
+        />
+      ) : situations.length === 0 ? (
         <p className="module-builder__empty">
           Este módulo ainda não tem situações. A primeira que você criar vira a situação inicial.
         </p>
@@ -403,5 +454,138 @@ export default function WorkflowSection({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * Visão do workflow como JSON editável — a mesma ideia (e o mesmo desenho) da
+ * aba "Ver como JSON" dos campos, aqui aplicada às situações, transições e
+ * ações automáticas de uma vez.
+ *
+ * O diagrama é bom para *conferir* a máquina de estados e ruim para *montá-la*:
+ * cada situação é um modal, cada seta são dois cliques, cada ação é outro
+ * modal. Colar o documento inteiro resolve o módulo numa aplicação só — é o
+ * caminho de quem opera a ferramenta e o de uma sessão do Claude Code, que lê
+ * o estado exato sem inspecionar o desenho por screenshot/DOM.
+ *
+ * O texto é **estado próprio**, não uma projeção do workflow: editar não muda
+ * nada até o "Aplicar". Quando o workflow muda de verdade (a aplicação
+ * terminou), o texto é sincronizado de novo com o estado do banco — que é o
+ * passo que mostra os ids reais do que acabou de ser criado.
+ *
+ * A validação é toda feita **antes** de qualquer escrita, nos três níveis, e a
+ * primeira coisa errada aborta o documento inteiro: um workflow meio aplicado
+ * é pior que um não aplicado, porque ninguém sabe onde ele parou.
+ */
+function WorkflowJsonView({
+  snapshot,
+  fields,
+  references,
+  isFaciliteDeveloper,
+  onApply,
+}: {
+  snapshot: WorkflowSnapshot;
+  fields: ModuleFieldDefinition[];
+  references: ReferenceTarget[];
+  isFaciliteDeveloper: boolean;
+  onApply: (plan: WorkflowPlan) => Promise<string[]>;
+}) {
+  const json = useMemo(() => workflowToJson(snapshot), [snapshot]);
+  const [text, setText] = useState(json);
+  const seeded = useRef(json);
+  const [copied, setCopied] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [status, setStatus] = useState<{ tone: "ok" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    if (json === seeded.current) return;
+    seeded.current = json;
+    setText(json);
+  }, [json]);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  async function handleApply() {
+    const result = planWorkflowJson(text, snapshot, { fields, references, isFaciliteDeveloper });
+    if (!result.ok) {
+      setStatus({ tone: "error", message: result.error });
+      return;
+    }
+    if (!workflowPlanHasWork(result.plan)) {
+      setStatus({ tone: "ok", message: "Nada a aplicar: o documento já é igual ao do módulo." });
+      return;
+    }
+
+    setApplying(true);
+    try {
+      const applied = await onApply(result.plan);
+      setStatus({ tone: "ok", message: `Aplicado: ${applied.join("; ")}.` });
+    } catch (err) {
+      setStatus({
+        tone: "error",
+        message: extractErrorMessage(err, "Não foi possível aplicar o documento."),
+      });
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return (
+    <div className="module-builder__json-block">
+      <div className="module-builder__json-toolbar">
+        <p className="module-builder__json-hint">
+          A ordem das listas vira a ordem das situações, transições e ações. Item sem <code>id</code>{" "}
+          cria (o <code>code</code> de uma situação nova sai do nome); <code>id</code> que sumir
+          remove. As transições apontam as situações pelo <code>code</code>, e as ações moram dentro
+          da transição — assim uma situação e a seta que chega nela nascem na mesma aplicação. O
+          código de uma situação que já existe não muda por aqui, a posição dos nós no diagrama não
+          entra, e nada é gravado até "Aplicar".
+        </p>
+        <div className="module-builder__json-actions">
+          <button
+            type="button"
+            className="module-builder__btn module-builder__btn--small"
+            onClick={handleCopy}
+          >
+            {copied ? "Copiado!" : "Copiar"}
+          </button>
+          <button
+            type="button"
+            className="module-builder__btn module-builder__btn--small"
+            onClick={handleApply}
+            disabled={applying}
+          >
+            {applying ? "Aplicando…" : "Aplicar"}
+          </button>
+        </div>
+      </div>
+      <textarea
+        className="module-builder__json-textarea"
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          setStatus(null);
+        }}
+        spellCheck={false}
+        disabled={applying}
+      />
+      {status && (
+        <p
+          className={`module-builder__json-status module-builder__json-status--${
+            status.tone === "ok" ? "ok" : "error"
+          }`}
+        >
+          {status.message}
+        </p>
+      )}
+    </div>
   );
 }

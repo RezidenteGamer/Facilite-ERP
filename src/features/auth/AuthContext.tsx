@@ -22,7 +22,15 @@ export type Profile = {
   canManagePermissions: boolean;
   canManageUsers: boolean;
   canManageBranches: boolean;
-  /** Cria e gerencia módulos do usuário (`/modulos`) — ver M3 no AGENTS.md. */
+  /**
+   * **Obsoleta como portão de UI** (decisão de produto de 28/08/2026, ver
+   * AGENTS.md): não abre mais `/modulos`, nem faz o tile aparecer — quem abre
+   * o construtor é `isFaciliteDeveloper`. Continua sendo lida do papel porque
+   * ainda é o portão do **banco**: as policies de `modules`/`module_fields` e
+   * as RPCs de M3/M4 exigem `can_manage_modules()`. Sem consumidor no front
+   * hoje; fica aqui para que a assimetria "front exige mais que o banco" seja
+   * visível em vez de esquecida.
+   */
   canManageModules: boolean;
   /**
    * Desenvolvedor do Facilite — **não** é papel do cliente. Vem de
@@ -31,9 +39,10 @@ export type Profile = {
    * tem como conceder isso a ninguém, nem a si mesmo. Liga-se por SQL direto
    * no banco, sem UI nenhuma — ver M4 no AGENTS.md.
    *
-   * Habilita só os controles de Camada 2 do construtor de módulos (apontar
-   * um campo para outro módulo, configurar ação que lê/escreve num módulo
-   * relacionado). Não dá acesso a nada mais.
+   * Desde 28/08/2026 é o **portão de entrada do construtor de módulos**
+   * inteiro (`/modulos`, seu tile e sua rota), e não só dos controles de
+   * Camada 2 dentro dele (apontar um campo para outro módulo, configurar ação
+   * que lê/escreve num módulo relacionado). Não dá acesso a nada mais.
    */
   isFaciliteDeveloper: boolean;
 };

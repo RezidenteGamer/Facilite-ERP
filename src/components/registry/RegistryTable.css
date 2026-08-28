@@ -186,6 +186,19 @@
   font-weight: 700;
 }
 
+/* Só existe quando o cabeçalho serve para escolher a coluna, não para
+   ordenar (prop `onColumnSelect` — hoje só a prévia do construtor de
+   módulos). Sublinhado em âmbar em vez de fundo: o cabeçalho da tabela
+   publicada não tem caixa nenhuma, e ganhar uma aqui mudaria a cara que a
+   prévia existe para reproduzir. */
+.registry-table__sort-btn--picked {
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--amber);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 5px;
+}
+
 .registry-table__sort-icon {
   font-size: .7em;
   min-width: 8px;

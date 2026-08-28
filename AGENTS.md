@@ -53,7 +53,7 @@ O que **não** muda por causa disso:
   - `/usuarios-operadores` — usuários reais, com "Resetar senha" (`can_manage_users`);
   - `/realizar-venda` — vendas (real: grava em `sales`/`sale_items`/`sale_payments` e baixa estoque — ver decisão abaixo);
   - `/ajuste-estoque` — ajuste de estoque (real, motor genérico em modo lote — ver decisão do motor de lote abaixo);
-  - `/pedidos-venda` e `/pedidos-venda/novo` — pedidos de venda (real: grava em `sale_orders`/`sale_order_items` e converte em venda de verdade via `create_sale` — ver decisão abaixo);
+  - `/pedidos-venda`, `/pedidos-venda/novo` e `/pedidos-venda/:id/editar` — pedidos de venda (real: grava em `sale_orders`/`sale_order_items` e converte em venda de verdade via `create_sale` — ver decisão abaixo; a rota de edição reaproveita a mesma tela do "novo", ver a decisão de 27/08/2026);
   - `/financeiro` — contas a pagar/receber (real, motor genérico simples sobre `financial_entries` — ver decisão abaixo);
   - `/compras` e `/compras/nova` — compras (real: grava em `purchases`/`purchase_items`, sobe estoque e lança financeiro a pagar via `create_purchase` — ver decisão abaixo);
   - `/controle-caixa` — controle de caixa (real: sessão de caixa e sangria/suprimento sobre `cash_registers`/`cash_sessions`/`cash_movements`, lê vendas em dinheiro de `financial_entries` sem escrever nela — ver decisão abaixo);
@@ -61,7 +61,7 @@ O que **não** muda por causa disso:
   - `/tributacoes` — regras de **CFOP** por natureza da operação × UF origem/destino × tipo de cliente × regime (real: motor genérico puro sobre `tax_rules`, sem componente próprio — ver decisão abaixo e a correção de 19/08/2026);
   - `/grupos-tributarios` — grupos tributários (CST/CSOSN + alíquotas), o perfil de tributação que se atrela ao produto (real: motor genérico puro sobre `tax_groups`, sem componente próprio — ver a correção de 19/08/2026);
   - `/devolucao-venda` — devolução de venda (real: grava em `sale_returns`/`sale_return_items` via `create_sale_return`, repõe estoque, gera um `a_pagar` novo no Financeiro e oferece as duas ações fiscais — ver decisão abaixo);
-  - `/modulos` — construtor de módulos: cria um módulo do usuário (rota, tile, campos, CRUD) sem deploy, edita os campos de módulos que já rodam no motor genérico, e configura o **workflow** deles (situações, transições e ações automáticas). Gated pela flag global `can_manage_modules` (`access_gate = 'manage_modules'`); os controles de automação **entre** módulos são uma segunda camada, exclusiva de `profiles.is_facilite_developer` — ver as decisões de M3 e M4 abaixo;
+  - `/modulos` — construtor de módulos: cria um módulo (rota, tile, campos, CRUD) sem deploy, edita os campos de módulos que já rodam no motor genérico, e configura o **workflow** deles (situações, transições e ações automáticas). **Ferramenta interna da Facilite, não recurso do cliente**: desde 28/08/2026 o portão de entrada é `profiles.is_facilite_developer` (flag de pessoa, ligada só por SQL), não mais a flag de papel `can_manage_modules` — ver a decisão de produto no fim deste arquivo, além das decisões de M3 e M4 abaixo. O `access_gate` da linha continua sendo `manage_modules` (o nome diz o que o portão protege; quem passa por ele é que mudou);
   - `/condicionais` e `/condicionais/nova` — condicionais: peças enviadas ao cliente para experimentar em casa (real: grava em `conditionals`/`conditional_items` via `create_conditional`, que já baixa estoque na hora; devolução e conversão em venda resolvem o saldo aos poucos por item — ver decisão abaixo);
   - `/relatorios` — relatórios: grade de 12 blocos, cada um com filtro + tabela + resumo, lendo de views/tabelas de outros módulos, sem escrever nada (real: tela própria sobre views com `security_invoker` — ver decisão abaixo);
   - `/configuracoes` — configurações.
@@ -200,7 +200,7 @@ Pedido é a etapa que antecede a venda confirmada (orçamento → pedido → ven
 - **Ação "Converter em venda"** foi adicionada à tela de listagem (`SaleOrdersPage.tsx`), com `ConfirmDialog` antes de confirmar — não existia no mock antigo (`SALE_ORDERS` hardcoded, ações "Gerar NF"/"Pré visualizar"/"Trocar"/"Financeiro"/"Editar"/"Excluir", nenhuma com `onClick`). Fica desabilitada quando o pedido não está `aberto`. "Gerar NF"/"Pré visualizar"/"Trocar"/"Financeiro"/"Editar"/"Excluir" continuam sem função — são de etapas mais adiante do plano (Notas Emitidas, Devolução, Financeiro) ou fora de escopo (não há edição/exclusão de pedido nesta rodada, mesma decisão de "sem exclusão" de Ajuste de estoque, mas por falta de escopo aqui, não por ser registro de auditoria).
 - **Ficha do pedido selecionado** usa o prop `fields` de `RegistryActions` (ficha resumida sem caixa, já usado em outros módulos), não `RegistryDetails` — mais simples e já suficiente para "ver ficha" sem puxar o motor genérico.
 - **Testado no navegador**: criado um pedido com 2 produtos (Doritos + Arroz, R$ 43,90), confirmado que aparece na listagem com cliente/forma de pagamento/parcelas/total corretos, convertido em venda (venda 0004 criada, `sale_orders.status` virou `convertido` com `converted_sale_id` preenchido) e confirmado que `products.stock` só baixou na conversão, não na criação do pedido. "Converter em venda" confirmado desabilitado depois de convertido.
-- **Fora de escopo por enquanto**: cancelamento de pedido (`status = 'cancelado'` existe no enum mas nada escreve nele ainda); edição de pedido em aberto; reserva de estoque no momento do pedido (fora de escopo por instrução explícita do usuário — ver acima).
+- **Fora de escopo por enquanto**: cancelamento de pedido (`status = 'cancelado'` existe no enum mas nada escreve nele ainda); ~~edição de pedido em aberto~~ — **feita em 27/08/2026**, ver a decisão "editar pedido de venda" abaixo; reserva de estoque no momento do pedido (fora de escopo por instrução explícita do usuário — ver acima).
 
 ### Decisão arquitetural: pré-visualização de Pedidos de venda (27/08/2026)
 
@@ -211,6 +211,32 @@ Primeira de três rodadas para "ver/editar pedidos": esta constrói só a visual
 - **`SaleOrderPreviewModal.tsx`** é modal bespoke, não o motor genérico nem `RegistryDetails` — mesmo critério já registrado para `SaleReturnModal`/`FinanceEntryPlanModal`: ficha de um registro existente com lista de itens dentro. Busca o pedido de novo ao abrir (não reaproveita a linha da listagem, que não tem itens). Botão "Pré visualizar" habilita com qualquer pedido selecionado, independente do `status`.
 - **"Trocar"/"Editar" continuam desabilitados** — são as próximas duas rodadas (envolvem RPC de update nova, mais risco). Não foi criada RPC nem alterado `create_sale_order`/`convert_sale_order_to_sale` nesta rodada.
 - **Testado no navegador**: selecionado o pedido 0002 (Padaria do Bairro LTDA, R$ 118,40, 3 itens) e clicado "Pré visualizar" — modal mostrou os 3 produtos (Farinha, Açúcar, Ovos) com quantidade/preço unitário/total de cada linha batendo com o banco, e o total do pedido (R$ 118,40) confirmado.
+
+### Decisão arquitetural: editar pedido de venda (27/08/2026)
+
+Segunda de três rodadas de "ver/editar pedidos" (a primeira foi a pré-visualização, acima). Esta é a que **altera dado real**: nasce a primeira RPC de UPDATE de documento do projeto.
+
+- **RPC `update_sale_order(p_id uuid, payload jsonb)`, `security definer`**: mesma validação de `create_sale_order` (permissão, filial, ao menos um item, produto existente e da filial certa) **mais uma barreira que só existe aqui — o pedido precisa estar `aberto`**. Pedido `convertido` ou `cancelado` é dado histórico: a venda gerada já baixou estoque e já lançou financeiro em cima dos valores do pedido, então reescrever o pedido depois deixaria os dois documentos divergentes. `revoke execute ... from public, anon` nos dois, como sempre.
+- **Diferenças deliberadas em relação a `create_sale_order`**: as checagens de permissão usam `coalesce(has_permission(...), false)` (a regra do item 3 do roteiro, que `create_sale_order` não seguiu na época — não foi corrigida aqui de propósito, para não mexer numa rotina de criação fora do escopo desta rodada); a permissão cobrada é `'edit'`, não `'create'`; e `branch_id`/`code` **não** entram no `update` — mudar a filial de um pedido driblaria a validação de filial dos produtos, e o código é a numeração sequencial da filial.
+- **Itens são substituídos, não casados linha a linha**: `delete from sale_order_items where sale_order_id = ...` seguido dos `insert` novos, tudo dentro da transação da função. **Não havia precedente no projeto** — foi procurado antes de decidir: nenhuma outra rotina faz "substituir itens" (as `save_module_*` são upsert de uma linha só). O critério: item de pedido não tem nada pendurado nele (nem movimento de estoque, nem financeiro, nem nota), então update incremental só acrescentaria caminhos de erro sem ganho.
+- **Permissão que precisou ser marcada à mão**: `role_permissions` tinha `can_edit = false` para `pedidos-venda` em todo mundo (o módulo só recebeu `view`/`create` quando nasceu, em 17/08/2026). Sem isso a RPC recusaria até o Administrador. Marcado `can_edit` para **Administrador**; Operador segue sem acesso ao módulo, mesma pendência de sempre.
+- **Uma tela só para criar e editar** (`SaleOrderFormPage.tsx`): o que separa os dois modos é a presença do `:id` na rota (`useParams`). Duplicar a tela significaria manter dois formulários em sincronia para sempre; o que de fato difere — o rascunho nascer carregado e o submit chamar `update_sale_order` — mora inteiro em `useSaleOrderDraft`, que ganhou um quarto parâmetro `editingOrderId`.
+- **Reidratar o carrinho custa duas buscas**: `fetchSaleOrderWithItems` (da rodada anterior) devolve o `product_id` de cada item, mas a linha do carrinho guarda o `Product` inteiro (unidade comercial, preço, código) — daí `fetchProductsByIds(branchId, ids)`, novo em `productsRepository.ts`. Se algum produto do pedido não existir mais na filial, a tela **recusa a edição** com o nome do produto em vez de abrir um carrinho com uma linha a menos em silêncio.
+- **O rascunho por janela precisou de um slot por pedido** (ver a decisão "estado por janela no `OpenWindowsProvider`", 25/08/2026). Lista e formulário compartilham **um id de janela só** (`"pedidos-venda"`), então o slot único `"sale-order-draft"` faria o rascunho de "novo pedido" e o de "editar o pedido X" se sobrescreverem. O modo edição usa `sale-order-draft:<id>`. **O `windowId` continua o mesmo de propósito** — é ele que `closeWindow` usa para jogar fora tudo o que a janela guardava; trocar o id de janela criaria uma segunda entrada no dock e vazaria estado ao fechar.
+  - Consequência disso no fim de vida do rascunho: salvar uma **edição** limpa **só o slot daquele pedido** (`setWindowState(..., undefined)`), não `clearWindowState`, que é por janela inteira e levaria junto o rascunho de "novo pedido". Salvar um pedido **novo** continua chamando `clearWindowState`, como antes.
+  - O efeito que grava o rascunho também **não grava enquanto o pedido está carregando**: sem isso, montar a tela de edição salvaria um formulário vazio por cima do slot, e uma troca de janela nessa fresta faria a volta restaurar o vazio em vez do pedido.
+- **Dupla barreira na UI, como no resto do projeto**: "Editar" na listagem só habilita com `status === "aberto"` (mesma condição de "Converter em venda") e `has_permission('pedidos-venda','edit')`; e a própria tela de edição se recusa a abrir se o pedido carregado não estiver `aberto` — isso cobre quem chega pela URL direto e quem deixou a tela aberta enquanto o pedido era convertido em outra janela.
+- **"Trocar"/"Gerar NF"/"Financeiro"/"Excluir" continuam desabilitados** — fora do escopo desta rodada, e nada em `create_sale_order`/`convert_sale_order_to_sale` foi tocado.
+
+#### Testado no navegador
+
+Pedido 0005 criado (Padaria do Bairro, 1× Arroz, R$ 29,90) → "Editar" → formulário abriu preenchido com cliente/vendedor/item corretos → quantidade do Arroz para 3 e Café Torrado adicionado → "Salvar alterações" → "Pedido 0005 atualizado! Total: R$ 109,60". "Pré visualizar" confirmou a persistência (Arroz 3× R$ 89,70 + Café R$ 19,90 = R$ 109,60), e o banco bate.
+
+**Isolamento dos rascunhos, in-app (sem reload)**: rascunho de "novo pedido" com Doritos → voltar para a lista → editar o pedido 0004 → a tela de edição veio com os dados **do 0004** (Bruno, Arroz + Leite), sem traço do Doritos → "Cancelar" → "Novo pedido" → o rascunho do Doritos **intacto**, sem nada do 0004. Os dois sentidos.
+
+**Dupla barreira**: pedido 0005 convertido em venda (venda 0038) — "Editar" e "Converter em venda" ficaram desabilitados na listagem, "Pré visualizar" continuou habilitado. Abrir `/pedidos-venda/<id>/editar` pela URL mostrou "Este pedido está convertido e não pode mais ser editado". E chamando `update_sale_order` **direto pelo console**, contornando a UI inteira, o banco recusou: `P0001 — "Só é possível editar pedido em aberto."`.
+
+`get_advisors` (security) não trouxe nada novo além do `authenticated_security_definer_function_executable` que **todas** as RPCs do projeto já têm (é intencional: elas existem para o usuário logado chamar, e a permissão é cobrada dentro). `vite build` limpo, com o code splitting por página preservado (`SaleOrderFormPage` segue em chunk próprio). Console sem erros — os dois 401/400 que aparecem foram os testes de barreira acima. `tsc` continua acusando erros **pré-existentes** em `moduleWorkflow.ts` e `cashControlRepository.ts`, de outras frentes em andamento; nenhum arquivo desta rodada aparece.
 
 ### Decisão arquitetural: módulo Financeiro (17/08/2026)
 
@@ -1698,6 +1724,313 @@ Pedido do usuário: vincular venda a sessão de caixa continua fora de escopo pa
 - **Aviso do modo em dois lugares, não um só**: o título da tabela (`RegistryTable title`, `titleVariant="plain"`) vira "Sem sessão de caixa aberta" (curto, mesmo padrão de título das outras tabelas do sistema — nenhuma usa frase longa ali) e o `fieldsTitle` do painel "Informações" (`RegistryActions`) carrega a frase completa ("vendas em dinheiro registradas fora de uma sessão de caixa aparecem aqui"), com os campos Caixa/Situação/Operador (que não fazem sentido sem sessão) escondidos nesse modo. O resumo (`RegistryTable.summary`) também troca: em vez dos cinco totais de sessão (entradas/saídas/sangrias/suprimentos/saldo), mostra um único "Total vendas sem sessão" — não existe abertura/saldo pra calcular sem sessão de verdade.
 - **Não é uma sessão de caixa.** Nenhuma linha nova em `cash_sessions`, nenhuma FK, nenhuma forma de lançar sangria/suprimento contra a lista — "Suprimentos"/"Sangria"/"Fechar caixa" continuam desabilitados nesse modo pela mesma condição que já existia (`!gerencialSession`), sem precisar de nenhuma mudança nova nesses botões. É só uma lista de conferência.
 - **Testado no navegador**: sem nenhuma sessão aberta na filial, venda em dinheiro de R$15,00 pela Realizar Venda (0037) → apareceu na aba "Caixa gerencial" com o título "Sem sessão de caixa aberta" e a frase completa no painel "Informações", "Fechar caixa"/"Suprimentos"/"Sangria" desabilitados. Sessão aberta em seguida (Caixa 0010, R$100) → a mesma aba voltou instantaneamente ao extrato normal da sessão nova (vazio, saldo R$100), sem nenhum resquício do modo órfão. Fechamento da sessão (contado R$100, bateu certinho) → a aba voltou ao modo "sem sessão", mostrando de novo a mesma lista de vendas órfãs (a sessão que acabou de fechar não tinha nenhuma venda dentro da janela, então não mudou o conjunto).
+
+
+### Decisão de produto: construtor de módulos é ferramenta interna, não self-service (28/08/2026)
+
+Reverte a **premissa** de M3 (não o código dela): "um usuário autorizado cria o próprio módulo, sem deploy" deixa de valer para o cliente final. O construtor continua existindo, inteiro, e a engine genérica continua sendo a base de módulos reais (Tributações, Grupos tributários, Unidades de medida, Condicionais e os que vierem). O que mudou é **quem opera a ferramenta**: a Facilite, montando o módulo sob encomenda; nunca o cliente.
+
+**Por quê.** Quem consegue usar uma ferramenta que pede campos, tipos de dado, regras de visibilidade e workflow de situações/transições já tem capacidade técnica elevada — está programando com outro nome. O cliente comum tipicamente nem sabe *descrever* o módulo que quer, quanto mais modelá-lo; nenhuma quantidade de polimento de UX resolve isso, porque o obstáculo não é a interface, é a modelagem. Sai mais barato e sai melhor a Facilite construir o módulo com a mesma engine.
+
+**Consequência de escopo**: o redesenho visual do construtor ("tipo Canva", pensado para qualquer um bater o olho e entender) está **cancelado** — não faz sentido investir em UX de leigo numa ferramenta de público técnico interno. Não é escopo de nada, a menos que o usuário peça de novo, explicitamente.
+
+#### O novo portão
+
+| | Antes (M3/M4) | Depois (28/08/2026) |
+| --- | --- | --- |
+| Abre `/modulos` e mostra o tile | `roles.can_manage_modules` | `profiles.is_facilite_developer` |
+| Quem consegue conceder | o Administrador **do cliente**, por SQL em `roles` (nunca houve coluna na grade de `/permissoes`) | só a Facilite, por SQL em `profiles` — não existe UI nenhuma, por decisão de M4 |
+| Categoria da flag | papel (cargo dentro da empresa cliente) | pessoa |
+
+Era exatamente esse o furo: `can_manage_modules` mora em `roles`, e o Administrador do cliente é dono dos próprios papéis. A flag "certa" já existia desde M4 — só estava sendo consultada num lugar pequeno demais (habilitar campos de referência entre módulos genéricos, a Camada 2 do workflow). Esta mudança só **amplia onde ela é lida**; como ela é ligada e a RLS que já depende dela não foram tocadas.
+
+**Um lugar decide, três consumidores obedecem**: `canAccessModule` (`src/features/modules/moduleAccess.ts`) trocou `canManageModules` por `isFaciliteDeveloper` no caso `manage_modules`, e com isso o tile da tela inicial (`useModuleOrder.ts`), a rota (`ModuleRoute.tsx`) e as sub-rotas (`ModuleSubrouteGuard`) mudaram juntos — que é a razão de `canAccessModule` existir. `ModuleBuilderPage.tsx` repete a checagem porque a tela também é alcançável direto pelo componente registrado em `MODULE_COMPONENTS`, e portão que só existe num dos caminhos não é portão.
+
+**`modules.access_gate` continua `'manage_modules'`** — nenhuma migração, nenhum valor novo no `CHECK`. O nome do portão diz **o que** ele protege ("gerenciar módulos"), não qual flag ele lê; a pergunta continua a mesma, a resposta é que mudou. Inventar um sexto valor `facilite_developer` só para renomear a mesma porta custaria DDL e um `CHECK` a mais sem responder nada que o valor atual já não responda.
+
+#### `can_manage_modules`: mantida no banco, obsoleta como portão de UI
+
+Escolhida a opção **(b)**, não a (a): a coluna fica. Motivo verificado antes de decidir — ela **não** ficou sem consumidor. Continua sendo o portão do **banco** em tudo que M3 e M4 construíram: as policies de `modules` (update de módulo destravado) e de `module_fields`, e as RPCs `create_user_module`, `delete_user_module`, `assert_module_workflow_editable` (logo, toda a Camada 1 de workflow) e `save_module_situation_position`. Removê-la seria reescrever essa camada inteira, escopo de outra ordem que esta decisão não pede.
+
+Não havia toggle a remover: `can_manage_modules` **nunca teve coluna na grade de `/permissoes`** (o filtro `access_gate = 'permission'` sempre a deixou de fora, e conceder era `update` em `roles` por SQL — está registrado assim na decisão de M3). Então a opção (b) se resumiu a documentar: o campo segue em `AuthContext` (`profile.canManageModules`), **sem consumidor no front**, com o comentário dizendo que é obsoleto como portão de UI. Fica visível de propósito, em vez de sumir, porque ele é a marca da assimetria abaixo.
+
+#### A assimetria aceita: o front exige mais que o banco
+
+Depois desta mudança, quem tem `can_manage_modules` e **não** é desenvolvedor da Facilite não enxerga nem abre o construtor — mas as RPCs e policies de M3/M4 continuariam aceitando essa pessoa se ela as chamasse direto pelo PostgREST, porque no banco o portão ainda é `can_manage_modules()`. **O portão novo é de UI, não de segurança.** Isso é uma regressão em relação ao que M3 tinha (lá UI e banco concordavam), e está registrado aqui em vez de escondido: fechar de verdade é trocar `can_manage_modules()` por `has_facilite_developer_access()` dentro dessas policies e RPCs — mudança de banco, com migração e reteste da Camada 1 inteira, deliberadamente fora desta etapa. Na prática o risco é baixo (exige um cliente adulterado e alguém com a flag de papel querendo mexer nisso), mas "baixo" não é "nenhum".
+
+#### Testado no navegador
+
+Conta de testes (`claude.testes@facilite.com`, papel Administrador, `can_manage_modules = true`). Nenhum perfil do banco tinha `is_facilite_developer = true` antes desta etapa — o teste ligou e desligou a flag só nessa conta.
+
+- **Com `is_facilite_developer = true`** (e `can_manage_modules` também ligada): tile "Módulos" na tela inicial e `/modulos` abrindo normal, com os 21 módulos do catálogo listados à esquerda. Único erro no console é um 401 do endpoint de auth do Supabase na sondagem inicial de sessão — aparece igual nos dois estados da flag e em nada depende desta mudança (nenhum código tocado aqui faz requisição).
+- **Com `is_facilite_developer = false` e `can_manage_modules = true`** (o caso que a decisão inteira existe para cobrir): o tile some da tela inicial — os outros 17 continuam lá, na mesma ordem — e `/modulos` recusa com "O construtor de módulos é uma ferramenta interna da Facilite." A flag de papel sozinha não basta mais, que era o ponto.
+
+`tsc`, `oxlint` e `vite build` limpos, com o `ModuleBuilderPage` ainda saindo em chunk próprio.
+
+**Operacional**: quando o portão foi ligado, **nenhum** perfil tinha `is_facilite_developer = true` — nem o do desenvolvedor —, ou seja, `/modulos` ficou fechado para todo mundo por alguns minutos. A flag foi então concedida ao perfil de `brunovenzodebacco@gmail.com`, que é hoje o único a tê-la. Conceder é `update profiles set is_facilite_developer = true where id = '<uuid>'` por SQL direto; não há (nem deve haver) UI para isso — é justamente esse o ponto da decisão.
+
+**Limpeza junto**: o único módulo do usuário que existia (`controle-de-validade`, criado em 24/08 para teste — 3 campos, 1 situação "Situação x", **zero registros**, nenhuma referência de entrada) foi excluído na mesma passada, na mesma ordem e com o mesmo escopo (`is_locked = false`) que `delete_user_module` usa. Sobraram 20 linhas em `modules`, 18 com `show_on_home`, e nenhuma linha órfã de `module_fields`/`module_records`/`module_tabs`/`role_permissions`/`module_situations`. **De agora em diante todo módulo de `modules` é módulo de sistema**: o próximo módulo genérico a nascer sai da mão da Facilite, que é a decisão desta seção em forma de dado.
+
+### Decisão arquitetural: visão JSON dos campos do módulo — leitura (Fase 1) e edição (Fase 2) (28/08/2026)
+
+O construtor de campos nasceu clicável: um cartão por campo, um modal por criação. Isso é bom para ajustar uma coisa, e ruim para montar um módulo inteiro — e péssimo para uma **sessão do Claude Code**, que teria que descobrir o estado atual por screenshot/DOM e depois clicar campo por campo. A aba "Ver como JSON" (`FieldsJsonView`, dentro de `ModuleBuilderPage.tsx`) existe para o caso de configurar tudo de uma vez: **Fase 1** mostrou `fields` como JSON somente-leitura, com "Copiar"; a **Fase 2** tornou o texto editável e acrescentou "Aplicar".
+
+O formato é `ModuleFieldDefinition` cru, sem tradução nenhuma — o mesmo objeto que o motor já usa por dentro. Não existe "formato de importação" novo para manter em sincronia com o de leitura.
+
+#### Nada de payload novo: a lista vira as chamadas que já existiam
+
+`fieldsJsonPlan.ts` **não fala com o banco**. Ele compara a lista colada com `fields` e devolve um plano nos termos das funções que o canvas já usava uma a uma — `updateModuleField`, `removeModuleField`, `addModuleField`, `reorderModuleFields`. Quem executa é `applyFieldsPlan` (em `useModuleBuilderData.ts`). A reconciliação é por `id`:
+
+| No JSON | Vira |
+| --- | --- |
+| `id` que existe em `fields` | `updateModuleField` — **e só se algo mudou** (a lista inteira volta do "Copiar", então a maioria dos itens está intacta) |
+| item sem `id` (ausente, `null` ou `""`) | `addModuleField` — campo novo; a chave sai do rótulo, pela função do banco |
+| `id` de `fields` que sumiu da lista | `removeModuleField` |
+| a **posição** no array | `reorderModuleFields`, no fim |
+
+Quatro detalhes que explicam a forma do código:
+
+- **O patch de edição vai completo, não só o que mudou.** `updateModuleField` grava todas as colunas de uma vez (é o contrato que o cartão do canvas já usava, com `toFormValues`); mandar só o campo alterado apagaria o resto — inclusive `reference_module_id`. O que o diff decide é *se* a linha é regravada, não *quais colunas* vão.
+- **A ordem é gravada por último**, depois das criações, porque só aí existem ids reais. `addModuleField` passou a **devolver o `id` da linha criada** — o cliente não tem como adivinhá-lo, e sem ele a ordem final não fecha.
+- **`applyFieldsPlan` chama as funções do repositório, não os wrappers do hook** (`addField`, `editField`…): cada wrapper recarrega os campos depois de escrever (uma ida ao banco por item), e `reorderFields` fecha sobre o `fields` do render — que fica velho no meio de uma sequência de escritas, fazendo a reordenação virar no-op silencioso. A lista é relida **uma vez**, no fim.
+- **Remoções antes das criações**, para a chave de um campo removido nesta mesma aplicação ficar livre para um campo novo (remover não apaga o dado no jsonb — recriar com o mesmo rótulo o traz de volta, como a decisão de M3 já dizia).
+
+#### Tudo ou nada na validação; e "parou aqui" quando o banco recusa
+
+Toda a validação roda **antes** de qualquer escrita, e a primeira coisa errada aborta o plano inteiro com uma mensagem que diz qual item e qual problema (`Campo 3 ("Telefone"): "dataType" precisa ser um destes: …`). Isso cobre `JSON.parse` falho, item que não é objeto, `label`/`dataType` faltando, `dataType` fora dos cinco tipos do motor, booleano que veio texto, campo que não aparece em lugar nenhum (mesma regra do `FieldFormModal`), `id` que não é deste módulo, `id` repetido, e — de propósito, para não descobrir no meio da gravação — **colisão de chave**: rótulo que gera chave vazia, reservada, já usada por um campo que sobrevive, ou igual à de outro item novo.
+
+O que a validação **não** tenta prever é a recusa do banco (RLS, trigger de referência). Se uma chamada falhar no meio, a aplicação **para ali** e a mensagem diz o que já tinha passado: *"Parou na primeira falha: … Já tinha sido aplicado antes disso: X, Y. O resto da lista não foi gravado."* Seguir em frente deixaria um estado parcial que ninguém consegue reconstruir de cabeça. A lista é sempre relida do banco depois — sucesso ou falha —, então o textarea volta a mostrar a verdade (inclusive os ids reais dos campos recém-criados).
+
+#### A chave física de um campo existente: **recusa**, não "ignora em silêncio"
+
+`id`, `fieldKey` e `accessorKey` de um item que já existe não mudam por esta via — mesmo motivo de M3 (mudar a chave orfanaria o dado gravado debaixo da chave velha). Das duas saídas possíveis, a escolha foi **recusar com mensagem explícita** em vez de aceitar e ignorar: ignorar deixaria quem colou o JSON acreditando que renomeou a chave, e o erro só apareceria muito depois, como valor sumido. `fieldKey` é obrigatório em item com `id` justamente porque serve de conferência; em item **novo** ele é opcional e ignorado, já que a chave é derivada do rótulo pela função do banco.
+
+Também são ignorados (e a dica na tela diz isso): `sortOrder` — quem manda é a posição no array — e `tableWidth`/`tableAlign`, que não têm como ser gravados por aqui.
+
+#### A mesma fronteira de M3, não uma nova
+
+Módulo `table` sem tela própria (Tributações, Grupos tributários, Unidades de medida) aceita **editar** pelo JSON, e a aplicação **recusa** criação/remoção com o motivo e o nome da tabela — a mesma regra que `fieldEditingCapabilityFor` já impunha nos botões do canvas, agora dita também nesta via. Módulo com tela própria não mostra nem a aba.
+
+#### Testado no navegador
+
+Com a conta de testes (`is_facilite_developer` ligada para ela nesta sessão — antes só o perfil do desenvolvedor tinha a flag): módulo genérico "Teste JSON Fase 2" criado pela tela e configurado inteiro pelo JSON. Rótulo + `isRequired` alterados por texto → canvas e prévia da lista acompanharam (*"Aplicado: 'Nome do teste' alterado (label, isRequired)"*). Dois itens **sem `id`** aplicados de uma vez, um deles na **primeira** posição → viraram campos reais, com `sort_order` 10/20/30 na ordem do array, e o textarea recarregou já com os ids do banco. Item removido da lista **junto com** uma troca de ordem → campo removido e ordem gravada numa aplicação só. Quatro recusas seguidas (JSON truncado, `fieldKey` renomeada, `dataType: "number"`, `id` inexistente) mostraram mensagem específica e — confirmado por SQL — **não escreveram nada**: `module_fields` continuou exatamente como estava. Em Tributações, uma lista pedindo 1 campo novo e 1 removido foi recusada com o nome da tabela (`tax_rules`), e os 6 campos ficaram intactos. Módulo de teste excluído no fim, sem órfãos em `modules`/`module_fields`/`module_records`/`role_permissions`. `tsc`, `oxlint` e `vite build` limpos; console do navegador sem erros.
+
+#### Fora de escopo
+
+Workflow (situações, transições, ações) continua só no canvas — esta etapa é `module_fields` e nada mais. Rótulo/ordem/`branch_scoped` do próprio módulo também não entram no JSON. E o rascunho do textarea é perdido ao alternar para a outra aba ("Editor" desde a Fase 3; o componente desmonta): quem está colando uma lista grande aplica antes de trocar de aba.
+
+### Decisão arquitetural: construtor em três painéis com a tabela real como prévia (Fase 3) (28/08/2026)
+
+Terceira fase do construtor "para dev", depois da visão JSON (Fases 1 e 2). Etapa de **superfície**, como o redesenho de 21/08 foi — nenhuma regra de M3 ou M4 mudou —, mas resolvendo o problema que aquele redesenho deixou: a grade de cartões era boa para *um* campo e ruim para *um módulo*, e a prévia embaixo dela era um desenho de tabela, não a tabela.
+
+O público desta tela é só a Facilite desde a decisão de 28/08 (`is_facilite_developer`), então a forma que serve é a de um editor de propriedades de IDE/engine: **lista de campos | prévia | Inspetor**, lado a lado.
+
+| Painel | O que é |
+| --- | --- |
+| Esquerda — "Campos" | Lista vertical compacta: alça de arraste, rótulo, tipo em texto pequeno. Nenhum controle de edição inline. Clicar seleciona. `+` no cabeçalho abre o mesmo `FieldFormModal` de sempre. |
+| Centro — "Prévia" | **`RegistryTable` de verdade**, alimentada por `buildTableColumns(fields, referenceLabels)` e pelos registros reais do módulo. Clicar num cabeçalho seleciona o campo daquela coluna. |
+| Direita — "Inspetor" | Rótulo, `FieldTypePicker`, referência (Camada 2) e "Visibilidade" com quatro interruptores. Sem campo selecionado, um estado vazio no lugar. |
+
+"Ver como JSON" continua como a segunda aba do mesmo alternador — os três painéis somem quando ela está ativa, exatamente como o canvas sumia antes.
+
+#### A prévia é a tela publicada, não uma imitação dela
+
+`ListPreview` (uma `<table>` à mão, com linhas fixas de `—`) foi apagada. No lugar entrou o **mesmo par** que `GenericModulePage` monta em produção: `buildTableColumns` + `RegistryTable`, com as linhas vindo do **mesmo** `useGenericModuleData` filtrando pelo módulo selecionado, e os rótulos de referência do **mesmo** `useModuleReferences`. Verificado lado a lado com `/tributacoes`: markup idêntico, `grid-template-columns` idêntico (`110px 160px 110px 160px 160px 90px`), fundo idêntico (`--blue-panel`), mesma contagem de linhas.
+
+- **Estado vazio de graça**: módulo sem registro cai nas linhas-fantasma que `minRows` já desenha (e no "Nenhum registro encontrado." dos cards em mobile). Nada de mensagem própria.
+- **Zero coluna é o único caso com texto próprio**: sem nenhum campo com `showInTable` a tabela publicada também sairia em branco, e uma caixa vazia não explica por quê. A frase (*"Nenhum campo com 'Mostrar na tabela'…"*) ocupa o lugar da tabela nesse caso, e só nele.
+- **A primeira linha nasce selecionada**, como na tela publicada — sem isso a comparação lado a lado teria uma diferença que não vem de nenhuma decisão de campo.
+- **A prévia refaz o `select` a cada edição**, porque `fields` é dependência do repositório. É uma ida ao banco por mexida, num cadastro pequeno, numa ferramenta interna: o preço certo por a prévia nunca mentir (a coluna de ordenação, por exemplo, é o primeiro campo com `showInTable` — muda quando a flag muda).
+
+#### `onColumnSelect`: dois props opcionais em `RegistryTable`, e por que não um hack de DOM
+
+Selecionar o campo clicando no cabeçalho da prévia precisava de um gancho que a tabela não tinha. As duas saídas eram delegar clique por classe CSS de fora (`.registry-table__header > span`, frágil e acoplado ao interior de um componente compartilhado) ou dois props **opcionais**:
+
+- `onColumnSelect?: (key: string) => void` — quando informado, o clique no cabeçalho **seleciona em vez de ordenar**. Ter os dois gestos no mesmo clique seria pior que nenhum: ordenar a prévia não significa nada, e a seta de ordenação apareceria como efeito colateral de escolher um campo.
+- `selectedColumnKey?: string | null` — o destaque, um sublinhado âmbar. Não é caixa nem fundo: o cabeçalho da tabela publicada não tem caixa nenhuma, e ganhar uma aqui mudaria justamente a cara que a prévia existe para reproduzir.
+
+Sem os props **nada muda** — `aria-sort` continua saindo, `handleSort` continua sendo o `onClick`. Confirmado no navegador em `/tributacoes` e `/produtos` depois da mudança: ordenar continua ordenando, com seta, classe `--active` e as linhas na ordem certa.
+
+#### Interruptor no lugar de chip, e por que o desligado não é vermelho
+
+As quatro flags eram chips (pílula preenchida = ligado). Viraram `role="switch"` de verdade, no mesmo desenho do interruptor de Configurações e da ficha (trilho pílula + botão branco deslizante), menores porque são quatro empilhados. **Uma diferença deliberada**: o trilho desligado é neutro, não `--danger`. Os dois usos anteriores são de política ("permitir estoque negativo"), onde vermelho quer dizer alguma coisa; "este campo não aparece na tabela" é escolha comum de campo, e quatro trilhos vermelhos no Inspetor leriam como quatro erros.
+
+A regra de sempre continua no clique, não no submit: desligar a terceira das três flags de visibilidade é recusado com *"O campo precisa aparecer em pelo menos um lugar…"*, agora escrita dentro do próprio Inspetor, onde a ação aconteceu.
+
+#### Detalhes que valem lembrar
+
+- **A seleção é derivada, não espelhada**: `fields.find(f => f.id === selectedFieldId)`. Trocar de módulo ou remover o campo selecionado esvazia o Inspetor sozinho — nenhum efeito de sincronização, nenhum estado morto apontando para um id que não existe mais. Verificado removendo o campo selecionado: o Inspetor voltou ao estado vazio na hora.
+- **A lista virou `verticalListSortingStrategy`** (era `rectSortingStrategy`, para grade). O resto do arraste é igual, incluindo **só a alça carregando os listeners** e a ausência de `DragOverlay` pelo `backdrop-filter` de `.module-builder__detail`. A ordem continua indo para `sort_order` no banco.
+- **A marca "fora da tabela"** na linha da lista existe porque um campo sem `showInTable` não tem cabeçalho na prévia: sem ela, a única forma de descobrir isso seria abrir o Inspetor de cada campo.
+- **A aba "Canvas" virou "Editor"** — o nome descrevia uma grade que não existe mais. O arquivo continua `FieldCanvas.tsx` (renomear custaria churn em git sem responder nada).
+- **`FieldCanvas` recebe o `BuilderModule` inteiro**, não só o rótulo: a prévia precisa de `storageKind`/`dataTable`/`branchScoped` para buscar o dado, mais `branchId` e `has_permission(view)` vindos da página.
+- **`ModuleBuilderPage.css` é um arquivo só para vários componentes** (a página, o canvas, o modal de módulo novo, o de campo, o diagrama), todos com o mesmo prefixo `module-builder__`. Duas classes do painel novo (`field-list`, `field-glyph`) colidiram com as que `NewModuleModal` já usava e, por virem depois no arquivo, **sobrescreveram a lista de campos do modal** (gap, `flex`, tamanho do ícone). Pegado no fim da etapa; as do painel viraram `field-rows` e `field-row-glyph`. **Antes de nomear uma classe nova aqui, `grep` o prefixo no CSS inteiro** — o arquivo não avisa, e o sintoma aparece numa tela que ninguém tocou.
+- **`FieldTypePicker` perdeu o prop `size`**: o `small` existia só para caber no cartão, e o cartão morreu. No Inspetor cabe o tamanho normal, com o nome do tipo escrito.
+
+#### Testado no navegador
+
+Conta de testes (`is_facilite_developer` ligada), viewport 1600x900.
+
+- **Tributações** (`table` sem tela própria, dado real): três painéis lado a lado; prévia idêntica a `/tributacoes` (markup, larguras de coluna, cor do painel, 2 registros reais + 3 linhas-fantasma). Clicar em "UF de origem" na lista abriu o Inspetor com `uf_origem`; clicar no cabeçalho "CFOP" da prévia selecionou `cfop` **nos três lugares** (linha destacada na lista, sublinhado no cabeçalho, Inspetor). Desligar "Mostrar na tabela" tirou a coluna e marcou "fora da tabela" na lista; religar devolveu tudo. Sem `+` (a fronteira de M3 intacta). Confirmado por SQL no fim: os 6 campos exatamente como estavam.
+- **Unidades de medida** (mesmo caso): 3 campos, sem `+`, alças ativas, prévia com os registros reais (`CX|Caixa|false`…), sem seção de workflow.
+- **Produtos** (tela própria): só a mensagem de recusa de M3 — sem painéis, sem abas, sem workflow.
+- **Módulo genérico "Fase 3 teste"**, criado do zero: `+` presente; prévia vazia caiu nas linhas-fantasma da própria `RegistryTable`. Registro real criado por `/fase-3-teste` apareceu na prévia com a primeira linha selecionada. **Arraste** de "Prazo" para a primeira posição (eventos de ponteiro reais, espaçados) reordenou lista, cabeçalhos **e valores das linhas** ao vivo, gravou no banco e a rota publicada voltou na mesma ordem depois do F5. Rótulo editado no Inspetor ("Prazo" → "Prazo final") propagou para lista, cabeçalho da prévia e subtítulo do painel. Recusa da terceira flag exercitada. Campo novo pelo `+` apareceu como coluna com célula vazia no registro antigo. Campo removido pelo `×` do Inspetor levou o Inspetor de volta ao estado vazio. Com um segundo módulo genérico ("Fase 3 ref") o Inspetor mostrou **Rótulo/Tipo/Referência/Visibilidade**, e a referência gravou sem erro.
+- **"Ver como JSON"** continua substituindo os três painéis e mostrando o estado exato (inclusive o `referenceModuleId` recém-gravado).
+- **Layout**: 1600px e 1280px mantêm os três painéis sem rolagem horizontal de página (a tabela rola por dentro, como na tela publicada); abaixo de 1180px eles empilham.
+- Os dois módulos de teste foram excluídos pelo diálogo de atrito: 20 linhas em `modules`, zero órfãos em `module_fields`/`module_records`/`role_permissions`/`module_situations`/`module_tabs`. Console do navegador sem erros. `tsc`, `oxlint` e `vite build` limpos, com `ModuleBuilderPage` ainda em chunk próprio.
+
+**Não exercitado**: a prévia de um módulo `branch_scoped` com filial trocada no meio (os módulos genéricos de teste não eram isolados por filial); e a coluna de referência renderizando o rótulo do registro apontado em vez do uuid — a referência foi gravada, mas nenhum registro chegou a apontar para outro (o caminho é o mesmo `useModuleReferences` que `GenericModulePage` já usa, sem código novo).
+
+#### Fora de escopo
+
+Workflow (`WorkflowCanvas.tsx`, situações e transições) segue igual — é a Fase 5. Prévia da **ficha** e do **formulário** (só a tabela ganhou prévia real). Redesenho da lista de módulos à esquerda da página. Múltipla seleção de campos no Inspetor. `data_type` novo no motor.
+
+### Decisão arquitetural: desfazer/refazer, atalhos de teclado e seleção múltipla no construtor (Fase 4) (28/08/2026)
+
+Quarta fase do construtor "para dev". As três primeiras deram **superfície** (JSON, três painéis, Inspetor); esta dá os gestos que separam uma tela de cadastro de uma ferramenta de trabalho: `Ctrl+Z`, setas, `Delete`, `Shift`/`Ctrl+clique`. Nenhuma regra de M3 ou M4 mudou.
+
+#### Desfazer é a reconciliação da Fase 2, não um mecanismo novo
+
+O achado que encolheu esta etapa: **`fieldsJsonPlan.ts` já sabe aplicar uma lista de campos desejada**. Ele compara a lista pedida com a atual e devolve os `updateModuleField`/`addModuleField`/`removeModuleField`/`reorderModuleFields` que faltam — e "voltar ao estado anterior" é literalmente isso, com a lista desejada sendo um snapshot antigo. Então não nasceu nenhum caminho de gravação novo:
+
+| Peça | O que é |
+| --- | --- |
+| `useFieldsHistory.ts` | Só as duas pilhas (`past`/`future`, últimas 20) e a disciplina de quem empurra o quê. Não sabe gravar nada. |
+| `snapshotToFieldsJson` (em `fieldsJsonPlan.ts`) | Serializa o snapshot no mesmo texto que a visão JSON aceita. |
+| `applyFieldsSnapshot` (em `ModuleBuilderPage.tsx`) | `planFieldsJson` + `applyFieldsPlan`, exatamente como o botão "Aplicar" da aba JSON. |
+
+Cinco consequências que valem lembrar:
+
+- **Desfazer uma remoção recria o campo, e isso funciona por causa de M3.** O snapshot ainda carrega o `id` do campo removido, e `planFieldsJson` recusaria um id que não é mais do módulo; `snapshotToFieldsJson` tira `id`/`fieldKey`/`accessorKey` **só** dos itens que sumiram, e o item vira criação. A chave sai de novo do rótulo, e como `removeModuleField` nunca apagou o valor no jsonb, o campo volta com os dados dos registros antigos. A reversibilidade que M3 documentava como consolo virou recurso.
+- **A validação e a fronteira de M3 vêm de graça.** Desfazer uma remoção num módulo `table` sem tela própria é recusado pela mesma mensagem com o nome da tabela, sem escrever nada — não foi preciso repetir a regra.
+- **A pilha é do módulo selecionado** e zera ao trocar (`useEffect` em `selectedId`): os ids de um módulo não dizem nada sobre outro.
+- **Nada é persistido.** F5 zera o histórico, como em qualquer editor. Persistir exigiria decidir o que fazer quando o banco mudou por outra via no meio — resposta errada para uma ferramenta interna.
+- **`busy` serializa undo/redo.** Aplicar um snapshot é várias idas ao banco; um segundo `Ctrl+Z` no meio leria um `fields` velho e empurraria o snapshot errado para o futuro.
+
+Toda ação que muda campos passa por `withHistory` — Inspetor, `+`, `×`, arraste, ações em lote e o "Aplicar" da aba JSON. Um "Aplicar" ruim se desfaz com uma tecla.
+
+#### Atalhos: três guardas antes de qualquer coisa
+
+O listener mora em `FieldCanvas` de propósito — o componente só existe na aba "Editor", então `Ctrl+Z` não some com o texto de quem está na aba "Ver como JSON" (confirmado no navegador: com o foco no textarea, `Ctrl+Z` não mexeu em campo nenhum).
+
+1. **Foco fora de campo de digitação** — `isEditableTarget`, a mesma guarda dos atalhos numéricos do `WindowDock` (a função foi copiada, não extraída: cinco linhas, e um util compartilhado acoplaria o dock ao construtor).
+2. **Nenhum modal aberto** — `shortcutsEnabled={modal.kind === "none"}`. O `ConfirmDialog` é Radix, com foco preso num `<button>`, que `isEditableTarget` deixaria passar. Verificado: com o diálogo de remoção aberto, as setas não mexem na seleção.
+3. **Nenhum arraste em curso** — `dragging`, de `onDragStart`/`onDragEnd`/`onDragCancel`.
+
+A terceira é a que importa: **as setas são do `KeyboardSensor` enquanto ele está no comando**. Espaço na alça ativa o arraste e a partir daí as setas movem o *campo*; fora do arraste elas movem a *seleção*. Exercitado com eventos de teclado reais: com o arraste ativo, `ArrowUp` moveu o item sobre o vizinho e a seleção continuou vazia — prova de que o handler novo não rodou, porque com âncora ausente ele teria selecionado a última linha.
+
+`Delete`/`Backspace` **abre o diálogo de sempre**, não pula a confirmação: o atalho encurta o caminho até a pergunta.
+
+#### Seleção múltipla, e por que o lote não tem rótulo
+
+`selectedFieldId: string | null` virou `selectedIds: string[]` mais uma **âncora** — que não se move no `Shift`, para o intervalo poder crescer para os dois lados. A seleção continua **derivada** (`fields.filter(f => ids.includes(f.id))`), a mesma decisão da Fase 3 no plural: remover um campo o tira da seleção sozinho.
+
+Com mais de um campo o Inspetor troca de conteúdo. Só entram as quatro flags e "Remover campos selecionados" — **rótulo, tipo e referência ficam de fora**: renomear três campos para o mesmo nome não é operação que alguém queira, e um campo de texto vazio no lugar seria um convite a fazer isso.
+
+- O interruptor mostra ligado só quando **todos** estão ligados, e cada linha diz a contagem (*"2 de 3 ligados"*) — a informação que falta quando a seleção é mista. Clicar liga todos, ou desliga todos se já estavam todos ligados; nunca "inverte cada um".
+- **A regra das três flags recusa o lote inteiro** se um só dos selecionados ficaria invisível, nomeando o culpado (*"'Alfa' ficaria sem aparecer em lugar nenhum…"*). Aplicar em alguns e pular outros deixaria a seleção em dois estados que ninguém pediu.
+- As ações em lote gravam por `onApplyFields` → `applyFieldsSnapshot`: três campos ganhando a mesma flag viram **um** plano e **uma** releitura, em vez de três `editField` encadeados — e ficam desfazíveis pelo mesmo caminho, sem código extra.
+- A prévia continua destacando **uma** coluna: `selectedColumnKey` de `RegistryTable` é singular, e alargá-lo para um array mexeria num componente compartilhado para um destaque de ferramenta interna.
+
+#### Testado no navegador
+
+Conta de testes (`is_facilite_developer`), 1600x900, módulo genérico "Fase 4 teste" (Alfa/Beta/Gama/Delta) criado e excluído na mesma sessão. Cada passo confirmado por SQL, não só por tela:
+
+- **Rótulo** "Alfa" → "Alfa renomeado" no Inspetor → `Ctrl+Z` devolveu "Alfa" **no banco**; `Ctrl+Shift+Z` refez; `Ctrl+Z` desfez de novo.
+- **Setas** andaram Alfa→Beta→Gama→Delta, pararam nas pontas e levaram o Inspetor junto. `Delete` em "Gama" abriu *"Remover o campo 'Gama'?"*; confirmado, sobraram 3 campos; `Ctrl+Z` recriou `gama` com a **mesma chave e `sort_order` 30**.
+- **Shift+clique** de Alfa a Gama selecionou 3; desligar "Mostrar na tabela" mudou os três de uma vez (marca "fora da tabela" nas três linhas, prévia com só a coluna "Delta", `show_in_table = false` nas três linhas do banco). `Ctrl+clique` acrescentou Delta (4) e tirou Beta (3).
+- **Recusa em lote**: com as três só no formulário, desligar "Mostrar no formulário" foi recusado nomeando "Alfa", e nada mudou. Dois `Ctrl+Z` devolveram as quatro colunas.
+- **Remoção em lote** de 3 campos pelo botão → diálogo no plural listando os três → um `Ctrl+Z` devolveu os quatro campos com chaves, ordem e flags originais.
+- **Arraste por teclado** (`Espaço`, `ArrowUp`, `Espaço` na alça) reordenou para Alfa/Beta/Delta/Gama, gravou, e `Ctrl+Z` devolveu a ordem — sem a seleção nunca ter se mexido durante o arraste.
+- **Tributações** (`existing-only`): setas selecionam, `Delete` não faz nada, sem `+`, sem `×`, e o Inspetor em lote mostra os quatro interruptores **sem** "Remover campos selecionados". Os 6 campos confirmados intactos por SQL no fim.
+- Console do navegador sem erros; `oxlint` limpo; `vite build` limpo, com `ModuleBuilderPage` ainda em chunk próprio. Depois da exclusão do módulo de teste: 20 linhas em `modules`, zero órfãos em `module_fields`/`module_records`/`role_permissions`.
+
+**Não exercitado**: uma escrita recusada pelo banco **no meio** de um desfazer (o caminho é o mesmo `applyFieldsPlan` da Fase 2, que já para na primeira falha e diz o que passou); e o limite de 20 snapshots batendo de verdade.
+
+#### Fora de escopo
+
+Prévia (`RegistryTable`) não ganhou seleção múltipla nem atalhos — só a lista da esquerda. Sem botões de desfazer/refazer na tela: os atalhos estão escritos no rodapé do painel "Campos", e um par de botões seria superfície nova numa etapa de gestos. Workflow (`WorkflowCanvas.tsx`) segue igual — é a Fase 5.
+
+### Decisão arquitetural: visão JSON do workflow, e a reconciliação compartilhada com os campos (Fase 5) (28/08/2026)
+
+Quinta fase do construtor "para dev". É a Fase 2 (visão JSON dos campos) aplicada ao **workflow** de M4 — situações, transições e ações automáticas —, pelo mesmo motivo e sem repetir a cautela de "primeiro só leitura": o padrão dos campos já provou que funciona, então esta nasceu editável. Nenhuma regra de M3 ou M4 mudou, e o **diagrama continua existindo inteiro** (`WorkflowCanvas.tsx` não foi tocado), como o editor de campos continuou existindo ao lado do JSON deles.
+
+O problema é o mesmo de sempre: o diagrama é bom para *conferir* a máquina de estados e péssimo para *montá-la*. Cada situação é um modal, cada seta são dois cliques, cada ação automática é outro modal — e uma sessão do Claude Code teria que descobrir o estado por screenshot/DOM e depois clicar tudo. `WorkflowSection.tsx` ganhou o mesmo alternador de duas abas ("Diagrama" | "Ver como JSON"), com o mesmo desenho e as mesmas classes CSS já existentes.
+
+#### Dois JSONs, não um
+
+Campos e workflow **não** se misturam na mesma visão: o JSON dos campos continua em `ModuleBuilderPage.tsx` (`FieldsJsonView`), o do workflow mora em `WorkflowSection.tsx` (`WorkflowJsonView`). Cada um no seu lugar já estabelecido, cada um com o seu "Copiar"/"Aplicar" e o seu textarea. Um documento só, com campos e workflow juntos, obrigaria a aplicar as duas coisas de uma vez para mexer numa — e são etapas de trabalho diferentes.
+
+#### O formato: onde ele deixa de ser o dump cru, e por quê
+
+A visão dos campos mostra `ModuleFieldDefinition` sem tradução nenhuma, e o ideal aqui seria o mesmo. Duas coisas impedem, e as duas são sobre **referências entre as listas**:
+
+| Decisão | Por quê |
+| --- | --- |
+| **As ações moram dentro da transição**, não num mapa `actionsByTransition` à parte | Uma transição *nova* não tem `id`, logo não tem chave sob a qual pendurar ações num mapa. Aninhar é a única forma de criar a transição e as ações dela na mesma aplicação. |
+| **A transição aponta as situações por `code`**, não por `fromSituationId`/`toSituationId` | Mesmo motivo (uma situação nova ainda não tem `id`) e mais um: um par de uuids não diz nada a quem lê o documento, enquanto o `code` é o identificador estável e legível que o banco já guarda em `module_records.status`. O `code` de uma situação nova é **previsível** — sai do rótulo pela mesma `previewFieldKey` que o formulário já mostra na dica. |
+
+`id` continua sendo o que decide edição × criação, nos **três** níveis, exatamente como nos campos. Ficam de fora, e a dica na tela diz: `sortOrder` (quem manda é a posição na lista) e `canvasX`/`canvasY` (posição do nó, que se grava arrastando).
+
+O ganho concreto dessa escolha, exercitado no navegador: **uma situação nova e a seta que chega nela nascem na mesma aplicação** — impossível se a transição precisasse citar um uuid que ainda não existe.
+
+#### `jsonPlan.ts`: a extração que fazia sentido, e a que não fazia
+
+O pedido pedia para generalizar "se ficar natural". O que **é** compartilhável de verdade é o miolo mecânico, e ele foi para `jsonPlan.ts`, usado pelos dois arquivos de plano:
+
+- `parsePlan` — `JSON.parse` + a disciplina de tudo ou nada (`PlanError` vira `{ ok: false, error }`, e erro que não é de validação continua subindo, porque é bug).
+- `createIdReconciler` — o casamento por `id`: item conhecido vira edição, item sem `id` vira criação, `id` que sumiu vira remoção, `id` inventado ou repetido é recusa. Devolve `drops()`, `survivors()` e `orderChanged()`.
+- `fail`/`describe`/`readBoolean`/`readLabel`/`readOptionalText`.
+
+O que **não** foi extraído, de propósito: a validação de conteúdo. Um campo tem `dataType` e chave física; uma situação tem código e a marca de inicial; uma ação tem seis colunas que se exigem entre si. Forçar isso num único validador genérico produziria uma abstração que ninguém consegue ler. Cada arquivo continua dono das suas regras **e das suas mensagens** — o reconciliador recebe as três mensagens de `id` como callbacks, e é por isso que as recusas de campo continuam falando "Campo 3" enquanto as de workflow falam "Situação 2".
+
+**Um detalhe que ditou a forma**: o reconciliador é *stateful*, chamado item a item de dentro do laço de quem usa, e não uma passada própria antes dele. Assim a primeira mensagem de erro continua sendo a do primeiro item problemático da lista — uma passada separada de ids reportaria "o id do item 7" quando o item 1 já estava sem rótulo. `fieldsJsonPlan.ts` foi reescrito para usar as peças novas **sem mudar nenhuma mensagem**, e a visão dos campos foi reexercitada no navegador para confirmar.
+
+#### Nove etapas, e por que a ordem não é arbitrária
+
+`applyWorkflowPlan` (em `useModuleWorkflowBuilder.ts`) chama as **funções do repositório**, não os wrappers do hook — cada wrapper recarrega o workflow inteiro depois de escrever, o que daria uma ida ao banco por item. A lista é relida **uma vez**, no fim, com sucesso ou com falha (é o passo que traz os ids reais do que acabou de ser criado para o textarea). Mesma decisão de `applyFieldsPlan`, mesmo motivo.
+
+1. **Remover antes de criar, e de dentro para fora**: ação → transição → situação. O banco recusa apagar uma situação que ainda tem transição, e recusa criar uma transição para um par `(de, para)` que já existe — remover primeiro libera o par, e libera o `code` da situação para um item novo desta mesma aplicação.
+2. **A troca da situação inicial é uma chamada própria, no fim.** `save_module_situation` recusa desmarcar a inicial vigente, então o valor **atual** de `is_initial` viaja em toda edição e a troca acontece depois que todas as situações existem. Assim ela funciona igual quando a nova inicial já existia, quando acabou de ser criada, e quando substitui uma que acabou de ser removida — sem depender da ordem dos itens na lista. A própria RPC desmarca a anterior.
+3. **Os ids reais sobem em cascata**: as situações novas devolvem id (a RPC já devolvia) e alimentam o mapa `code → id` que as transições usam; as transições novas devolvem id e alimentam as ações delas. O cliente não teria como adivinhar nenhum dos dois.
+
+Se uma escrita falhar, a aplicação **para ali**, com a mesma frase da Fase 2: *"Parou na primeira falha: … Já tinha sido aplicado antes disso: X, Y. O resto do documento não foi gravado."*
+
+#### `sortOrder`: renumera quando precisa, e fica quieto quando não
+
+A ordem não tem RPC própria (diferente dos campos, que têm `reorderModuleFields`): ela é parâmetro do próprio `save_*`. Renumerar tudo em `(índice+1)*10` a cada aplicação faria um "Copiar → Aplicar" sem edição nenhuma escrever em todas as linhas. A regra, aplicada por nível (situações, transições, e as ações de cada transição): **renumera só quando a ordem relativa dos sobreviventes mudou ou quando há item novo** — que são exatamente os casos em que a posição precisa mesmo ser expressa. Confirmado: um "Copiar → Aplicar" intacto responde *"Nada a aplicar: o documento já é igual ao do módulo."*
+
+#### Três recusas explícitas, herdadas da mesma filosofia
+
+Tudo é validado **antes** de qualquer escrita, e a primeira coisa errada aborta o documento inteiro. Além das checagens óbvias (enums, campo obrigatório, item que não é objeto), três recusas existem porque a alternativa seria aceitar e ignorar em silêncio:
+
+- **O `code` de uma situação que já existe não muda por aqui** — mesmo motivo da `fieldKey` de um campo: ele é o que está gravado em `module_records.status`, e trocá-lo orfanaria os registros que já estão nela.
+- **O par `from`/`to` de uma transição que já existe não muda por aqui** — a RPC simplesmente ignora os parâmetros na edição, e ignorar em silêncio deixaria quem colou acreditando que redesenhou a seta. As ações penduradas nela mudariam de sentido sem saber.
+- **Uma ação não muda de transição por aqui** — `save_module_transition_action` filtra o update por `(id, transition_id)` e responderia "ação não encontrada", mensagem verdadeira e inútil. A mensagem daqui diz de qual transição a ação é.
+
+Mais duas que são invariantes do banco antecipadas: **exatamente uma** situação com `isInitial: true` (o índice único parcial recusaria duas, e o gatilho não conseguiria carimbar um registro novo com zero), e as regras de combinação das seis colunas de uma ação, que são os CHECK da tabela escritos em português. O **portão da Camada 2** também é conferido aqui — sem ele a lista começaria a ser gravada e pararia na primeira ação cruzada.
+
+#### Testado no navegador
+
+Conta de testes (`is_facilite_developer` ligada), módulo genérico "Fase 5 teste" criado e excluído na mesma sessão, com cada passo conferido por SQL:
+
+- **Workflow inteiro montado de uma vez, a partir do zero**: duas situações, uma transição e duas ações (`now` e `current_user`) numa única aplicação — *"situação 'Aberto' criada; situação 'Resolvido' criada; transição 'Marcar como resolvido' criada; ação que preenche 'resolvido_em' … criada; ação que preenche 'resolvido_por' … criada"*. O textarea recarregou já com os ids reais do banco, e `sort_order` saiu 10/20 na ordem da lista.
+- **"Copiar → Aplicar" sem editar** → *"Nada a aplicar"*, zero escritas.
+- **Rótulo de situação editado no texto** → *"situação 'Resolvido' alterada (label)"*, e o **diagrama** passou a mostrar "Resolvido pelo suporte" com o `code` `resolvido` intacto.
+- **Transição nova sem `id`** ("Reabrir", resolvido → aberto) → apareceu como segunda seta no diagrama.
+- **Situação nova + transição que aponta para ela, na mesma aplicação** ("Cancelado" e "Cancelar", com uma ação `literal`) — o caso que o formato por `code` existe para permitir.
+- **Troca da inicial junto com uma inversão de ordem**: as três situações invertidas e "Cancelado" marcada inicial → `sort_order` 10/20/30 na ordem nova, `is_initial` só em "Cancelado", numa aplicação só.
+- **Remoções**: uma ação e uma transição fora da lista na mesma aplicação → as duas removidas, e o diagrama voltou com uma seta a menos.
+- **Nove recusas seguidas** — JSON truncado, array no lugar do objeto, `code` renomeado, `from` apontando para código inexistente, duas iniciais, par da transição alterado, `literal` sem `value`, campo de destino inexistente, `via` que não é campo de referência — cada uma com mensagem específica, e **confirmado por SQL: nada foi escrito** (contagens e fingerprint das situações idênticos antes e depois).
+- **O diagrama continua inteiro**: clicar na seta "Marcar como resolvido" abriu o painel com "Aberto → Resolvido pelo suporte" e a ação restante descrita em português.
+- **A visão JSON dos campos foi reexercitada** depois da extração (dois campos criados por ela), para confirmar que `fieldsJsonPlan.ts` não regrediu.
+- Console do navegador sem erros; `oxlint` limpo; `vite build` limpo, com `ModuleBuilderPage` ainda em chunk próprio. Depois da exclusão: 20 linhas em `modules`, zero órfãos em `module_fields`/`module_situations`/`module_transitions`/`module_records`/`role_permissions`.
+
+**Não exercitado**: uma escrita recusada pelo banco **no meio** da aplicação (o caminho é o mesmo "para na primeira falha" da Fase 2); ações de **Camada 2** por esta via (o módulo de teste não tinha campo de referência — a validação de `via`/`sourceFieldKey` foi exercitada pelo lado da recusa, não pelo do sucesso); e disparar a transição na tela publicada depois de configurá-la por JSON (a RPC de execução não foi tocada).
+
+#### Fora de escopo
+
+`WorkflowCanvas.tsx` não mudou — nada de redesenho do diagrama, que continua sendo a alternativa visual. Desfazer/refazer no workflow (a Fase 4 deu isso aos campos; aqui a reconciliação já existe, então seria a mesma receita, mas é etapa própria). Rótulo/ordem do próprio módulo. E, como na Fase 2, o rascunho do textarea é perdido ao alternar para a aba "Diagrama" — quem está colando um documento grande aplica antes de trocar de aba. O botão "Nova situação" some na aba JSON justamente por isso: criar por modal recarregaria o workflow e levaria o rascunho junto.
 
 ### Catálogos fiscais de referência: UF, CFOP, tipo de cliente, regime tributário e NCM (28/08/2026)
 

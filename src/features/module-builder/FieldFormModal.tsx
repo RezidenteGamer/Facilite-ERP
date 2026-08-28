@@ -21,10 +21,10 @@ type FieldFormModalProps = {
   submitLabel?: string;
   /**
    * Módulos genéricos que este campo pode referenciar. **Vazio esconde o
-   * controle inteiro** — é assim que a Camada 2 "nem aparece como opção" para
-   * quem tem `can_manage_modules` mas não é desenvolvedor do Facilite, em vez
-   * de aparecer desabilitada com um cadeado anunciando algo que a pessoa
-   * nunca vai poder usar.
+   * controle inteiro** — em vez de aparecer desabilitado com um cadeado
+   * anunciando algo que a pessoa nunca vai poder usar. Desde que o construtor
+   * inteiro passou a exigir `is_facilite_developer` (28/08/2026) a lista só
+   * chega vazia por falta de módulo genérico elegível, não por falta de flag.
    *
    * Esconder o controle não solta o valor já gravado: `referenceModuleId`
    * continua no estado e volta intacto no submit, senão editar o rótulo de um

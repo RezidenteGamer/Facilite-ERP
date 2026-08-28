@@ -33,7 +33,7 @@ function gateMessageFor(module: CatalogModule): string {
     case "manage_branches":
       return "Você não tem permissão para gerenciar filiais.";
     case "manage_modules":
-      return "Você não tem permissão para gerenciar módulos.";
+      return "O construtor de módulos é uma ferramenta interna da Facilite.";
     default:
       return "Você não tem permissão para acessar este módulo.";
   }
@@ -63,7 +63,7 @@ export default function ModuleRoute({ module }: { module: CatalogModule }) {
     canManageUsers: Boolean(profile?.canManageUsers),
     canManagePermissions: Boolean(profile?.canManagePermissions),
     canManageBranches: Boolean(profile?.canManageBranches),
-    canManageModules: Boolean(profile?.canManageModules),
+    isFaciliteDeveloper: Boolean(profile?.isFaciliteDeveloper),
   });
 
   if (!allowed) return <AccessDenied label={module.label} gateMessage={gateMessageFor(module)} />;
@@ -93,7 +93,7 @@ export function ModuleSubrouteGuard({
     canManageUsers: Boolean(profile?.canManageUsers),
     canManagePermissions: Boolean(profile?.canManagePermissions),
     canManageBranches: Boolean(profile?.canManageBranches),
-    canManageModules: Boolean(profile?.canManageModules),
+    isFaciliteDeveloper: Boolean(profile?.isFaciliteDeveloper),
   });
 
   if (!allowed) return <AccessDenied label={module.label} gateMessage={gateMessageFor(module)} />;

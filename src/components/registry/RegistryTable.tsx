@@ -64,6 +64,16 @@ type RegistryTableProps<T> = {
   footerActions?: RegistryTableAction[];
   /** Números-resumo acima da lista (ex.: totais do Financeiro). Sem isso, nada aparece. */
   summary?: RegistrySummaryItem[];
+  /**
+   * Quando informado, clicar no cabeçalho **seleciona a coluna** em vez de
+   * ordenar por ela. Existe para a prévia do construtor de módulos, onde o
+   * cabeçalho é a forma de escolher qual campo o Inspetor edita — ordenar ali
+   * não teria sentido, e ter os dois gestos no mesmo clique seria pior que
+   * nenhum. Sem o prop, nada muda: a tabela publicada continua ordenando.
+   */
+  onColumnSelect?: (key: string) => void;
+  /** Coluna em destaque; só faz efeito junto com `onColumnSelect`. */
+  selectedColumnKey?: string | null;
 };
 
 /** Largura mínima assumida para uma coluna flexível (ex.: "minmax(0, 1fr)")
@@ -188,6 +198,8 @@ export default function RegistryTable<T>({
   minRows = 5,
   footerActions,
   summary,
+  onColumnSelect,
+  selectedColumnKey,
 }: RegistryTableProps<T>) {
   const gridTemplate = columns.map((column) => column.width).join(" ");
   const tableMinWidth = columns.reduce((sum, column) => sum + columnMinWidth(column.width), 0);
@@ -272,13 +284,27 @@ export default function RegistryTable<T>({
           >
             {columns.map((column) => {
               const active = sort?.key === column.key;
+              const picked = Boolean(onColumnSelect) && selectedColumnKey === column.key;
               return (
                 <span key={column.key} style={{ textAlign: column.align ?? "left" }}>
                   <button
                     type="button"
-                    className={`registry-table__sort-btn${active ? " registry-table__sort-btn--active" : ""}`}
-                    onClick={() => handleSort(column.key)}
-                    aria-sort={active ? (sort!.direction === "asc" ? "ascending" : "descending") : "none"}
+                    className={`registry-table__sort-btn${active ? " registry-table__sort-btn--active" : ""}${
+                      picked ? " registry-table__sort-btn--picked" : ""
+                    }`}
+                    onClick={() =>
+                      onColumnSelect ? onColumnSelect(column.key) : handleSort(column.key)
+                    }
+                    aria-pressed={onColumnSelect ? picked : undefined}
+                    aria-sort={
+                      onColumnSelect
+                        ? undefined
+                        : active
+                          ? sort!.direction === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : "none"
+                    }
                   >
                     {column.label}
                     <span className="registry-table__sort-icon" aria-hidden="true">

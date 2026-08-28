@@ -6,7 +6,12 @@ export type ModuleAccessContext = {
   canManageUsers: boolean;
   canManagePermissions: boolean;
   canManageBranches: boolean;
-  canManageModules: boolean;
+  /**
+   * `profiles.is_facilite_developer` — flag de **pessoa**, ligada só por SQL.
+   * É ela, e não mais `roles.can_manage_modules`, que abre o construtor de
+   * módulos: ver a decisão de produto de 28/08/2026 em `AGENTS.md`.
+   */
+  isFaciliteDeveloper: boolean;
 };
 
 /**
@@ -28,8 +33,13 @@ export function canAccessModule(module: CatalogModule, ctx: ModuleAccessContext)
       return ctx.canManagePermissions;
     case "manage_branches":
       return ctx.canManageBranches;
+    /* O nome do portão diz **o que** ele protege (gerenciar módulos), não qual
+       flag ele lê — e quem passa mudou: o construtor deixou de ser recurso do
+       cliente final e virou ferramenta interna da Facilite. `can_manage_modules`
+       continua sendo o portão do **banco** (policies e RPCs de M3/M4), mas
+       sozinha não abre mais a tela. */
     case "manage_modules":
-      return ctx.canManageModules;
+      return ctx.isFaciliteDeveloper;
     case "authenticated":
       return true;
     case "permission":

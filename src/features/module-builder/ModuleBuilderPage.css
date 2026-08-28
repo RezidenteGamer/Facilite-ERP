@@ -476,7 +476,7 @@
   white-space: nowrap;
 }
 
-/* --- Seletor de tipo por icone (canvas e modal de campo novo) --- */
+/* --- Seletor de tipo por icone (Inspetor e modal de campo novo) --- */
 
 .module-builder__type-picker {
   display: flex;
@@ -520,16 +520,6 @@
   height: 20px;
 }
 
-.module-builder__type-picker--small .module-builder__type-option {
-  padding: 5px;
-  border-radius: 9px;
-}
-
-.module-builder__type-picker--small .module-builder__type-glyph {
-  width: 16px;
-  height: 16px;
-}
-
 .module-builder__field-glyph {
   width: 14px;
   height: 14px;
@@ -545,7 +535,49 @@
   gap: 12px;
 }
 
-.module-builder__canvas-head {
+
+/* --- Alternância canvas/JSON --- */
+
+.module-builder__view-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.18);
+  width: fit-content;
+}
+
+.module-builder__view-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.module-builder__view-tab:hover {
+  opacity: 0.9;
+}
+
+.module-builder__view-tab--on {
+  background: rgba(255, 255, 255, 0.9);
+  color: #10233f;
+  opacity: 1;
+}
+
+.module-builder__json-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.module-builder__json-toolbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -553,102 +585,283 @@
   flex-wrap: wrap;
 }
 
-.module-builder__canvas {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 10px;
+.module-builder__json-hint {
+  margin: 0;
+  flex: 1 1 320px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  opacity: 0.75;
 }
 
-.module-builder__card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-}
-
-.module-builder__card--dragging {
-  opacity: 0.45;
-}
-
-.module-builder__card-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.module-builder__grip {
-  flex-shrink: 0;
-  width: 22px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--white);
-  opacity: 0.55;
-  cursor: grab;
-  touch-action: none;
-}
-
-.module-builder__grip svg {
-  width: 18px;
-  height: 18px;
-}
-
-.module-builder__grip:hover {
-  opacity: 0.9;
+.module-builder__json-hint code {
+  font-size: 11.5px;
+  padding: 1px 4px;
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.1);
 }
 
-.module-builder__grip--off {
-  opacity: 0.2;
-  cursor: default;
+.module-builder__json-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
-.module-builder__card-title {
+.module-builder__json-status {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.module-builder__json-status--error {
+  border-color: var(--danger);
+  color: var(--amber);
+}
+
+.module-builder__json-textarea {
+  width: 100%;
+  height: 50vh;
+  max-height: 50vh;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--white);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+  overflow: auto;
+  white-space: pre;
+}
+
+/* --- Tres paineis: lista de campos | previa | inspetor --- */
+
+/* Larguras fixas nas pontas e o meio elastico: a previa e a unica coisa aqui
+   que precisa de espaco proporcional ao numero de colunas do modulo. */
+.module-builder__panes {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) minmax(320px, 1fr) minmax(250px, 300px);
+  gap: 12px;
+  align-items: stretch;
+  min-height: 440px;
+}
+
+@media (max-width: 1180px) {
+  .module-builder__panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.module-builder__pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  max-height: 68vh;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+@media (max-width: 1180px) {
+  .module-builder__pane {
+    max-height: none;
+  }
+}
+
+.module-builder__pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.module-builder__pane-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+}
+
+.module-builder__pane-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  opacity: 0.55;
+}
+
+.module-builder__pane-foot {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  opacity: 0.6;
+}
+
+.module-builder__pane-note {
+  margin: 0;
+  flex-shrink: 0;
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.module-builder__pane-add {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--amber);
+  color: var(--white);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease);
+}
+
+.module-builder__pane-add:hover {
+  background: var(--amber-hover);
+}
+
+/* --- Painel 1: a lista enxuta de campos --- */
+
+.module-builder__field-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.module-builder__field-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 10px;
+  background: transparent;
+  transition: background-color 0.15s var(--ease);
+}
+
+.module-builder__field-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.module-builder__field-row--selected {
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+
+.module-builder__field-row--dragging {
+  opacity: 0.45;
+}
+
+.module-builder__field-pick {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  padding: 6px 8px 6px 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
 }
 
-.module-builder__card-label {
-  width: 100%;
-  padding: 2px 6px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--white);
-  font-family: var(--font-ui);
-  font-size: 14px;
+.module-builder__field-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
   font-weight: 600;
 }
 
-.module-builder__card-label:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.module-builder__card-label:focus {
-  outline: none;
-  border-color: var(--amber);
-  background: rgba(0, 0, 0, 0.2);
-}
-
-.module-builder__card-label--static {
-  border-color: transparent;
-}
-
-.module-builder__card-key {
-  padding-left: 6px;
+.module-builder__field-type {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   opacity: 0.6;
 }
 
-.module-builder__card-remove {
+.module-builder__field-row-glyph {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+/* Um campo sem "Mostrar na tabela" nao tem cabecalho na previa — sem esta
+   marca, a unica forma de descobrir isso seria abrir o Inspetor de cada um. */
+.module-builder__field-off {
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 10px;
+}
+
+/* --- Painel 2: a previa com a RegistryTable de verdade --- */
+
+/* A tabela do motor se dimensiona por flex (painel `flex: 1`, linhas com
+   rolagem propria) — mesmo arranjo que `.registry` da a ela na tela
+   publicada, so que aqui a altura vem do painel em vez da janela. */
+.module-builder__pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.module-builder__pane-body .registry-table {
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- Painel 3: o Inspetor --- */
+
+.module-builder__inspector {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.module-builder__inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.module-builder__inspector-key {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  opacity: 0.6;
+}
+
+.module-builder__inspector-remove {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
@@ -661,83 +874,42 @@
   cursor: pointer;
 }
 
-.module-builder__card-remove:hover {
+.module-builder__inspector-remove:hover {
   background: var(--danger);
 }
 
-.module-builder__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.module-builder__chip {
-  padding: 3px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--white);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.6;
-  cursor: pointer;
-}
-
-.module-builder__chip:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.module-builder__chip--on {
-  background: rgba(255, 255, 255, 0.9);
-  border-color: transparent;
-  color: #10233f;
-  opacity: 1;
-}
-
-.module-builder__chip:disabled {
-  cursor: not-allowed;
-}
-
-.module-builder__card-ref {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  opacity: 0.8;
-}
-
-.module-builder__card-select {
-  height: 30px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--white);
-  color: #10233f;
-  font-family: var(--font-ui);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.module-builder__card-refnote {
+.module-builder__inspector-refnote {
   margin: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   opacity: 0.7;
 }
 
-/* --- Previa ao vivo da lista do modulo --- */
-
-.module-builder__preview {
-  margin-top: 4px;
-  padding: 10px 12px 12px;
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px dashed rgba(255, 255, 255, 0.2);
+/* Inspetor em lote: mesma moldura do Inspetor de um campo, so que o cabecalho
+   nomeia a selecao no lugar da chave fisica (que e de um campo, nao de tres). */
+.module-builder__batch-count {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--amber);
 }
 
-.module-builder__preview-cap {
-  margin: 0 0 8px;
+.module-builder__batch-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  opacity: 0.6;
+}
+
+.module-builder__batch-remove {
+  align-self: flex-start;
+}
+
+.module-builder__prop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.module-builder__prop-label {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -745,30 +917,111 @@
   opacity: 0.6;
 }
 
-.module-builder__preview-wrap {
-  overflow-x: auto;
+.module-builder__prop-input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.module-builder__preview-table {
-  border-collapse: collapse;
-  width: 100%;
+.module-builder__prop-input:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.module-builder__prop-static {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.module-builder__prop-select {
+  height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--white);
+  color: #10233f;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.module-builder__flags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.module-builder__flag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.module-builder__flag-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.module-builder__flag-label {
   font-size: 12.5px;
+  font-weight: 600;
 }
 
-.module-builder__preview-table th,
-.module-builder__preview-table td {
-  padding: 6px 12px;
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+.module-builder__flag-hint {
+  font-size: 10.5px;
+  line-height: 1.35;
+  opacity: 0.55;
 }
 
-.module-builder__preview-table thead th {
-  font-weight: 700;
+/* Mesmo desenho do interruptor de Configuracoes e da ficha (trilho pilula +
+   botao branco deslizante), num tamanho menor porque aqui sao quatro
+   empilhados. Unica diferenca deliberada: o trilho desligado e neutro, nao
+   vermelho — "nao aparece na tabela" e escolha comum de campo, nao alerta. */
+.module-builder__switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition: background-color 0.18s var(--ease);
 }
 
-.module-builder__preview-table tbody td {
-  opacity: 0.35;
+.module-builder__switch--on {
+  background: #a8e063;
+}
+
+.module-builder__switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.module-builder__switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: 0 2px 5px rgba(4, 30, 82, 0.35);
+  transition: transform 0.18s var(--ease);
+}
+
+.module-builder__switch--on .module-builder__switch-knob {
+  transform: translateX(18px);
 }
 
 /* --- Diagrama de situacoes e transicoes --- */

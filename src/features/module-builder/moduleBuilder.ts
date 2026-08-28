@@ -234,7 +234,12 @@ export async function deleteUserModule(moduleId: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function addModuleField(moduleId: string, field: NewModuleField): Promise<void> {
+/**
+ * Devolve o `id` da linha criada — o cliente não tem como adivinhá-lo, e quem
+ * aplica uma lista inteira de campos (a visão JSON) precisa dele para montar a
+ * ordem final com ids reais depois das criações.
+ */
+export async function addModuleField(moduleId: string, field: NewModuleField): Promise<string> {
   const client = assertSupabase();
 
   // A chave vem da mesma função SQL que `create_user_module` usa — o preview
@@ -256,19 +261,24 @@ export async function addModuleField(moduleId: string, field: NewModuleField): P
     .limit(1);
   if (lastError) throw lastError;
 
-  const { error } = await client.from("module_fields").insert({
-    module_id: moduleId,
-    field_key: key as string,
-    label: field.label.trim(),
-    data_type: field.dataType,
-    is_required: field.isRequired,
-    sort_order: (last?.[0]?.sort_order ?? 0) + 10,
-    show_in_table: field.showInTable,
-    show_in_details: field.showInDetails,
-    show_in_form: field.showInForm,
-    reference_module_id: field.referenceModuleId ?? null,
-  });
+  const { data: created, error } = await client
+    .from("module_fields")
+    .insert({
+      module_id: moduleId,
+      field_key: key as string,
+      label: field.label.trim(),
+      data_type: field.dataType,
+      is_required: field.isRequired,
+      sort_order: (last?.[0]?.sort_order ?? 0) + 10,
+      show_in_table: field.showInTable,
+      show_in_details: field.showInDetails,
+      show_in_form: field.showInForm,
+      reference_module_id: field.referenceModuleId ?? null,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  return created.id as string;
 }
 
 /**
