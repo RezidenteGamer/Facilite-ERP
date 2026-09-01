@@ -271,25 +271,42 @@ export default function PermissionsPage() {
                     />
                   </td>
                   <td className="permissions-table__discount-cell">
-                    <input
-                      className="permissions-table__discount-input"
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Sem teto"
-                      aria-label={`Desconto máximo — ${role.name}`}
-                      title="Soma do desconto por item e do desconto de cabeçalho, sobre o valor bruto. Vazio = sem teto."
-                      value={
-                        discountDrafts[role.id] ??
-                        (role.maxDiscountPercent === null ? "" : String(role.maxDiscountPercent))
-                      }
-                      onChange={(event) =>
-                        setDiscountDrafts((prev) => ({ ...prev, [role.id]: event.target.value }))
-                      }
-                      onBlur={() => handleCommitMaxDiscount(role.id)}
-                    />
+                    <div className="permissions-table__discount-row">
+                      <input
+                        className="permissions-table__discount-input"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Sem teto"
+                        aria-label={`Desconto máximo — ${role.name}`}
+                        title="Soma do desconto por item e do desconto de cabeçalho, sobre o valor bruto. Vazio = sem teto."
+                        value={
+                          discountDrafts[role.id] ??
+                          (role.maxDiscountPercent === null ? "" : String(role.maxDiscountPercent))
+                        }
+                        onChange={(event) =>
+                          setDiscountDrafts((prev) => ({ ...prev, [role.id]: event.target.value }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") handleCommitMaxDiscount(role.id);
+                        }}
+                      />
+                      {/* Só aparece quando há algo digitado ainda não salvo — clicar fora
+                          do campo NÃO salva mais nada sozinho, de propósito: o usuário
+                          pediu uma confirmação explícita, não uma gravação silenciosa. */}
+                      {discountDrafts[role.id] !== undefined && (
+                        <button
+                          className="permissions-table__discount-save"
+                          type="button"
+                          disabled={discountStatus[role.id] === "saving"}
+                          onClick={() => handleCommitMaxDiscount(role.id)}
+                        >
+                          Salvar
+                        </button>
+                      )}
+                    </div>
                     <span className="permissions-table__discount-status" aria-live="polite">
                       {discountStatus[role.id] === "saving" && "Salvando…"}
-                      {discountStatus[role.id] === "saved" && "Salvo"}
+                      {discountStatus[role.id] === "saved" && "✓ Salvo"}
                     </span>
                   </td>
                 </tr>

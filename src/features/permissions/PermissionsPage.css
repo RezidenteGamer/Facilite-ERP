@@ -94,22 +94,31 @@
 }
 
 /* Campo de texto (desconto máximo) — diferente do checkbox, precisa de
-   fundo e cor próprios: o input herda `color` da página (var(--white)) e,
-   sem um fundo escuro, ficava texto branco sobre o branco padrão do
-   navegador, ilegível nos dois temas. */
+   fundo e cor próprios. Primeira tentativa usou `color: var(--white)`, que
+   é uma cor fixa (sempre #FFFFFF, nos dois temas) — funcionava por
+   coincidência no tema escuro (fundo escuro atrás) e ficava texto branco
+   sobre fundo branco no tema claro. `--text-on-control` é o par certo: o
+   próprio tokens.css documenta essa combinação (ver comentário perto de
+   `--ink`) e already se ajusta sozinho por tema. */
 .permissions-table__discount-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+}
+
+.permissions-table__discount-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .permissions-table__discount-input {
-  width: 72px;
+  width: 64px;
   height: 32px;
   padding: 0 8px;
   text-align: center;
-  color: var(--white);
+  color: var(--text-on-control);
   background: var(--surface-control);
   border: 1px solid var(--blue-panel-edge);
   border-radius: var(--radius-md);
@@ -120,8 +129,30 @@
   outline-offset: 1px;
 }
 
+.permissions-table__discount-save {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--amber);
+  color: var(--white);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.permissions-table__discount-save:hover {
+  background: var(--amber-hover);
+}
+
+.permissions-table__discount-save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .permissions-table__discount-status {
   font-size: 11px;
-  opacity: 0.7;
+  opacity: 0.75;
   min-height: 14px;
 }
