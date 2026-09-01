@@ -53,7 +53,4 @@ quando não está configurada é pior que não ter bateria: ela dá um verde fal
 - **Teto de desconto** (C3) — venda com desconto acima do permitido pelo papel.
 - **Preço vindo do banco** (C3) — `unit_price` forjado no payload de
   `create_sale` tem de ser ignorado.
-- **Concorrência** (C4) — duas `create_sale` simultâneas do último item em
-  estoque: só uma pode passar. A trava (`select ... for update`) já existe nas
-  seis funções que escrevem em `products.stock`; falta o teste que impede a
-  regressão.
+- ~~**Concorrência** (C4)~~ — feito em `tests/concurrency/stockConcurrency.test.ts`.

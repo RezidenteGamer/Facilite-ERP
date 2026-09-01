@@ -2137,3 +2137,35 @@ Lido direto do catálogo (`pg_get_functiondef`), antes de o baseline existir:
   (`create_sale`, `create_sale_order`, `update_sale_order`, `create_conditional`,
   `create_sale_return`, `convert_sale_order_to_sale`,
   `convert_conditional_to_sale`).
+
+### Decisão arquitetural: teste de concorrência na baixa de estoque (C4) (01/09/2026)
+
+A auditoria acima confirmou que a trava (`select ... for update`) já existia nas
+seis funções que escrevem em `products.stock`; faltava o teste automatizado
+que prova isso e quebra o build se alguém remover a trava no futuro.
+
+- **`tests/concurrency/stockConcurrency.test.ts`** cobre só `create_sale`: cria
+  (ou reaproveita) um produto `TESTE-CONCORRENCIA-*`, põe o estoque em
+  exatamente 1 e dispara duas `create_sale` simultâneas (`Promise.all`)
+  comprando 1 unidade cada. Afirma que exatamente uma resolve com venda de
+  verdade, a outra rejeita com "Estoque insuficiente para o produto ..."
+  (regex — o id varia), e o estoque final é 0. Roda contra o Supabase real,
+  mesmo espírito de `tests/isolation`: o que está sendo testado é o
+  comportamento do banco sob concorrência, não uma simulação dele. As outras
+  cinco funções (`create_pos_sale`, `create_purchase`, `create_sale_return`,
+  `create_conditional`, `adjust_stock_batch`) ficam sem bateria própria —
+  trabalho pendente.
+- **Duplo rastro permanente e inevitável.** A venda vencedora é uma venda de
+  verdade — `financial_entries_before_delete` (tarefa C3, 29/08/2026) já
+  impede apagar o lançamento que ela gera. O que esta tarefa descobriu: o
+  **produto** de teste também não é apagável depois da primeira venda, porque
+  `sale_items_product_id_fkey` não tem `ON DELETE CASCADE` nem `SET NULL` —
+  sem cláusula, o Postgres cai no padrão `NO ACTION`, que bloqueia o delete
+  do mesmo jeito que `RESTRICT` — apagar o produto vira violação de chave
+  estrangeira.
+  Por isso "criar **ou reaproveitar**": da segunda execução em diante a
+  bateria acha o produto por descrição e só reseta o estoque para 1, em vez de
+  acumular um produto novo por rodada. O `afterAll` tenta apagar o produto
+  mesmo assim (best-effort, cobre o caso de nunca ter sido vendido), mas a
+  partir da primeira execução bem-sucedida esse delete sempre falha em
+  silêncio — de propósito, documentado em `tests/concurrency/README.md`.
