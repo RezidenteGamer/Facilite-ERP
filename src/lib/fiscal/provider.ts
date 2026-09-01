@@ -1,9 +1,23 @@
 /**
  * **O ponto único onde o front descobre qual provedor fiscal está ativo.**
  *
- * Nenhum módulo que emite nota (Notas Emitidas, NFC-e, Devolução) pode ter um
- * `if` de provedor: todos chamam `getFiscalProvider()` e recebem um
- * `FiscalProvider`.
+ * ## Desde A1 (01/09/2026), nenhuma tela chama isto
+ *
+ * A emissão saiu do navegador: Notas Emitidas, NFC-e do PDV e Devolução falam
+ * com a Edge Function `fiscal-emit`, que resolve o provedor do lado dela (lendo
+ * `Deno.env`) e é a única que emite de verdade. Este arquivo continua existindo
+ * por dois motivos, os dois honestos:
+ *
+ * - é a borda-navegador do registry compartilhado, o lugar onde uma **prévia**
+ *   de nota na tela (fora do escopo de A1) resolveria o provedor;
+ * - os scripts de verificação em `scripts/` ainda o carregam — ver o aviso em
+ *   `scripts/README.md` sobre o que eles deixaram de provar.
+ *
+ * **Não volte a emitir por aqui.** Emitir no cliente significa montar a nota com
+ * dados que o cliente escolheu, e é exatamente o que A1 fechou.
+ *
+ * Nenhum módulo pode ter um `if` de provedor: quem precisa de um recebe um
+ * `FiscalProvider` pronto de `getFiscalProvider()`.
  *
  * Desde A2 (01/09/2026) a lista de provedores e a regra de fallback moram no
  * núcleo compartilhado (`@fiscal-core/registry.ts`), que roda também na Edge

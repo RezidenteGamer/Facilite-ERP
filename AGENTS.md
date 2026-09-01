@@ -2381,3 +2381,228 @@ chamada HTTP de verdade da Focus); ligar as ações "Carta de correção" e
 tela ainda não expõe); o motor tributário que preenche as colunas por imposto de
 `fiscal_document_items` (Etapa 2); FCP-ST (`vFCPST`) por item — cabe no mesmo
 padrão das colunas de FCP quando virar assunto; aplicar a migration no banco.
+
+### Decisão arquitetural: a emissão fiscal sai do navegador — Edge Function `fiscal-emit` (A1) (01/09/2026)
+
+Etapa 1 do "Mínimo pra vender", tarefa A1 — a última das três (A2, A3, A1) e a
+que dá sentido às outras duas. A2 definiu o contrato, A3 definiu o dado; A1 muda
+**onde a emissão acontece**.
+
+#### O buraco que esta tarefa fecha
+
+Até aqui a nota fiscal era montada e "emitida" dentro do navegador:
+`invoiceMapping.ts` construía o `NfePayload` a partir do estado da tela,
+`getFiscalProvider()` era chamado no cliente e `fiscalDocumentsRepository.ts`
+gravava `fiscal_documents` sob RLS. Três consequências, e a primeira é a que
+importa:
+
+1. **O conteúdo da nota vinha do cliente.** Preço unitário, desconto, total,
+   base e alíquota atravessavam o payload. Um cliente adulterado declarava à
+   SEFAZ um valor que a venda não tinha — a mesma família do achado C3
+   (29/08/2026), agora no documento que tem valor legal.
+2. **O token do provedor real (A12) teria de morar no bundle** para a emissão
+   funcionar; ou seja, público.
+3. **A policy de `insert`/`update` de `fiscal_documents` precisava existir.**
+   Com ela de pé, qualquer sessão com `notas-emitidas.create` podia inserir uma
+   linha de nota fiscal com chave, protocolo e status inventados, sem nunca
+   falar com a SEFAZ.
+
+#### `supabase/functions/fiscal-emit/` — três arquivos, não um
+
+`admin-users` cabe em um arquivo; esta não caberia, e a fronteira entre leitura
+e escrita é justamente o que precisa ficar legível numa revisão de segurança.
+
+- **`index.ts`** — a borda HTTP: CORS, `Deno.serve`, validação do corpo,
+  autenticação por JWT e despacho. `has_permission('notas-emitidas', …)` +
+  `has_branch_access(branchId)` rodam **antes de qualquer leitura ou escrita**, e
+  pelo **cliente do chamador** (anon key + o JWT dele), não pelo `service_role`:
+  as duas funções decidem por `auth.uid()`, que sob `service_role` é nulo e
+  devolveria `false` para todo mundo. A permissão exigida acompanha a ação —
+  `emit` → `create`, `cancel` → `edit`, `query` → `view` —, que é exatamente o
+  que as policies removidas exigiam.
+- **`data.ts`** — a leitura. É o ponto da tarefa: venda, itens, produto, grupo
+  tributário, cliente e filial saem do banco, não do corpo da requisição. São as
+  mesmas consultas que estavam em `fetchSaleForInvoice` e
+  `fetchSaleReturnForInvoice`; elas não foram reescritas, mudaram de lado da
+  fronteira (e sumiram do front).
+- **`persist.ts`** — a escrita nas três tabelas de A3: `fiscal_documents`
+  (cabeçalho completo), `fiscal_document_items` (uma linha por item) e
+  `fiscal_document_events` (autorização/rejeição/cancelamento).
+
+**Do cliente vem só *o que* emitir**: `action`, `branchId`, `saleId` **ou**
+`saleReturnId`, `model` e (no cancelamento) `justificativa`. Nem a `ref` viaja —
+ela é derivada no servidor (`_shared/fiscal/refs.ts`), porque `fiscal_documents`
+é `unique (ref)` e aceitar uma `ref` pronta deixaria o cliente escolher **em qual
+linha** o resultado da emissão cairia, inclusive na linha de outra filial.
+
+O contrato de retorno **não mudou**: `{ ok, errors }`, HTTP 200 para rejeição da
+SEFAZ (é resultado de negócio, decisão de 18/08/2026) e HTTP de erro só para
+transporte, permissão e `FiscalNotConfiguredError`.
+
+#### Escopo: `emit`, `cancel`, `query` — e uma correção ao enunciado
+
+O prompt da tarefa dizia que esses são "os três métodos que a UI realmente chama
+hoje". São dois: **nenhuma tela chama `query`**. Ela foi implementada mesmo
+assim porque é o caminho da autorização assíncrona do provedor real (a API
+responde 202 e a nota vira `autorizado` depois), e é por ela que uma nota em
+`processando_autorizacao` sai desse estado. `correctionLetter`,
+`invalidateRange`, `getXml` e `getDanfe` ficaram de fora — os botões "Carta de
+correção" continuam `disabled: true` em `InvoicesPage.tsx`.
+
+#### O que saiu do front (e por que deletado, não desligado)
+
+| Saiu | Para onde |
+|---|---|
+| `src/features/sales/invoiceMapping.ts` | `git mv` para `_shared/fiscal/invoiceMapping.ts` — **sem camada de reexport**: nada no front deve conseguir montar um `NfePayload` |
+| `fetchSaleForInvoice`, `fetchSaleReturnForInvoice` | `fiscal-emit/data.ts` |
+| `persistEmitResult`, `persistCancelResult` | `fiscal-emit/persist.ts`, agora nas três tabelas |
+| `saleFiscalRef`, `saleReturnFiscalRef` | `_shared/fiscal/refs.ts` (derivadas no servidor) |
+| `updateSaleItemsCfop` | ninguém — ver abaixo |
+| `taxRulesRepository.ts` | `fiscal-emit/data.ts` (`readTaxRules`) |
+| `toTaxGroup` | `_shared/fiscal/taxGroups.ts` (as duas bordas leem `tax_groups`) |
+
+Deletar em vez de deixar desligado é deliberado: uma cópia da leitura fiscal
+parada no front é uma divergência esperando acontecer — um campo novo em
+`tax_groups` chegaria à tela sem chegar ao XML. Pelo mesmo motivo `toTaxGroup` e
+a conversão de `tax_rules` viraram uma função só, no núcleo.
+
+`src/lib/fiscal/provider.ts` **continua existindo** e agora tem um aviso no
+topo: nenhuma tela o chama, ele é a borda-navegador do registry (para uma prévia
+futura) e o que os scripts de verificação ainda carregam. Confirmado por
+inspeção do bundle: nenhum artefato de `dist/` contém o provedor simulado.
+
+#### Três decisões que valem registro
+
+##### 1. `sale_items.cfop` deixa de ser escrito
+
+A3 já dizia que o lugar canônico do CFOP do item é `fiscal_document_items.cfop`
+(o CFOP é **da nota**, não da venda — a mesma venda devolvida sai com CFOP de
+entrada), e que quem para de escrever em `sale_items` é A1. Feito. A coluna
+continua existindo pelas notas emitidas antes desta mudança, que não têm cópia
+na tabela nova (A3 não semeia nada retroativo), e ganhou `comment on column`
+dizendo isso. Nenhuma tela lia essa coluna — só `nfce-emission-check.mjs`.
+
+##### 2. O provedor simulado ganhou `seed`, porque a Edge Function não tem sessão
+
+O `SimulatedFiscalProvider` guarda estado em memória, e isso bastava enquanto
+quem emitia era o navegador: emitir e cancelar aconteciam na mesma instância.
+Cada requisição da Edge Function pode cair num isolate novo — sem restaurar
+nada, **todo cancelamento responderia `nao_encontrado` para uma nota que está
+`autorizado` no banco**.
+
+A saída não foi dar banco ao provedor (ele existe para não ter I/O), e sim
+aceitar que a borda devolva o pouco que ele precisa lembrar:
+`seed.documents` recoloca no `Map` a nota lida de `fiscal_documents`, e
+`seed.lastNumbers` diz de onde a numeração continua. O provedor real não precisa
+de nada disso — quem guarda o estado dele é a API dele —, e é por isso que a
+opção mora em `simulatedFiscalProvider.ts` e chega por
+`FiscalProviderOptions.simulatedSeed` no registry, **não** no contrato
+`FiscalProvider`, que descreve operações e não construção. Quatro testes novos
+em `tests/unit/fiscalProvider.test.ts` (23 no arquivo, 32 no `npm test`).
+
+`readLastNumero` **não é reserva de numeração**: duas emissões simultâneas leem
+o mesmo máximo e saem com o mesmo número. Numeração atômica por filial e série é
+a tarefa A10; isto aqui só impede que A1 piore o que já existia (o contador do
+navegador, que zerava a cada F5 — e que é justamente o motivo de a consulta ler
+a coluna inteira em vez de "as N mais recentes", ver o `/code-review` abaixo).
+
+##### 3. A emissão ficou idempotente de verdade, e não só dentro da sessão
+
+`handleEmit` consulta `fiscal_documents` pela `ref` **antes** de falar com o
+provedor: nota `autorizado` devolve a que existe, nota `cancelado` recusa
+reemissão. Antes disso, reemitir depois de um F5 gerava uma nota nova (número e
+chave novos) e o upsert por `ref` sobrescrevia a autorizada — perda silenciosa.
+Como efeito colateral, o conflito entre modelos ficou visível: `ref` é a mesma
+para NF-e e NFC-e da mesma venda, então pedir NF-e para uma venda que já tem
+NFC-e autorizada agora recebe uma mensagem em vez de sobrescrever a nota.
+
+#### Atomicidade: o que esta tarefa deliberadamente não resolveu
+
+As três escritas de `persistEmission` são três statements, não uma transação —
+PostgREST não oferece transação entre tabelas. A ordem é deliberada: **o
+cabeçalho primeiro**, porque ele é o registro de que a nota existe. Se itens ou
+evento falharem, quem chamou recebe uma mensagem dizendo que a nota **foi
+autorizada** e que reemitir é seguro (idempotente por `ref`, e o upsert reescreve
+tudo). Fingir que a emissão falhou seria pior: ela aconteceu, e a SEFAZ não
+desfaz por causa de um insert que não passou. Tornar isso atômico exigiria uma
+RPC `security definer` recebendo as três partes — candidata a tarefa própria.
+
+#### A migration (escrita, NÃO aplicada)
+
+`supabase/migrations/00000000000004_a1_escrita_fiscal_so_pela_edge_function.sql`.
+Ela **depende da função estar implantada**: entre o `drop policy` e o deploy
+nenhuma nota é emitida. Ordem: aplicar a migration de A3 → implantar
+`fiscal-emit` → aplicar esta.
+
+- Remove as 3 colunas `cancel_*` de `fiscal_documents`, marcadas OBSOLETAS por
+  A3. Nenhuma tela as lia: `InvoiceDocument.xmlCancelamento` era produzido e
+  nunca consumido, e o campo saiu do tipo.
+- Remove as policies de `insert` e `update` de `fiscal_documents`, mais
+  `revoke`/`grant select` explícitos por cima — a tabela fica igual às duas
+  criadas em A3.
+- **Remove também a policy `notas-emitidas update sale_items cfop`.** Ela existia
+  só para o `updateSaleItemsCfop` que deixou de existir, e o detalhe que a torna
+  mais que código morto: era `for update` **sem restrição de coluna**, então quem
+  tivesse `notas-emitidas.create` podia reescrever `unit_price` e `total_amount`
+  de qualquer item de venda da filial. É um buraco da família do C3, e só deu
+  para fechá-lo agora porque só agora ninguém precisa mais da porta. Todas as
+  funções que escrevem `sale_items` são `security definer` (conferido:
+  `create_sale`, `convert_conditional_to_sale`, e a versão de C3), então o
+  `revoke` não quebra venda nenhuma.
+
+#### `/code-review high` — três achados, todos corrigidos
+
+1. **`handleEmit` vazava a chave de acesso de outra filial.** O atalho de
+   idempotência devolvia a `chave` do documento achado por `ref` sem conferir a
+   filial dele — a checagem existia só em `buildPayload`, que roda depois.
+   Usuário com acesso só à filial B pedia emissão passando `branchId: B` e o
+   `saleId` de uma venda da filial A: `has_branch_access(B)` passava, e a
+   resposta trazia os 44 dígitos da nota da filial A. Corrigido logo após a
+   leitura do documento.
+2. **`readLastNumero` pegava o máximo só das 200 notas mais recentes.** A
+   premissa "a nota mais recente tem o maior número" é falsa exatamente por
+   causa da história que a função existe para consertar: com o contador
+   reiniciando a cada F5, o banco tem notas antigas com números **maiores** que
+   as recentes (uma sessão longa foi até 50; dez sessões curtas depois ficaram em
+   1–5). A janela devolveria 5 e a numeração seguinte colidiria com as notas 6 a
+   50. Ordenar por `numero` no banco também não resolve — a coluna é `text`, e
+   "9" ordena acima de "10". Passou a ler a coluna inteira e tirar o máximo em
+   memória; só roda para o provedor simulado.
+3. **Erro do gateway virava mensagem genérica.** `fiscalEmitApi` lia só
+   `result.error`, campo da nossa função; o gateway da Supabase recusa antes
+   (`verify_jwt = true`) com `{ code, message }`. Sessão expirada mostrava "Erro
+   ao falar com o serviço de emissão fiscal." em vez de "Invalid JWT",
+   escondendo que bastava entrar de novo.
+
+#### Configuração nova
+
+`FISCAL_PROVIDER` e `FISCAL_AMBIENTE` são **secrets do projeto Supabase**, não
+entradas do `.env.local`: a Edge Function roda em Deno e não enxerga nada com
+prefixo `VITE_`. `VITE_FISCAL_PROVIDER` continua existindo, mas depois de A1 ela
+não decide mais emissão nenhuma — só prévia e scripts. Documentado em
+`.env.example`. `supabase/config.toml` ganhou `[functions.fiscal-emit]` com
+`verify_jwt = true` declarado de propósito, para a diferença em relação a
+`admin-users` (que tem caso de bootstrap) ser intencional e não esquecimento.
+
+#### Testado
+
+`npm run build`, `npm run lint` e `npm test` limpos — o lint só com os seis
+avisos pré-existentes, e o `npm test` com 32 testes passando (28 + 4 do `seed`)
+mais as duas baterias que dependem de credencial em `.env.local` falhando alto,
+como é o desenho delas. A Edge Function foi checada com `deno check` fora da
+árvore, num diretório com `nodeModulesDir: auto` — a `d.ts` do runtime da
+Supabase puxa tipos de npm que este repositório não instala, então rodar o check
+dentro do projeto falha por dependência, não por erro nosso. **Nada foi testado
+no navegador**: o caminho novo só funciona com a função implantada e as duas
+migrations aplicadas, e as três coisas ficaram para revisão.
+
+#### Fora de escopo
+
+Implantar `fiscal-emit` e aplicar as migrations 3 e 4; A12 (a chamada HTTP da
+Focus); ligar "Carta de correção"/"Inutilizar numeração" na UI; A10 (numeração
+atômica); o motor tributário da Etapa 2 — as colunas de imposto de
+`fiscal_document_items` recebem hoje **o que foi declarado** no XML (ICMS, PIS,
+COFINS e os CSTs), e ficam nulas onde o mapeamento atual não calcula (ICMS-ST,
+FCP, IPI, IBS, CBS, reduções de base), mantendo "nulo = não calculado"; tornar a
+persistência atômica por RPC; consertar os três scripts de `scripts/`, que
+dependiam da lógica local que saiu do front (documentado em `scripts/README.md`).

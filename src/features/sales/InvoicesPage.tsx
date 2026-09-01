@@ -97,7 +97,7 @@ export default function InvoicesPage() {
 
   async function handleCancel(justificativa: string) {
     if (!selected?.document) return;
-    await cancelInvoice(selected.document.id, selected.saleId, justificativa);
+    await cancelInvoice(selected.saleId, justificativa);
     setActionMessage("Nota cancelada.");
   }
 

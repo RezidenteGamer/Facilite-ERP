@@ -24,9 +24,25 @@
 
 import { createFocusProvider } from "./focusProvider.ts";
 import type { FiscalProvider } from "./provider.ts";
-import { createSimulatedFiscalProvider } from "./simulatedFiscalProvider.ts";
+import {
+  createSimulatedFiscalProvider,
+  type SimulatedFiscalProviderSeed,
+} from "./simulatedFiscalProvider.ts";
 
 export type FiscalProviderId = "simulado" | "focus-nfe";
+
+/**
+ * O que a borda pode dizer ao provedor no momento de construí-lo.
+ *
+ * Hoje só o simulado usa alguma coisa daqui, e de propósito: `simulatedSeed` é
+ * o estado que ele **não consegue** guardar entre duas chamadas da Edge
+ * Function (ver o cabeçalho de `simulatedFiscalProvider.ts`). Um provedor real
+ * guarda o estado do lado dele e ignora o campo — por isso a opção entra aqui,
+ * e não no contrato `FiscalProvider`, que descreve operações, não construção.
+ */
+export type FiscalProviderOptions = {
+  simulatedSeed?: SimulatedFiscalProviderSeed;
+};
 
 /**
  * Cada provedor conhecido, por id.
@@ -38,8 +54,8 @@ export type FiscalProviderId = "simulado" | "focus-nfe";
  * lança `FiscalNotConfiguredError` (ver `focusProvider.ts`): quem pedir o
  * provedor real antes de A12 recebe um erro explícito, não uma nota simulada.
  */
-const PROVIDER_FACTORIES: Record<FiscalProviderId, () => FiscalProvider> = {
-  simulado: () => createSimulatedFiscalProvider(),
+const PROVIDER_FACTORIES: Record<FiscalProviderId, (options: FiscalProviderOptions) => FiscalProvider> = {
+  simulado: (options) => createSimulatedFiscalProvider({ seed: options.simulatedSeed }),
   "focus-nfe": () => createFocusProvider(),
 };
 
@@ -54,8 +70,11 @@ export function listFiscalProviderIds(): FiscalProviderId[] {
   return Object.keys(PROVIDER_FACTORIES) as FiscalProviderId[];
 }
 
-export function createFiscalProvider(id: FiscalProviderId): FiscalProvider {
-  return PROVIDER_FACTORIES[id]();
+export function createFiscalProvider(
+  id: FiscalProviderId,
+  options: FiscalProviderOptions = {},
+): FiscalProvider {
+  return PROVIDER_FACTORIES[id](options);
 }
 
 /**

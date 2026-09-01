@@ -20,3 +20,14 @@ major_version = 17
 # dentro da própria função (can_manage_users), então não usa a verificação
 # automática do gateway.
 verify_jwt = false
+
+[functions.fiscal-emit]
+# Emite, cancela e consulta documento fiscal com service_role (tarefa A1,
+# 01/09/2026). Ao contrário de `admin-users`, ela **não** tem caso de bootstrap:
+# toda chamada exige um usuário autenticado, então a verificação automática do
+# gateway fica ligada (`verify_jwt = true`, que é o padrão — declarado aqui de
+# propósito, para a diferença em relação à outra função ser intencional e não
+# esquecimento). Ela não substitui a checagem interna: a chave anônima também é
+# um JWT válido para o gateway, e quem decide de verdade são `has_permission`
+# e `has_branch_access`, chamados dentro da função com o token do chamador.
+verify_jwt = true

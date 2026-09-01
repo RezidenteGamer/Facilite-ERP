@@ -271,6 +271,79 @@ describe("SimulatedFiscalProvider — getXml / getDanfe (A2)", () => {
   });
 });
 
+describe("SimulatedFiscalProvider — seed do estado pela borda (A1)", () => {
+  /**
+   * A Edge Function `fiscal-emit` não mantém a instância viva entre duas
+   * requisições: cada chamada pode cair num isolate novo. Sem restaurar o
+   * estado, cancelar uma nota emitida ontem responderia `nao_encontrado` para
+   * um documento que está `autorizado` no banco — que é o bug que estes testes
+   * existem para impedir de voltar.
+   */
+  async function emitidaEm(instancia: ReturnType<typeof provider>) {
+    return await instancia.emit({ ref: "venda-1", model: "nfe", payload: payload() });
+  }
+
+  it("cancela uma nota que esta instância nunca emitiu", async () => {
+    const emitida = await emitidaEm(provider());
+
+    // Instância nova, como se fosse outra requisição — só com o que a borda leu
+    // do banco.
+    const outra = createSimulatedFiscalProvider({
+      now: () => new Date("2026-09-01T15:00:00Z"),
+      randomInt: () => 7,
+      seed: { documents: [{ ...emitida, cnpjEmitente: CNPJ }] },
+    });
+
+    const semSeed = await provider().cancel({ ref: "venda-1", justificativa: JUSTIFICATIVA });
+    expect(semSeed.status).toBe("nao_encontrado");
+
+    const comSeed = await outra.cancel({ ref: "venda-1", justificativa: JUSTIFICATIVA });
+    expect(comSeed.status).toBe("cancelado");
+    expect((await outra.query("venda-1")).status).toBe("cancelado");
+  });
+
+  it("mantém a emissão idempotente entre instâncias", async () => {
+    const emitida = await emitidaEm(provider());
+
+    const outra = createSimulatedFiscalProvider({
+      now: () => new Date("2026-09-01T15:00:00Z"),
+      randomInt: () => 7,
+      seed: { documents: [{ ...emitida, cnpjEmitente: CNPJ }] },
+    });
+
+    const reemitida = await outra.emit({ ref: "venda-1", model: "nfe", payload: payload() });
+    expect(reemitida.chave).toBe(emitida.chave);
+    expect(reemitida.numero).toBe(emitida.numero);
+  });
+
+  it("continua a numeração a partir do último número informado", async () => {
+    const fiscal = createSimulatedFiscalProvider({
+      now: () => new Date("2026-09-01T15:00:00Z"),
+      randomInt: () => 7,
+      seed: { lastNumbers: [{ cnpj: CNPJ, model: "nfe", ultimoNumero: 41 }] },
+    });
+
+    const document = await fiscal.emit({ ref: "venda-42", model: "nfe", payload: payload() });
+    expect(document.numero).toBe("42");
+  });
+
+  it("ignora numeração inválida em vez de corromper o contador", async () => {
+    const fiscal = createSimulatedFiscalProvider({
+      now: () => new Date("2026-09-01T15:00:00Z"),
+      randomInt: () => 7,
+      seed: {
+        lastNumbers: [
+          { cnpj: "", model: "nfe", ultimoNumero: 99 },
+          { cnpj: CNPJ, model: "nfe", ultimoNumero: -3 },
+        ],
+      },
+    });
+
+    const document = await fiscal.emit({ ref: "venda-1", model: "nfe", payload: payload() });
+    expect(document.numero).toBe("1");
+  });
+});
+
 describe("createFocusProvider — esqueleto até A12", () => {
   it("lança FiscalNotConfiguredError nas sete operações", async () => {
     const fiscal = createFocusProvider();

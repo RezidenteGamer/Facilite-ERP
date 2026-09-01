@@ -43,6 +43,33 @@ export type TaxRuleRow = {
   cfop: string;
 };
 
+/**
+ * Linha crua de `tax_rules` → `TaxRuleRow`.
+ *
+ * No núcleo desde A1 (01/09/2026), mesmo motivo de `toTaxGroup`: quem lê a
+ * tabela agora é a Edge Function `fiscal-emit`, e a conversão não pode existir
+ * em dois lugares.
+ */
+export function toTaxRuleRow(row: {
+  id: string;
+  regime: string;
+  natureza_operacao: string;
+  uf_origem: string;
+  uf_destino: string;
+  tipo_cliente: string;
+  cfop: string;
+}): TaxRuleRow {
+  return {
+    id: row.id,
+    regime: row.regime,
+    naturezaOperacao: row.natureza_operacao,
+    ufOrigem: row.uf_origem,
+    ufDestino: row.uf_destino,
+    tipoCliente: row.tipo_cliente,
+    cfop: row.cfop,
+  };
+}
+
 /** As cinco dimensões de uma operação — o que decide qual CFOP se aplica. */
 export type TaxRuleQuery = {
   /** CRT de quem emite (mesmo código de `branches.regime_tributario`: '1', '2' ou '3'). */

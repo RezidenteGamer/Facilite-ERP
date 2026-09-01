@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import { extractErrorMessage } from "../../lib/errorMessage";
 import {
   emitInvoiceForSale,
   fetchInvoiceSales,
-  persistCancelResult,
-  saleFiscalRef,
   type EmitOutcome,
   type InvoiceSaleRow,
 } from "../../lib/repositories/fiscalDocumentsRepository";
-import { getFiscalProvider } from "../../lib/fiscal/provider";
+import { requestFiscalCancel } from "../../lib/repositories/fiscalEmitApi";
 
-/** Mesmo padrão de `extractErrorMessage` do Financeiro/Controle de Caixa: erros do supabase-js não são `instanceof Error`. */
-export function extractErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (err && typeof err === "object" && "message" in err && typeof (err as { message?: unknown }).message === "string") {
-    return (err as { message: string }).message;
-  }
-  return fallback;
-}
+/**
+ * Reexportado de `src/lib/errorMessage.ts`, onde a função passou a morar em A1
+ * (01/09/2026) — `CancelInvoiceModal.tsx` e outras telas já importavam daqui.
+ */
+export { extractErrorMessage };
 
 export type { EmitOutcome };
 
@@ -50,7 +46,7 @@ export function useInvoicesData(branchId: string | null) {
   /**
    * Emite (ou reemite — idempotente por venda) a nota da venda selecionada.
    * Wrapper fino sobre `emitInvoiceForSale` (fiscalDocumentsRepository.ts) —
-   * o núcleo de "montar payload + emitir + persistir" mora lá, reaproveitado
+   * que desde A1 é uma chamada à Edge Function `fiscal-emit`, reaproveitada
    * também pelo wizard de Realizar Venda; aqui só se soma o `reload()` da
    * lista, que só faz sentido para esta tela.
    */
@@ -61,12 +57,20 @@ export function useInvoicesData(branchId: string | null) {
     return outcome;
   }
 
-  /** Cancela a nota — `run()` da tela cuida de mostrar a mensagem de recusa (justificativa curta, já cancelada etc.). */
-  async function cancelInvoice(documentId: string, saleId: string, justificativa: string): Promise<void> {
-    const provider = getFiscalProvider();
-    const result = await provider.cancel({ ref: saleFiscalRef(saleId), justificativa });
-    await persistCancelResult(documentId, result, justificativa);
+  /**
+   * Cancela a nota da venda.
+   *
+   * **Lança** quando a SEFAZ recusa (justificativa curta, nota já cancelada) —
+   * é o contrato que `CancelInvoiceModal` sempre esperou, e é ele que faz a
+   * recusa aparecer dentro do modal em vez de fechar como se tivesse dado
+   * certo. A Edge Function devolve `{ ok, errors }` como todo o resto; a
+   * conversão para exceção acontece aqui, no único lugar que a quer.
+   */
+  async function cancelInvoice(saleId: string, justificativa: string): Promise<void> {
+    if (!branchId) throw new Error("Selecione uma filial.");
+    const outcome = await requestFiscalCancel(branchId, { saleId }, justificativa);
     await reload();
+    if (!outcome.ok) throw new Error(outcome.errors.join(" "));
   }
 
   return { sales, loading, error, reload, emitInvoice, cancelInvoice };

@@ -8,6 +8,18 @@
  * para a tela mostrar uma mensagem acionável, mesmo espírito de
  * `resolveTaxRule` e do `FiscalProvider`.
  *
+ * ## Por que este arquivo saiu de `src/features/sales/` (A1, 01/09/2026)
+ *
+ * Ele morava no bundle do navegador, e era o navegador quem montava a nota
+ * fiscal a partir de dados que a própria tela tinha em mãos. Depois de A1 quem
+ * monta é a Edge Function `fiscal-emit`, que lê venda, itens, produto, grupo
+ * tributário, cliente e filial **do banco** antes de montar — o cliente não
+ * manda nem preço, nem alíquota, nem CFOP. O arquivo é o mesmo (nenhuma regra
+ * de mapeamento mudou nesta tarefa); o que mudou foi de que lado da fronteira
+ * ele roda. Por isso os imports relativos ganharam `.ts` explícito, exigência
+ * do Deno — e **não existe mais camada de reexport em `src/`**: nada no front
+ * deve conseguir montar um `NfePayload`.
+ *
  * ## De onde vem cada metade da tributação (correção de 19/08/2026)
  *
  * - **CFOP vem da operação**: `resolveTaxRule` decide, a partir das cinco
@@ -34,10 +46,10 @@
  * regra de negócio central que distingue os dois modelos.
  */
 
-import { onlyDigits } from "../../lib/fiscal/accessKey";
-import { resolveIcmsSituacaoTributaria, type TaxGroup } from "../../lib/fiscal/taxGroups";
-import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "../../lib/fiscal/types";
-import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "../../lib/fiscal/taxRules";
+import { onlyDigits } from "./accessKey.ts";
+import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
+import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "./types.ts";
+import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "./taxRules.ts";
 
 export type SaleForInvoiceBranch = {
   cnpj: string | null;

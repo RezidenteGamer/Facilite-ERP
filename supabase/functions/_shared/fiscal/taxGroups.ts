@@ -52,3 +52,47 @@ export type TaxGroup = {
 export function resolveIcmsSituacaoTributaria(group: TaxGroup, regime: string): string | null {
   return regime === "3" ? (group.cstIcms ?? group.csosn) : (group.csosn ?? group.cstIcms);
 }
+
+/**
+ * Linha crua de `tax_groups` → `TaxGroup`.
+ *
+ * Mora no núcleo desde A1 (01/09/2026) porque as duas bordas leem a mesma
+ * tabela: a Edge Function `fiscal-emit`, para montar a nota, e o front, para o
+ * lookup de "Grupo tributário" no cadastro de Produtos. Duas cópias desta
+ * conversão significariam que um campo novo em `tax_groups` poderia chegar à
+ * tela sem chegar à nota — que é exatamente o tipo de divergência silenciosa
+ * que o núcleo compartilhado existe para impedir.
+ */
+export function toTaxGroup(row: {
+  id: string;
+  code: string;
+  name: string;
+  cst_icms: string | null;
+  csosn: string | null;
+  aliquota_icms: number | null;
+  cst_pis: string | null;
+  aliquota_pis: number | null;
+  cst_cofins: string | null;
+  aliquota_cofins: number | null;
+  cst_ibs_cbs: string | null;
+  cclasstrib: string | null;
+}): TaxGroup {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    cstIcms: row.cst_icms,
+    csosn: row.csosn,
+    aliquotaIcms: row.aliquota_icms,
+    cstPis: row.cst_pis,
+    aliquotaPis: row.aliquota_pis,
+    cstCofins: row.cst_cofins,
+    aliquotaCofins: row.aliquota_cofins,
+    cstIbsCbs: row.cst_ibs_cbs,
+    cclasstrib: row.cclasstrib,
+  };
+}
+
+/** As colunas de `tax_groups` que `toTaxGroup` precisa — para quem monta o `select`. */
+export const TAX_GROUP_COLUMNS =
+  "id, code, name, cst_icms, csosn, aliquota_icms, cst_pis, aliquota_pis, cst_cofins, aliquota_cofins, cst_ibs_cbs, cclasstrib";

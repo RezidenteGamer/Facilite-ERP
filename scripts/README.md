@@ -28,3 +28,23 @@ descartável, é trabalho pendente.
 `tax-rule-resolution-check.mjs` foi aposentado em 29/08/2026: era o único que
 não falava com o banco, e virou `tests/unit/taxRules.test.ts` — mesmas
 asserções, agora rodando em `npm test`.
+
+## Aviso: os três primeiros estão quebrados desde A1 (01/09/2026)
+
+A tarefa A1 tirou a emissão fiscal do navegador: quem monta a nota, fala com o
+`FiscalProvider` e grava em `fiscal_documents` passou a ser a Edge Function
+`fiscal-emit` (`supabase/functions/fiscal-emit/`). Os três scripts carregam
+módulos do front pelo `ssrLoadModule` do Vite e chamam a lógica local que **não
+existe mais lá**:
+
+| Script | O que sumiu de baixo dele |
+|---|---|
+| `fiscal-cycle-check.mjs` | Nada foi removido, mas ele exercita o `FiscalProvider` local — que já não é o caminho de emissão do produto. O ciclo emitir → consultar → cancelar virou `tests/unit/fiscalProvider.test.ts`, sem banco e rodando em `npm test`. |
+| `nfce-emission-check.mjs` | `fetchSaleForInvoice`, `buildNfcePayloadFromSale`, `buildNfePayloadFromSale` e `taxRulesRepository.ts` — a leitura e o mapeamento mudaram para a Edge Function; `invoiceMapping.ts` mudou para `supabase/functions/_shared/fiscal/`. |
+| `wizard-invoice-check.mjs` | `emitInvoiceForSale` ainda existe e continua sendo o que o wizard chama — mas agora é um `fetch` para a Edge Function. O script só passa a valer se a função estiver **implantada** e o `.env.local` apontar para o projeto onde ela está. |
+
+Consertá-los não é reescrevê-los no mesmo formato: o que eles provavam
+(mapeamento + emissão) agora acontece do lado do servidor, então a forma
+honesta de exercitar isso é chamar a Edge Function implantada com a conta de
+teste, ou portar as asserções que não dependem de banco para `tests/`. Nenhuma
+das duas foi feita — está anotado como pendência no AGENTS.md.

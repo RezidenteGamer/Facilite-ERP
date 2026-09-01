@@ -6,9 +6,14 @@
  * Realizar Venda/Pedidos/Financeiro): o cadastro do grupo em si roda pela
  * `GenericModulePage` em `/grupos-tributarios`; isto aqui é só a consulta de
  * quem precisa escolher um.
+ *
+ * `toTaxGroup` (linha crua → `TaxGroup`) morava aqui e mudou para o núcleo
+ * compartilhado em A1 (01/09/2026): a Edge Function `fiscal-emit` lê a mesma
+ * tabela para montar a nota, e duas conversões significariam um campo novo em
+ * `tax_groups` podendo chegar à tela sem chegar ao XML.
  */
 import { supabase } from "../supabaseClient";
-import type { TaxGroup } from "../fiscal/taxGroups";
+import { toTaxGroup, type TaxGroup } from "../fiscal/taxGroups";
 
 function assertSupabase() {
   if (!supabase) {
@@ -17,36 +22,6 @@ function assertSupabase() {
     );
   }
   return supabase;
-}
-
-export function toTaxGroup(row: {
-  id: string;
-  code: string;
-  name: string;
-  cst_icms: string | null;
-  csosn: string | null;
-  aliquota_icms: number | null;
-  cst_pis: string | null;
-  aliquota_pis: number | null;
-  cst_cofins: string | null;
-  aliquota_cofins: number | null;
-  cst_ibs_cbs: string | null;
-  cclasstrib: string | null;
-}): TaxGroup {
-  return {
-    id: row.id,
-    code: row.code,
-    name: row.name,
-    cstIcms: row.cst_icms,
-    csosn: row.csosn,
-    aliquotaIcms: row.aliquota_icms,
-    cstPis: row.cst_pis,
-    aliquotaPis: row.aliquota_pis,
-    cstCofins: row.cst_cofins,
-    aliquotaCofins: row.aliquota_cofins,
-    cstIbsCbs: row.cst_ibs_cbs,
-    cclasstrib: row.cclasstrib,
-  };
 }
 
 /** Busca grupos por código ou nome. Sem termo, devolve os primeiros 20 por código. */

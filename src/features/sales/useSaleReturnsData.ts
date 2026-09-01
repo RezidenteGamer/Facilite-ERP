@@ -13,23 +13,14 @@
  * estoque já reposto), mas também não fica silenciosa.
  */
 import { useCallback, useEffect, useState } from "react";
-import { getFiscalProvider } from "../../lib/fiscal/provider";
-import {
-  persistCancelResult,
-  persistEmitResult,
-  saleFiscalRef,
-} from "../../lib/repositories/fiscalDocumentsRepository";
+import { extractErrorMessage } from "../../lib/errorMessage";
+import { requestFiscalCancel, requestFiscalEmit } from "../../lib/repositories/fiscalEmitApi";
 import {
   createSaleReturn,
-  fetchSaleReturnForInvoice,
   fetchSaleReturns,
-  saleReturnFiscalRef,
   type CreateSaleReturnInput,
   type SaleReturnListRow,
 } from "../../lib/repositories/saleReturnsRepository";
-import { fetchTaxRules } from "../../lib/repositories/taxRulesRepository";
-import { buildReturnNfePayload } from "./invoiceMapping";
-import { extractErrorMessage } from "./useInvoicesData";
 
 export type FiscalOutcome = { ok: true; message: string } | { ok: false; errors: string[] };
 
@@ -68,36 +59,18 @@ export function useSaleReturnsData(branchId: string | null) {
   }
 
   /**
-   * Emite a NF-e de devolução da devolução informada. Nunca lança — devolve
-   * um resultado que a tela mostra como aviso, porque a devolução em si já
-   * está gravada e não é desfeita por uma nota que não saiu.
+   * Emite a NF-e de devolução da devolução informada — desde A1 (01/09/2026),
+   * pela Edge Function `fiscal-emit`, que lê a devolução e a venda original do
+   * banco. Nunca lança: devolve um resultado que a tela mostra como aviso,
+   * porque a devolução em si já está gravada e não é desfeita por uma nota que
+   * não saiu.
    */
   async function emitReturnInvoice(saleReturnId: string): Promise<FiscalOutcome> {
     if (!branchId) return { ok: false, errors: ["Selecione uma filial."] };
-    try {
-      const [saleReturn, rules] = await Promise.all([
-        fetchSaleReturnForInvoice(saleReturnId),
-        fetchTaxRules(),
-      ]);
-      const built = buildReturnNfePayload(saleReturn, rules);
-      if (!built.ok) return { ok: false, errors: built.errors };
-
-      const provider = getFiscalProvider();
-      const document = await provider.emit({
-        ref: saleReturnFiscalRef(saleReturnId),
-        model: "nfe",
-        payload: built.payload,
-      });
-      await persistEmitResult(branchId, { saleReturnId }, document);
-      await reload();
-
-      if (document.status !== "autorizado") {
-        return { ok: false, errors: [document.mensagemSefaz ?? "A SEFAZ recusou a emissão da nota de devolução."] };
-      }
-      return { ok: true, message: `Nota de devolução autorizada (chave ${document.chave}).` };
-    } catch (err) {
-      return { ok: false, errors: [extractErrorMessage(err, "Erro inesperado ao emitir a nota de devolução.")] };
-    }
+    const outcome = await requestFiscalEmit(branchId, { saleReturnId }, "nfe");
+    await reload();
+    if (!outcome.ok) return outcome;
+    return { ok: true, message: `Nota de devolução autorizada (chave ${outcome.chave ?? "—"}).` };
   }
 
   /**
@@ -106,20 +79,12 @@ export function useSaleReturnsData(branchId: string | null) {
    * não calcula esse prazo (varia por UF e modelo; ver AGENTS.md) — a decisão
    * é do operador.
    */
-  async function cancelOriginalInvoice(
-    documentId: string,
-    saleId: string,
-    justificativa: string,
-  ): Promise<FiscalOutcome> {
-    try {
-      const provider = getFiscalProvider();
-      const result = await provider.cancel({ ref: saleFiscalRef(saleId), justificativa });
-      await persistCancelResult(documentId, result, justificativa);
-      await reload();
-      return { ok: true, message: "Nota da venda original cancelada." };
-    } catch (err) {
-      return { ok: false, errors: [extractErrorMessage(err, "Não foi possível cancelar a nota da venda.")] };
-    }
+  async function cancelOriginalInvoice(saleId: string, justificativa: string): Promise<FiscalOutcome> {
+    if (!branchId) return { ok: false, errors: ["Selecione uma filial."] };
+    const outcome = await requestFiscalCancel(branchId, { saleId }, justificativa);
+    await reload();
+    if (!outcome.ok) return outcome;
+    return { ok: true, message: "Nota da venda original cancelada." };
   }
 
   return { returns, loading, error, reload, createReturn, emitReturnInvoice, cancelOriginalInvoice };

@@ -22,6 +22,23 @@
  *
  * `now` e `randomInt` são injetáveis para um teste poder fixar chave e protocolo.
  * Sem eles, o provedor usa relógio e aleatoriedade normais.
+ *
+ * ## `seed`: a borda devolve o estado que este provedor não guarda (A1, 01/09/2026)
+ *
+ * Enquanto quem emitia era o navegador, "estado em memória" significava "estado
+ * da aba aberta": emitir e cancelar aconteciam na mesma instância, então o
+ * `Map` bastava. A Edge Function `fiscal-emit` não tem essa continuidade — cada
+ * requisição pode cair num isolate novo, e um cancelamento chegaria a um
+ * provedor que nunca ouviu falar daquela `ref`, respondendo `nao_encontrado`
+ * para uma nota que está `autorizado` no banco.
+ *
+ * A saída **não** foi dar banco ao provedor (ele existe justamente para não ter
+ * I/O), e sim aceitar que a borda restaure o pouco que ele precisa lembrar:
+ * `seed.documents` recoloca no `Map` as notas que a borda leu de
+ * `fiscal_documents`, e `seed.lastNumbers` diz de onde a numeração continua.
+ * O provedor real não precisa de nada disso — quem guarda o estado dele é a API
+ * dele —, e é por isso que o parâmetro é opcional e vive só aqui, não no
+ * contrato `FiscalProvider`.
  */
 
 import { buildAccessKey, isValidAccessKey, onlyDigits, resolveUfCode } from "./accessKey.ts";
@@ -47,6 +64,34 @@ import type {
   NfePayload,
 } from "./types.ts";
 
+/**
+ * Uma nota que a borda já tinha guardado e está devolvendo ao provedor — ver
+ * `seed` no cabeçalho.
+ *
+ * É `FiscalDocument` mais os dois campos que o provedor guarda por fora do
+ * contrato: o CNPJ do emitente (que a inutilização precisa para saber de quem é
+ * a faixa) e quantas cartas de correção a nota já tem (que decide o
+ * `nSeqEvento` da próxima). Os dois são opcionais porque uma borda que só
+ * precisa cancelar/consultar não tem obrigação de saber deles.
+ */
+export type SimulatedSeedDocument = FiscalDocument & {
+  cnpjEmitente?: string;
+  cartasCorrecao?: number;
+};
+
+/** O último número já usado numa combinação CNPJ + modelo (a série é a do provedor). */
+export type SimulatedSeedNumbering = {
+  cnpj: string;
+  model: FiscalModel;
+  /** A próxima emissão sai com `ultimoNumero + 1`. */
+  ultimoNumero: number;
+};
+
+export type SimulatedFiscalProviderSeed = {
+  documents?: SimulatedSeedDocument[];
+  lastNumbers?: SimulatedSeedNumbering[];
+};
+
 export type SimulatedFiscalProviderOptions = {
   /** Relógio. Injetável para o teste fixar a data que entra na chave (AAMM). */
   now?: () => Date;
@@ -56,6 +101,11 @@ export type SimulatedFiscalProviderOptions = {
   serie?: number;
   /** cUF de reserva quando a filial não tem UF nem código IBGE cadastrados. */
   fallbackUfCode?: string;
+  /**
+   * Estado restaurado pela borda que não consegue manter a instância viva entre
+   * duas operações (a Edge Function `fiscal-emit`). Ver o cabeçalho do arquivo.
+   */
+  seed?: SimulatedFiscalProviderSeed;
 };
 
 type StoredDocument = FiscalDocument & {
@@ -175,6 +225,24 @@ export function createSimulatedFiscalProvider(
   const counters = new Map<string, number>();
   /** Faixas já inutilizadas — ver `invalidateRange`. */
   const invalidations: StoredInvalidation[] = [];
+
+  for (const document of options.seed?.documents ?? []) {
+    documents.set(document.ref, {
+      ...document,
+      // O protocolo em forma numérica é o que entra no XML de evento. O
+      // contrato só expõe `protocolo` (que no simulado é o mesmo valor), então
+      // é dele que a restauração parte.
+      protocoloNumerico: document.protocolo ?? "",
+      cartasCorrecao: document.cartasCorrecao ?? 0,
+      cnpjEmitente: onlyDigits(document.cnpjEmitente ?? ""),
+    });
+  }
+
+  for (const numbering of options.seed?.lastNumbers ?? []) {
+    const cnpj = onlyDigits(numbering.cnpj);
+    if (!cnpj || !Number.isInteger(numbering.ultimoNumero) || numbering.ultimoNumero < 0) continue;
+    counters.set(`${cnpj}:${numbering.model}:${serie}`, numbering.ultimoNumero);
+  }
 
   function invalidationCovering(cnpj: string, model: string, numero: number): StoredInvalidation | undefined {
     return invalidations.find(

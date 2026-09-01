@@ -156,7 +156,7 @@ export default function SaleReturnPage() {
 
   async function handleCancelOriginal(justificativa: string) {
     if (!selected || !originSale?.invoice) return;
-    const outcome = await cancelOriginalInvoice(originSale.invoice.id, selected.saleId, justificativa);
+    const outcome = await cancelOriginalInvoice(selected.saleId, justificativa);
     showOutcome(outcome);
     // O modal só fecha sozinho quando dá certo — recusa da SEFAZ (justificativa
     // curta, evento duplicado) precisa aparecer dentro dele, não sumir junto.
