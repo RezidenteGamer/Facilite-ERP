@@ -2596,13 +2596,28 @@ dentro do projeto falha por dependência, não por erro nosso. **Nada foi testad
 no navegador**: o caminho novo só funciona com a função implantada e as duas
 migrations aplicadas, e as três coisas ficaram para revisão.
 
+#### Implantação (01/09/2026, mesmo dia)
+
+`fiscal-emit` foi implantada e as migrations 3 e 4 foram aplicadas ao projeto
+real. Uma armadilha do deploy: o primeiro `deploy_edge_function` falhou ao
+empacotar (`Module not found ".../_shared/fiscal/invoiceMapping.ts"`) porque o
+payload só trazia os três arquivos próprios da função (`index.ts`, `data.ts`,
+`persist.ts`) — os 12 arquivos de `_shared/fiscal/` que eles importam por
+caminho relativo (`../_shared/fiscal/<arquivo>.ts`) também precisam entrar no
+`files[]` da chamada, com o `name` replicando esse mesmo caminho relativo. Sem
+isso o bundler remoto não resolve o import. Confirmado depois do deploy:
+`get_advisors` sem avisos novos, e consulta direta mostrando as 3 colunas
+`cancel_*`, as duas policies de escrita de `fiscal_documents` e a policy
+vulnerável de `sale_items` (a do `unit_price`/`total_amount` reescrevível) de
+fato ausentes do schema. A1 está fechada.
+
 #### Fora de escopo
 
-Implantar `fiscal-emit` e aplicar as migrations 3 e 4; A12 (a chamada HTTP da
-Focus); ligar "Carta de correção"/"Inutilizar numeração" na UI; A10 (numeração
-atômica); o motor tributário da Etapa 2 — as colunas de imposto de
-`fiscal_document_items` recebem hoje **o que foi declarado** no XML (ICMS, PIS,
-COFINS e os CSTs), e ficam nulas onde o mapeamento atual não calcula (ICMS-ST,
-FCP, IPI, IBS, CBS, reduções de base), mantendo "nulo = não calculado"; tornar a
-persistência atômica por RPC; consertar os três scripts de `scripts/`, que
-dependiam da lógica local que saiu do front (documentado em `scripts/README.md`).
+A12 (a chamada HTTP da Focus); ligar "Carta de correção"/"Inutilizar
+numeração" na UI; A10 (numeração atômica); o motor tributário da Etapa 2 — as
+colunas de imposto de `fiscal_document_items` recebem hoje **o que foi
+declarado** no XML (ICMS, PIS, COFINS e os CSTs), e ficam nulas onde o
+mapeamento atual não calcula (ICMS-ST, FCP, IPI, IBS, CBS, reduções de base),
+mantendo "nulo = não calculado"; tornar a persistência atômica por RPC;
+consertar os três scripts de `scripts/`, que dependiam da lógica local que
+saiu do front (documentado em `scripts/README.md`).
