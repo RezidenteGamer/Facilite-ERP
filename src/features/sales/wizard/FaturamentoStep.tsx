@@ -76,11 +76,10 @@ export default function FaturamentoStep({ draft }: FaturamentoStepProps) {
                     className="sale__cart-line-input"
                     type="text"
                     inputMode="decimal"
+                    placeholder="0,00"
                     aria-label={`Valor do pagamento ${index + 1}`}
                     value={payment.amount}
-                    onChange={(e) =>
-                      draft.updatePayment(payment.lineId, { amount: Number(e.target.value.replace(",", ".")) || 0 })
-                    }
+                    onChange={(e) => draft.updatePayment(payment.lineId, { amount: e.target.value })}
                   />
                   {INSTALLMENT_METHODS.includes(payment.method) && (
                     <input

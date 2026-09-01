@@ -21,7 +21,13 @@ export type PosPaymentMethod = "dinheiro" | "debito" | "credito" | "pix";
 export type PosSplitLine = {
   lineId: string;
   method: PosPaymentMethod;
-  amount: number;
+  /**
+   * Texto, não número — de propósito, mesma correção de `PaymentLine` em
+   * `useSaleDraft.ts`: um input controlado que mostra `String(number)`
+   * reescreve o campo a cada tecla, e a vírgula digitada desaparecia antes
+   * do segundo dígito decimal ser digitado.
+   */
+  amount: string;
   installments: number;
 };
 
@@ -203,7 +209,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
   function addSplitLine() {
     setSplitLines((current) => [
       ...current,
-      { lineId: crypto.randomUUID(), method: "dinheiro", amount: 0, installments: 1 },
+      { lineId: crypto.randomUUID(), method: "dinheiro", amount: "", installments: 1 },
     ]);
   }
 
@@ -218,7 +224,10 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     setSplitLines((current) => current.filter((line) => line.lineId !== lineId));
   }
 
-  const splitTotal = useMemo(() => splitLines.reduce((sum, line) => sum + line.amount, 0), [splitLines]);
+  const splitTotal = useMemo(
+    () => splitLines.reduce((sum, line) => sum + (parseAmount(line.amount) ?? 0), 0),
+    [splitLines],
+  );
   const splitMatches = splitLines.length > 0 && Math.abs(splitTotal - total) < 0.01;
 
   /** Trocar para "Dividir" já nasce com 2 linhas — evita o operador ter que descobrir o botão "+ linha" na primeira vez. */
@@ -226,8 +235,8 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     setMethod(next);
     if (next === "dividir" && splitLines.length === 0) {
       setSplitLines([
-        { lineId: crypto.randomUUID(), method: "dinheiro", amount: 0, installments: 1 },
-        { lineId: crypto.randomUUID(), method: "credito", amount: 0, installments: 1 },
+        { lineId: crypto.randomUUID(), method: "dinheiro", amount: "", installments: 1 },
+        { lineId: crypto.randomUUID(), method: "credito", amount: "", installments: 1 },
       ]);
     }
   }
@@ -238,7 +247,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     if (method === "dividir") {
       return splitLines.map((line) => ({
         method: line.method,
-        amount: line.amount,
+        amount: parseAmount(line.amount) ?? 0,
         installments: line.method === "credito" ? line.installments : 1,
       }));
     }

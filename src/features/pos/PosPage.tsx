@@ -554,10 +554,8 @@ export default function PosPage() {
                       inputMode="decimal"
                       placeholder="0,00"
                       aria-label={`Valor do pagamento ${index + 1}`}
-                      value={line.amount === 0 ? "" : String(line.amount)}
-                      onChange={(event) =>
-                        sale.updateSplitLine(line.lineId, { amount: Number(event.target.value.replace(",", ".")) || 0 })
-                      }
+                      value={line.amount}
+                      onChange={(event) => sale.updateSplitLine(line.lineId, { amount: event.target.value })}
                     />
                     {line.method === "credito" && (
                       <input

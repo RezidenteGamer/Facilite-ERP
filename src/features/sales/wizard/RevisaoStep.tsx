@@ -1,3 +1,4 @@
+import { parseAmount } from "../../../lib/amount";
 import { formatMoney, SALE_PAYMENT_METHOD_LABEL } from "../sales";
 import type { useSaleDraft } from "../useSaleDraft";
 import "../SalePage.css";
@@ -75,7 +76,7 @@ export default function RevisaoStep({ draft }: RevisaoStepProps) {
                   {SALE_PAYMENT_METHOD_LABEL[payment.method]}
                   {payment.method === "credito" ? ` — ${payment.installments}x` : ""}
                 </span>
-                <span>{formatMoney(payment.amount)}</span>
+                <span>{formatMoney(parseAmount(payment.amount) ?? 0)}</span>
               </div>
             ))
           )}

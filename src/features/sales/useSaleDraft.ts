@@ -71,7 +71,14 @@ export type CartLine = {
 export type PaymentLine = {
   lineId: string;
   method: SalePaymentMethod;
-  amount: number;
+  /**
+   * Texto, não número — de propósito. Um input controlado que mostra
+   * `String(number)` reescreve o campo a cada tecla; digitar "17,90" virava
+   * "1790" porque a vírgula desaparecia assim que "17," virava o número 17
+   * e a tela redesenhava sem ela. Mesmo padrão de `discount`/`freight`
+   * (texto na tela, `parseAmount` só na hora de calcular/enviar).
+   */
+  amount: string;
   installments: number;
 };
 
@@ -340,7 +347,7 @@ export function useSaleDraft(
   function addPayment() {
     setPayments((current) => [
       ...current,
-      { lineId: crypto.randomUUID(), method: "dinheiro", amount: 0, installments: 1 },
+      { lineId: crypto.randomUUID(), method: "dinheiro", amount: "", installments: 1 },
     ]);
   }
 
@@ -379,7 +386,10 @@ export function useSaleDraft(
   const freightValue = Math.max(0, parseAmount(freight) ?? 0);
   const discountValue = Math.max(0, parseAmount(discount) ?? 0);
   const total = Math.max(0, subtotal + freightValue - discountValue);
-  const paymentsTotal = useMemo(() => payments.reduce((sum, p) => sum + p.amount, 0), [payments]);
+  const paymentsTotal = useMemo(
+    () => payments.reduce((sum, p) => sum + (parseAmount(p.amount) ?? 0), 0),
+    [payments],
+  );
   const paymentsMatch = cart.length > 0 && Math.abs(paymentsTotal - total) < 0.01;
 
   /**
@@ -433,7 +443,11 @@ export function useSaleDraft(
           unitPrice: line.unitPrice,
           discountAmount: line.discountAmount,
         })),
-        payments: payments.map((p) => ({ method: p.method, amount: p.amount, installments: p.installments })),
+        payments: payments.map((p) => ({
+          method: p.method,
+          amount: parseAmount(p.amount) ?? 0,
+          installments: p.installments,
+        })),
         // Omitidos quando não há parcelamento: a RPC mantém o padrão dela
         // (30 dias / 30 dias) para quem não manda esses campos — é o caso do
         // PDV e de qualquer venda à vista.
