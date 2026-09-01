@@ -2621,3 +2621,194 @@ mapeamento atual não calcula (ICMS-ST, FCP, IPI, IBS, CBS, reduções de base),
 mantendo "nulo = não calculado"; tornar a persistência atômica por RPC;
 consertar os três scripts de `scripts/`, que dependiam da lógica local que
 saiu do front (documentado em `scripts/README.md`).
+
+### Decisão arquitetural: resolução tributária por item — IPI, redução de base e os CSTs que não têm onde escrever valor (B1) (01/09/2026)
+
+Etapa 2 do "Mínimo pra vender", primeira tarefa. A Etapa 1 (A2, A3, A1) mudou
+**onde** a nota é montada e **onde** ela é guardada; nenhuma delas tocou em
+*quanto* de imposto a nota destaca. É o que B1 começa.
+
+#### O que o cálculo era, e por que não bastava
+
+`resolveItemsForSale` fazia, para ICMS, PIS e COFINS, sempre a mesma conta:
+`valor = base × alíquota / 100`, com a base sendo o valor bruto do item, desde
+que o grupo tributário tivesse alíquota. E não calculava IPI nenhum — embora
+`NfePayloadItem` já tivesse `ipi_base_calculo`/`ipi_aliquota`/`ipi_valor` e
+`fiscal_document_items` já tivesse as três colunas correspondentes (`ipi_base`,
+`ipi_aliquota`, `ipi_valor`), todas nascidas em A3/A1 e nunca preenchidas.
+
+Duas coisas faltavam, e a segunda é a mais séria:
+
+1. **Redução de base de cálculo.** É o mecanismo mais comum da tributação
+   estadual brasileira depois da própria alíquota (cesta básica, regimes
+   especiais setoriais). Sem ela, um grupo que deveria destacar ICMS sobre 58%
+   da base destacava sobre 100% — nota autorizada com imposto a maior.
+2. **O CST era decorativo.** O código lia o CST/CSOSN para escrever no XML e
+   depois calculava imposto **independentemente dele**. Isso não é "informação
+   a mais": o leiaute 4.00 da NF-e **não tem um grupo único de ICMS**, tem um
+   grupo por CST, e a maioria não possui `vBC`/`pICMS`/`vICMS`. Um item com CST
+   40 (isenta) declarando ICMS é rejeição na validação do schema, não uma nota
+   com um campo sobrando.
+
+#### `taxSituations.ts` — a pergunta certa é de schema, não de contabilidade
+
+Arquivo novo no núcleo, com três predicados (`icmsCalculaValorProprio`,
+`pisCofinsCalculaValor`, `ipiCalculaValor`) e uma tabela de códigos cada. O que
+ele responde **não** é "este produto paga imposto?" — essa é pergunta de
+contabilidade e depende de coisas que não estão no cadastro. É "**o grupo XML
+deste CST tem onde escrever base, alíquota e valor?**", que se responde lendo o
+MOC e é decidível a partir do código sozinho.
+
+- **ICMS**: saem sem valor próprio os CSTs `30`, `40`, `41`, `50` e `60`
+  (grupos `ICMS30`/`ICMS40`/`ICMS60`, que só têm origem, CST e — no 40 —
+  desoneração), e os CSOSN `101`, `102`, `103`, `201`, `202`, `203`, `300`,
+  `400` e `500`. Do lado do Simples, **só o CSOSN 900 tem `vBC`/`pICMS`/`vICMS`**;
+  o crédito de Simples do 101/201 (`pCredSN`) é B8. Continuam calculando os CSTs
+  `00`, `10`, `20`, `51`, `70` e `90` — o `10` e o `70` têm ST **além** do ICMS
+  próprio, e a parte de ST é B2.
+- **PIS/COFINS**: saem sem valor os CSTs `04` a `09` (grupo `PISNT`), e também
+  o `03`, que é o caso interessante — ele *é* tributado, mas por unidade de
+  medida (`qBCProd`/`vAliqProd`), e este motor só sabe percentual. Declarar
+  `vBC` + `pPIS` nele seria escrever no grupo errado; ensinar o motor a calcular
+  por unidade é B5.
+- **IPI**: aqui a lista é de **inclusão** (`00`, `49`, `50`, `99` — o grupo
+  `IPITrib`), ao contrário das outras duas, que são de exclusão. O motivo é que
+  a tabela de CST do IPI é curta e fechada, então não existe a categoria
+  "código que talvez este arquivo não conheça" que justifica a lista de
+  exclusão nos outros dois. Nos outros dois, código desconhecido **calcula** —
+  mantém o comportamento anterior a B1 em vez de suprimir imposto em silêncio.
+
+#### Decisão 1: o CST de IPI muda de `products` para `tax_groups`
+
+A correção de 19/08/2026 tirou os seis CSTs de `products` e deixou `cst_ipi`
+para trás de propósito, com o motivo escrito lá em cima: "`tax_groups` não tem
+campo de IPI (…) Se IPI virar assunto de verdade, o lugar dele é no grupo,
+junto do resto." Virou assunto aqui, e o que decide é a alíquota: ela vai para
+o grupo, porque é onde moram todas as outras, e **CST e alíquota são as duas
+metades do mesmo grupo XML** (`IPITrib`). Guardá-las em tabelas diferentes é
+convidar o cadastro a se contradizer — produto com CST 52 (isenta) e grupo com
+alíquota 5% descrevem duas notas diferentes.
+
+**`products.cst_ipi` não foi removida**, e isso também é decisão. Não há
+`update` correto possível: N produtos apontam para o mesmo grupo e podem ter
+CSTs de IPI diferentes entre si. A coluna vira **fallback de leitura** — o
+mapeamento faz `grupo ?? produto`, o grupo sempre vence — e ganhou
+`comment on column` marcando-a obsoleta. O `drop` fica para a tarefa que migrar
+o cadastro produto a produto. É o mesmo padrão de A3 com as colunas `cancel_*`:
+marcar obsoleto, remover quando ninguém mais depender.
+
+#### Decisão 2: redução de base só para ICMS
+
+`reducao_base_icms` é a única coluna de redução criada, e o argumento já estava
+escrito em A3, no `comment on column fiscal_document_items.icms_reducao_base`:
+**`pRedBC` só existe, no leiaute, para o ICMS próprio e para o ICMS-ST
+(`pRedBCST`)**. PIS, COFINS e IPI não têm campo de percentual de redução no
+XML — quando a legislação reduz a base deles, o que se declara é a base menor,
+sem o percentual. Três colunas `reducao_base_pis`/`_cofins`/`_ipi` seriam dado
+que o motor lê e não tem onde escrever. `reducao_base_icms_st` fica para B2,
+junto do resto do ICMS-ST.
+
+No payload a redução aparece **em dois campos, não um**: `icms_base_calculo`
+com a base **já reduzida** e `icms_reducao_base_calculo` (o nome que a Focus
+usa para `pRedBC`, confirmado na tabela de campos) com o percentual. O leiaute
+pede os dois — o fisco precisa conseguir refazer a conta a partir do valor do
+produto —, e sem redução o segundo simplesmente não vai, porque `pRedBC` não
+existe nos grupos `ICMS00`/`ICMS10` e mandar zero seria inventar campo.
+
+**O percentual não é filtrado por CST.** Um grupo com CST 00 e redução
+cadastrada emite `pRedBC` num grupo que não o aceita, e a SEFAZ rejeita. É
+deliberado: a alternativa — ignorar a redução em silêncio — produziria uma nota
+**autorizada com valor errado**, que é o desfecho pior. Rejeição é ruidosa e
+corrigível no cadastro.
+
+#### Decisão 3: o IPI entra no total da nota
+
+`valor_ipi` passou a ser preenchido, e `valor_total` passou a ser
+`total da venda + IPI`. O IPI é imposto **por fora**: não está no preço, é
+acrescido ao documento, e a regra W16-10 do validador exige que `vNF` inclua
+`vIPI`. Declarar IPI nos itens e não somá-lo no total é rejeição garantida.
+
+Na prática nada muda hoje: `aliquota_ipi` nasce nula em todos os grupos, então
+`valor_total` continua idêntico a `sale.totalAmount` até alguém cadastrar IPI.
+Quando cadastrar, **o total da nota passa a ser maior que o total da venda** —
+correto pelo leiaute, mas é uma diferença visível e por isso está registrada
+aqui.
+
+#### Dois achados do `/code-review high`, os dois corrigidos
+
+1. **As colunas novas ausentes viravam `NaN`.** `toTaxGroup` copiava
+   `aliquota_ipi` direto, e o mapeamento testa `!== null`. Na janela entre
+   implantar a função e aplicar a migration, o `select` volta sem as colunas,
+   `aliquotaIpi` chega `undefined`, `undefined !== null` é verdadeiro — e todo
+   item com CST de IPI no produto sairia com `ipi_valor: NaN`, enquanto os
+   demais recusariam a emissão pedindo um CST que ninguém cadastrou. As três
+   colunas de B1 levam `?? null` na conversão, e só elas: é a única fronteira
+   onde a ausência é possível.
+2. **O total de `vBC` sumia quando o ICMS somava zero.** Os totais eram
+   `soma || undefined`, herdado de antes de B1. Um grupo com CST tributado e
+   alíquota **zero** faz cada item declarar `vBC` e `vICMS` de zero, e o total
+   saía ausente — a regra W03-10 exige que o `vBC` do grupo `total` seja a soma
+   dos `vBC` dos itens. Passou a decidir pela **presença do campo no item**
+   (`totalDeclarado`), não pelo resultado da soma.
+
+#### A migration (escrita, NÃO aplicada)
+
+`supabase/migrations/00000000000005_b1_resolucao_tributaria_por_item.sql`.
+Três colunas em `tax_groups` (`reducao_base_icms`, `cst_ipi`, `aliquota_ipi`),
+duas `check constraint` de 0–100 nas duas numéricas novas (as alíquotas antigas
+ficam como estão — constraint retroativa em coluna com dado em produção é
+mudança de outra natureza), os `comment on column` das três, o comentário de
+obsolescência em `products.cst_ipi` e **três linhas em `module_fields`**.
+
+As linhas de `module_fields` não estavam no enunciado e entraram porque sem
+elas B1 não tem meio de uso: `grupos-tributarios` roda na `GenericModulePage`
+(`storage_kind = 'table'`, sem componente próprio), então coluna sem campo é
+coluna que ninguém consegue preencher pela aplicação. `sort_order` 55, 95 e 96
+— intermediários de propósito, para nenhuma linha existente ser renumerada — e
+`show_in_table = false` nos três, como os campos de PIS/COFINS já são.
+
+**Nada de RLS.** `tax_groups` já tem as quatro policies separadas de
+`grupos-tributarios` desde 19/08/2026, e policy é por linha, não por coluna;
+os `grant` também são por tabela. Coluna nova em tabela com RLS não pede
+policy nova — só confirmação de que nada quebrou, que é o que a revisão
+independente vai fazer ao aplicar.
+
+`src/types/supabase.ts` foi editado à mão (12 linhas, as três colunas em
+`Row`/`Insert`/`Update` e no retorno de `search_tax_groups`) porque ele é
+gerado do banco real e o banco real ainda não tem as colunas. **Front e
+migration precisam ir juntos**: com o arquivo à frente do banco, `toTaxGroup`
+lê `undefined` nas três — o que o `?? null` do achado 1 já absorve.
+
+#### Testado
+
+`npm run build` e `npm run lint` limpos (61 avisos, exatamente os mesmos de
+antes da tarefa — conferido com `git stash`). `npm test` com **90 testes
+passando** (58 novos + os 32 que já existiam) e as duas baterias que dependem
+de credencial em `.env.local` falhando alto, como é o desenho delas.
+
+`tests/unit/invoiceTaxes.test.ts` é a bateria nova, e ela entra por
+`buildNfePayloadFromSale` de propósito — `resolveItemsForSale` não é exportada
+e não deve ser; o que interessa provar é o item que sai no payload. As contas
+estão escritas por extenso nos comentários (`1000 × (1 − 41,67/100) = 583,30`,
+`583,30 × 18% = 104,99`), porque um teste que compara com `taxAmount(...)`
+reimplementa o código que deveria estar conferindo. Cobre: redução de base
+(inclusive 0%, 100% e redução com CST que não aceita ICMS), IPI (alíquota do
+grupo, precedência grupo/produto, CST sem alíquota, alíquota sem CST), os 15
+CST/CSOSN de ICMS e os 7 de PIS/COFINS que zeram campos, os 6 CSTs de ICMS que
+continuam calculando, e a regressão de CFOP e de ICMS/PIS/COFINS sem redução.
+
+**Nada foi testado no navegador nem no banco**: a migration não foi aplicada e
+a Edge Function não foi implantada — as duas coisas ficaram para a sessão de
+coordenação, junto com a revisão independente.
+
+#### Fora de escopo
+
+B2 (ICMS-ST, MVA, `mva_rules`, `pRedBCST`), B5 (as regras *positivas* de
+PIS/COFINS por CST — cálculo por unidade do CST 03, monofásico, os CSTs de
+crédito; o que B1 fez foi só **parar de declarar** onde o grupo XML não tem
+campo), B8 (Simples Nacional completo: `pCredSN` do CSOSN 101/201, anexo do
+cliente), B9 (IBPT) e B10 (IBS/CBS/IS). Também fora: filtrar `pRedBC` por CST
+(ver Decisão 2), remover `products.cst_ipi` (ver Decisão 1), e
+`ipi_codigo_enquadramento`, que existe em `fiscal_document_items` desde A3 e
+continua nulo — é código de enquadramento legal, dado de cadastro que ninguém
+tem hoje.

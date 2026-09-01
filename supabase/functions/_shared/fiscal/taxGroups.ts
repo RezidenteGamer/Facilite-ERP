@@ -26,10 +26,36 @@ export type TaxGroup = {
   /** Aplica-se quando quem emite é Simples Nacional (CRT 1 ou 2). */
   csosn: string | null;
   aliquotaIcms: number | null;
+  /**
+   * `pRedBC` em percentual (B1, 01/09/2026): 0 a 100, nulo quando não há
+   * redução. A base do item vira `valor × (1 − reducao/100)` antes de a
+   * alíquota ser aplicada.
+   *
+   * **Só ICMS tem esta coluna, e é decisão, não esquecimento**: `pRedBC` (e o
+   * `pRedBCST` do ICMS-ST, que é assunto de B2) é o único percentual de redução
+   * de base que existe no leiaute 4.00 da NF-e. PIS, COFINS e IPI não têm campo
+   * equivalente no XML — uma coluna de redução para eles seria dado sem
+   * destino. A mesma constatação já está registrada em A3, no
+   * `comment on column fiscal_document_items.icms_reducao_base`.
+   */
+  reducaoBaseIcms: number | null;
   cstPis: string | null;
   aliquotaPis: number | null;
   cstCofins: string | null;
   aliquotaCofins: number | null;
+  /**
+   * CST de IPI (B1, 01/09/2026). Mora aqui, e não mais só em `products.cst_ipi`,
+   * porque a alíquota de IPI passou a morar no grupo: CST e alíquota são as
+   * duas metades do mesmo grupo XML (`IPITrib`), e separá-las em tabelas
+   * diferentes deixaria o cadastro se contradizer.
+   *
+   * `products.cst_ipi` continua existindo como **fallback de leitura** para os
+   * produtos cadastrados antes de B1 — ver `resolveItemsForSale` e a decisão no
+   * AGENTS.md. Grupo vence produto.
+   */
+  cstIpi: string | null;
+  /** Alíquota de IPI em percentual (`pIPI`), 0 a 100. Nula = não tributa IPI. */
+  aliquotaIpi: number | null;
   cstIbsCbs: string | null;
   cclasstrib: string | null;
 };
@@ -70,10 +96,16 @@ export function toTaxGroup(row: {
   cst_icms: string | null;
   csosn: string | null;
   aliquota_icms: number | null;
+  /** Aceita `undefined`: a linha pode vir de um banco onde B1 ainda não rodou. */
+  reducao_base_icms: number | null | undefined;
   cst_pis: string | null;
   aliquota_pis: number | null;
   cst_cofins: string | null;
   aliquota_cofins: number | null;
+  /** Idem `reducao_base_icms`. */
+  cst_ipi: string | null | undefined;
+  /** Idem `reducao_base_icms`. */
+  aliquota_ipi: number | null | undefined;
   cst_ibs_cbs: string | null;
   cclasstrib: string | null;
 }): TaxGroup {
@@ -84,10 +116,20 @@ export function toTaxGroup(row: {
     cstIcms: row.cst_icms,
     csosn: row.csosn,
     aliquotaIcms: row.aliquota_icms,
+    // Os três campos de B1 levam `?? null` e os anteriores não, de propósito:
+    // enquanto a migration de B1 não estiver aplicada, o `select` volta **sem**
+    // estas colunas e elas chegam aqui como `undefined`. Sem a normalização,
+    // `aliquotaIpi !== null` seria verdadeiro para todo grupo do banco e o
+    // cálculo de IPI sairia `NaN` — ou recusaria a emissão pedindo um CST de
+    // IPI que ninguém cadastrou. A janela entre implantar a função e aplicar a
+    // migration é curta, mas é justamente quando isso quebraria tudo.
+    reducaoBaseIcms: row.reducao_base_icms ?? null,
     cstPis: row.cst_pis,
     aliquotaPis: row.aliquota_pis,
     cstCofins: row.cst_cofins,
     aliquotaCofins: row.aliquota_cofins,
+    cstIpi: row.cst_ipi ?? null,
+    aliquotaIpi: row.aliquota_ipi ?? null,
     cstIbsCbs: row.cst_ibs_cbs,
     cclasstrib: row.cclasstrib,
   };
@@ -95,4 +137,5 @@ export function toTaxGroup(row: {
 
 /** As colunas de `tax_groups` que `toTaxGroup` precisa — para quem monta o `select`. */
 export const TAX_GROUP_COLUMNS =
-  "id, code, name, cst_icms, csosn, aliquota_icms, cst_pis, aliquota_pis, cst_cofins, aliquota_cofins, cst_ibs_cbs, cclasstrib";
+  "id, code, name, cst_icms, csosn, aliquota_icms, reducao_base_icms, cst_pis, aliquota_pis, " +
+  "cst_cofins, aliquota_cofins, cst_ipi, aliquota_ipi, cst_ibs_cbs, cclasstrib";

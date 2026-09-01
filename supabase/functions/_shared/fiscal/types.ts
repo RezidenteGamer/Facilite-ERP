@@ -285,11 +285,25 @@ export type NfePayloadItem = {
   /** `products.cst_icms` **ou** `products.csosn`, conforme o regime da filial. */
   icms_situacao_tributaria: string;
   icms_modalidade_base_calculo?: string;
+  /** `vBC` — **já reduzida** quando há `icms_reducao_base_calculo` (ver abaixo). */
   icms_base_calculo?: number;
+  /**
+   * `pRedBC` — o percentual de redução de base, em si (B1, 01/09/2026).
+   *
+   * O leiaute da NF-e pede **os dois**: `vBC` já reduzida *e* `pRedBC` com o
+   * percentual que a reduziu, para o fisco conseguir refazer a conta a partir
+   * do valor do produto. Por isso este campo existe além de `icms_base_calculo`
+   * em vez de a redução ficar implícita na base. O nome é o que a Focus usa
+   * (`icms_reducao_base_calculo`), confirmado na tabela de campos.
+   *
+   * Vai ausente quando não há redução — `pRedBC` não existe nos grupos `ICMS00`
+   * e `ICMS10`, então mandar `0` seria inventar campo.
+   */
+  icms_reducao_base_calculo?: number;
   icms_aliquota?: number;
   icms_valor?: number;
 
-  /** `products.cst_ipi`. */
+  /** `tax_groups.cst_ipi`, com `products.cst_ipi` de fallback (ver `taxGroups.ts`). */
   ipi_situacao_tributaria?: string;
   ipi_base_calculo?: number;
   ipi_aliquota?: number;

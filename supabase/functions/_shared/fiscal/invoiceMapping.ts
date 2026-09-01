@@ -48,6 +48,7 @@
 
 import { onlyDigits } from "./accessKey.ts";
 import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
+import { icmsCalculaValorProprio, ipiCalculaValor, pisCofinsCalculaValor } from "./taxSituations.ts";
 import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "./types.ts";
 import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "./taxRules.ts";
 
@@ -166,11 +167,31 @@ function taxAmount(base: number, aliquota: number): number {
   return Math.round(base * (aliquota / 100) * 100) / 100;
 }
 
+/** Arredonda a centavos — o mesmo critério de `taxAmount`, isolado para reuso. */
+function toCents(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Base de cálculo depois da redução (`pRedBC`), arredondada a centavos.
+ *
+ * Devolve a base inteira quando não há redução — inclusive quando a coluna vem
+ * `0`, que é o mesmo que "sem redução" e não deve virar um `pRedBC` de zero no
+ * XML. O `Math.min(…, 100)` é defesa em profundidade: a `check constraint` da
+ * migration de B1 já limita a coluna a 0–100, e este núcleo também roda com
+ * dado de teste que não passa pelo banco.
+ */
+function reducedBase(base: number, reducaoPercentual: number | null | undefined): number {
+  if (!reducaoPercentual || reducaoPercentual <= 0) return base;
+  return toCents(base * (1 - Math.min(reducaoPercentual, 100) / 100));
+}
+
 type ResolvedItems = {
   cfop: string;
   items: NfePayloadItem[];
   icmsBaseCalculoTotal?: number;
   icmsValorTotal?: number;
+  ipiValorTotal?: number;
   pisValorTotal?: number;
   cofinsValorTotal?: number;
 };
@@ -183,6 +204,27 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  * grupo tributário do produto. Não sabe nada sobre cliente/destinatário —
  * isso é responsabilidade de quem chama (a exigência diverge entre os dois
  * modelos).
+ *
+ * ## O cálculo por item depois de B1 (01/09/2026)
+ *
+ * Antes de B1 esta função fazia `valor = base × alíquota / 100` para ICMS, PIS
+ * e COFINS, sempre que houvesse alíquota, e não calculava IPI nenhum. Três
+ * coisas mudaram, e todas na mesma direção — **declarar só o que o grupo XML
+ * daquele CST aceita**:
+ *
+ * 1. **Redução de base do ICMS.** Com `tax_groups.reducao_base_icms`
+ *    preenchida, a base do item vira `valor × (1 − reducao/100)` e o item
+ *    carrega também o percentual em `icms_reducao_base_calculo` (`pRedBC`) —
+ *    o leiaute pede os dois, a base já reduzida e o percentual que a reduziu.
+ * 2. **IPI passou a ser calculado**, do mesmo jeito que os outros três, com
+ *    alíquota e CST vindos do grupo tributário.
+ * 3. **CST/CSOSN de isenção, não tributação ou ST já retida zeram os campos**
+ *    em vez de forçá-los: `undefined` em base/alíquota/valor, exatamente o
+ *    espírito com que o código já tratava alíquota ausente. Quem decide isso é
+ *    `taxSituations.ts`, que documenta código a código o porquê.
+ *
+ * Redução de base só existe para ICMS porque só o ICMS tem `pRedBC` no leiaute
+ * — ver o campo `reducaoBaseIcms` em `taxGroups.ts`.
  */
 function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: TaxRuleQuery): ItemsResolution {
   const errors: string[] = [];
@@ -208,7 +250,7 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
   }
   const cfop = resolution.cfop;
 
-  const icmsErrors: string[] = [];
+  const cadastroErrors: string[] = [];
   const items: NfePayloadItem[] = sale.items.map((item, index) => {
     const group = item.product.taxGroup!;
     const base = item.totalAmount;
@@ -217,15 +259,41 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
     // produtos da mesma venda saírem com tributação diferente.
     const icmsSituacaoTributaria = resolveIcmsSituacaoTributaria(group, query.regime);
     if (!icmsSituacaoTributaria) {
-      icmsErrors.push(
+      cadastroErrors.push(
         `${itemLabel(item, index)}: o grupo tributário "${group.name}" não tem CST ICMS nem CSOSN ` +
           `cadastrado. Complete o cadastro em Grupos tributários.`,
       );
     }
 
-    const icmsAliquota = group.aliquotaIcms ?? undefined;
-    const pisAliquota = group.aliquotaPis ?? undefined;
-    const cofinsAliquota = group.aliquotaCofins ?? undefined;
+    // ICMS — a alíquota só vira base/valor se o CST/CSOSN tiver onde escrevê-los.
+    const icmsDeclara = group.aliquotaIcms !== null && icmsCalculaValorProprio(icmsSituacaoTributaria);
+    const icmsAliquota = icmsDeclara ? group.aliquotaIcms! : undefined;
+    const icmsReducao = icmsDeclara && group.reducaoBaseIcms ? group.reducaoBaseIcms : undefined;
+    const icmsBase = icmsDeclara ? reducedBase(base, icmsReducao) : undefined;
+
+    /**
+     * CST de IPI: o grupo tributário manda, o cadastro do produto é fallback
+     * para os produtos que já tinham `cst_ipi` antes de B1 (ver AGENTS.md).
+     * String vazia no banco conta como ausente — `''` não é um CST.
+     */
+    const cstIpi = group.cstIpi?.trim() || item.product.cstIpi?.trim() || undefined;
+    if (group.aliquotaIpi !== null && !cstIpi) {
+      cadastroErrors.push(
+        `${itemLabel(item, index)}: o grupo tributário "${group.name}" tem alíquota de IPI mas não tem ` +
+          `CST de IPI. Complete o cadastro em Grupos tributários.`,
+      );
+    }
+    // O inverso (CST sem alíquota) **não** é erro: é o estado de todo produto
+    // cadastrado antes de B1, quando só existia `products.cst_ipi`. Nesse caso
+    // o item declara o CST e deixa base/alíquota/valor nulos — "não calculado".
+    const ipiDeclara = group.aliquotaIpi !== null && ipiCalculaValor(cstIpi);
+    const ipiBase = ipiDeclara ? base : undefined;
+
+    // PIS/COFINS: mesma regra do ICMS, com a tabela de CST própria deles.
+    const pisAliquota =
+      group.aliquotaPis !== null && pisCofinsCalculaValor(group.cstPis) ? group.aliquotaPis : undefined;
+    const cofinsAliquota =
+      group.aliquotaCofins !== null && pisCofinsCalculaValor(group.cstCofins) ? group.aliquotaCofins : undefined;
 
     return {
       numero_item: index + 1,
@@ -246,13 +314,15 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
       // "" quando o cadastro do produto ainda não tem origem preenchida.
       icms_origem: item.product.origemMercadoria ?? "",
       icms_situacao_tributaria: icmsSituacaoTributaria ?? "",
-      icms_base_calculo: icmsAliquota !== undefined ? base : undefined,
+      icms_base_calculo: icmsBase,
+      icms_reducao_base_calculo: icmsReducao,
       icms_aliquota: icmsAliquota,
-      icms_valor: icmsAliquota !== undefined ? taxAmount(base, icmsAliquota) : undefined,
+      icms_valor: icmsBase !== undefined ? taxAmount(icmsBase, icmsAliquota!) : undefined,
 
-      // IPI continua no cadastro do produto: `tax_groups` não tem campo de
-      // IPI, então ele não era redundante com o grupo (ver AGENTS.md).
-      ipi_situacao_tributaria: item.product.cstIpi ?? undefined,
+      ipi_situacao_tributaria: cstIpi,
+      ipi_base_calculo: ipiBase,
+      ipi_aliquota: ipiDeclara ? group.aliquotaIpi! : undefined,
+      ipi_valor: ipiBase !== undefined ? taxAmount(ipiBase, group.aliquotaIpi!) : undefined,
 
       pis_situacao_tributaria: group.cstPis ?? undefined,
       pis_base_calculo: pisAliquota !== undefined ? base : undefined,
@@ -266,15 +336,55 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
     };
   });
 
-  if (icmsErrors.length > 0) return { ok: false, errors: icmsErrors };
+  if (cadastroErrors.length > 0) return { ok: false, errors: cadastroErrors };
 
-  const icmsValorTotal = items.reduce((sum, item) => sum + (item.icms_valor ?? 0), 0) || undefined;
-  const pisValorTotal = items.reduce((sum, item) => sum + (item.pis_valor ?? 0), 0) || undefined;
-  const cofinsValorTotal = items.reduce((sum, item) => sum + (item.cofins_valor ?? 0), 0) || undefined;
-  const icmsBaseCalculoTotal =
-    icmsValorTotal !== undefined ? items.reduce((s, i) => s + (i.icms_base_calculo ?? 0), 0) : undefined;
+  const icmsBaseCalculoTotal = totalDeclarado(items, (item) => item.icms_base_calculo);
+  const icmsValorTotal = totalDeclarado(items, (item) => item.icms_valor);
+  const ipiValorTotal = totalDeclarado(items, (item) => item.ipi_valor);
+  const pisValorTotal = totalDeclarado(items, (item) => item.pis_valor);
+  const cofinsValorTotal = totalDeclarado(items, (item) => item.cofins_valor);
 
-  return { ok: true, data: { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, pisValorTotal, cofinsValorTotal } };
+  return {
+    ok: true,
+    data: { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal },
+  };
+}
+
+/**
+ * Soma um campo de valor pelos itens que o **declararam**, a centavos.
+ * Devolve `undefined` só quando nenhum item declarou — "nulo = não calculado",
+ * a mesma convenção que A3 fixou para as colunas de `fiscal_document_items`.
+ *
+ * O critério é a presença do campo, e não o resultado da soma, porque os dois
+ * divergem num caso real: um item com CST tributado e alíquota **zero**
+ * declara `vBC` e `vICMS` de zero, e o total tem de acompanhar — o validador
+ * da SEFAZ exige que o `vBC` do grupo `total` seja a soma dos `vBC` dos itens
+ * (regra W03-10). Somar e depois converter zero em ausente, como o código
+ * fazia antes de B1, mandava itens com base e um total sem base nenhuma.
+ */
+function totalDeclarado(
+  items: NfePayloadItem[],
+  pick: (item: NfePayloadItem) => number | undefined,
+): number | undefined {
+  const declarados = items.map(pick).filter((valor): valor is number => valor !== undefined);
+  if (declarados.length === 0) return undefined;
+  return toCents(declarados.reduce((soma, valor) => soma + valor, 0));
+}
+
+/**
+ * Total da nota com o IPI somado (`vNF` = `vProd` − `vDesc` + … + `vIPI`, regra
+ * W16-10 do validador da SEFAZ).
+ *
+ * O IPI é imposto **por fora**: ele não está no preço da venda, é acrescido ao
+ * total do documento. Enquanto nenhum grupo tributário tiver alíquota de IPI
+ * — o estado de todos eles hoje, já que a coluna nasce nula em B1 — isto
+ * devolve exatamente `sale.totalAmount` e nada muda. Quando alguém cadastrar
+ * IPI, o total da nota passa a ser maior que o total da venda; isso é o que o
+ * leiaute exige, e mandar `vNF` sem o `vIPI` que os itens declaram é rejeição
+ * na validação.
+ */
+function totalComIpi(total: number, ipiValorTotal: number | undefined): number {
+  return ipiValorTotal === undefined ? total : toCents(total + ipiValorTotal);
 }
 
 export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[]): BuildPayloadResult {
@@ -307,7 +417,8 @@ export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[
 
   const resolved = resolveItemsForSale(sale, rules, query);
   if (!resolved.ok) return resolved;
-  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, pisValorTotal, cofinsValorTotal } = resolved.data;
+  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal } =
+    resolved.data;
 
   const localDestino = branch.uf === contact.uf ? 1 : 2;
 
@@ -346,11 +457,12 @@ export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[
     telefone_destinatario: contact.phone ?? undefined,
 
     valor_produtos: sale.subtotalAmount,
-    valor_total: sale.totalAmount,
+    valor_total: totalComIpi(sale.totalAmount, ipiValorTotal),
     valor_desconto: sale.discountAmount || undefined,
     valor_frete: sale.freightAmount || undefined,
     icms_base_calculo: icmsBaseCalculoTotal,
     icms_valor_total: icmsValorTotal,
+    valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
     modalidade_frete: sale.freightAmount > 0 ? 0 : 9,
@@ -442,7 +554,8 @@ export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow
 
   const resolved = resolveItemsForSale(sale, rules, query);
   if (!resolved.ok) return resolved;
-  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, pisValorTotal, cofinsValorTotal } = resolved.data;
+  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal } =
+    resolved.data;
 
   const payload: NfePayload = {
     natureza_operacao: sale.operationType?.trim() || "Venda de mercadoria",
@@ -467,11 +580,12 @@ export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow
     ...buildNfceDestinatarioFields(sale.contact),
 
     valor_produtos: sale.subtotalAmount,
-    valor_total: sale.totalAmount,
+    valor_total: totalComIpi(sale.totalAmount, ipiValorTotal),
     valor_desconto: sale.discountAmount || undefined,
     valor_frete: sale.freightAmount || undefined,
     icms_base_calculo: icmsBaseCalculoTotal,
     icms_valor_total: icmsValorTotal,
+    valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
     modalidade_frete: sale.freightAmount > 0 ? 0 : 9,
@@ -585,7 +699,8 @@ export function buildReturnNfePayload(saleReturn: SaleReturnForInvoice, rules: T
 
   const resolved = resolveItemsForSale(asSale, rules, query);
   if (!resolved.ok) return resolved;
-  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, pisValorTotal, cofinsValorTotal } = resolved.data;
+  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal } =
+    resolved.data;
 
   const payload: NfePayload = {
     natureza_operacao: "Devolução de venda",
@@ -622,10 +737,11 @@ export function buildReturnNfePayload(saleReturn: SaleReturnForInvoice, rules: T
     telefone_destinatario: contact.phone ?? undefined,
 
     valor_produtos: saleReturn.totalAmount,
-    valor_total: saleReturn.totalAmount,
+    valor_total: totalComIpi(saleReturn.totalAmount, ipiValorTotal),
     valor_desconto: saleReturn.discountAmount || undefined,
     icms_base_calculo: icmsBaseCalculoTotal,
     icms_valor_total: icmsValorTotal,
+    valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
     modalidade_frete: 9,

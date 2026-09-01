@@ -252,6 +252,8 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     icms_situacao_tributaria: item.icms_situacao_tributaria || null,
     icms_modalidade_base_calculo: item.icms_modalidade_base_calculo ?? null,
     icms_base: toNumberOrNull(item.icms_base_calculo),
+    // `pRedBC` (B1): a coluna existe desde A3 e só agora tem quem a preencha.
+    icms_reducao_base: toNumberOrNull(item.icms_reducao_base_calculo),
     icms_aliquota: toNumberOrNull(item.icms_aliquota),
     icms_valor: toNumberOrNull(item.icms_valor),
 

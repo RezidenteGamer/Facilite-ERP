@@ -634,18 +634,350 @@ export type Database = {
           },
         ]
       }
-      fiscal_documents: {
+      fiscal_document_events: {
         Row: {
+          ambiente: Database["public"]["Enums"]["fiscal_ambiente"]
           branch_id: string
-          cancel_justificativa: string | null
-          cancel_xml_content: string | null
-          cancel_xml_path: string | null
-          chave: string | null
+          correcao: string | null
           created_at: string
           created_by: string | null
+          fiscal_document_id: string | null
           id: string
+          justificativa: string | null
           mensagem_sefaz: string | null
+          model: Database["public"]["Enums"]["fiscal_document_model"] | null
+          numero_final: number | null
+          numero_inicial: number | null
+          occurred_at: string
+          protocolo: string | null
+          ref: string | null
+          request_payload: Json | null
+          response_payload: Json | null
+          sequencia: number | null
+          serie: string | null
+          status_sefaz: string | null
+          tipo: Database["public"]["Enums"]["fiscal_event_type"]
+          xml_content: string | null
+          xml_path: string | null
+        }
+        Insert: {
+          ambiente?: Database["public"]["Enums"]["fiscal_ambiente"]
+          branch_id: string
+          correcao?: string | null
+          created_at?: string
+          created_by?: string | null
+          fiscal_document_id?: string | null
+          id?: string
+          justificativa?: string | null
+          mensagem_sefaz?: string | null
+          model?: Database["public"]["Enums"]["fiscal_document_model"] | null
+          numero_final?: number | null
+          numero_inicial?: number | null
+          occurred_at?: string
+          protocolo?: string | null
+          ref?: string | null
+          request_payload?: Json | null
+          response_payload?: Json | null
+          sequencia?: number | null
+          serie?: string | null
+          status_sefaz?: string | null
+          tipo: Database["public"]["Enums"]["fiscal_event_type"]
+          xml_content?: string | null
+          xml_path?: string | null
+        }
+        Update: {
+          ambiente?: Database["public"]["Enums"]["fiscal_ambiente"]
+          branch_id?: string
+          correcao?: string | null
+          created_at?: string
+          created_by?: string | null
+          fiscal_document_id?: string | null
+          id?: string
+          justificativa?: string | null
+          mensagem_sefaz?: string | null
+          model?: Database["public"]["Enums"]["fiscal_document_model"] | null
+          numero_final?: number | null
+          numero_inicial?: number | null
+          occurred_at?: string
+          protocolo?: string | null
+          ref?: string | null
+          request_payload?: Json | null
+          response_payload?: Json | null
+          sequencia?: number | null
+          serie?: string | null
+          status_sefaz?: string | null
+          tipo?: Database["public"]["Enums"]["fiscal_event_type"]
+          xml_content?: string | null
+          xml_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_document_events_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_document_events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_document_events_fiscal_document_id_fkey"
+            columns: ["fiscal_document_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fiscal_document_items: {
+        Row: {
+          cbs_aliquota: number | null
+          cbs_base: number | null
+          cbs_valor: number | null
+          cclasstrib: string | null
+          cest: string | null
+          cfop: string | null
+          codigo_produto: string
+          cofins_aliquota: number | null
+          cofins_base: number | null
+          cofins_situacao_tributaria: string | null
+          cofins_valor: number | null
+          created_at: string
+          descricao: string
+          fcp_aliquota: number | null
+          fcp_base: number | null
+          fcp_valor: number | null
+          fiscal_document_id: string
+          ibs_aliquota: number | null
+          ibs_base: number | null
+          ibs_cbs_situacao_tributaria: string | null
+          ibs_valor: number | null
+          icms_aliquota: number | null
+          icms_base: number | null
+          icms_modalidade_base_calculo: string | null
+          icms_reducao_base: number | null
+          icms_situacao_tributaria: string | null
+          icms_st_aliquota: number | null
+          icms_st_base: number | null
+          icms_st_modalidade_base_calculo: string | null
+          icms_st_mva: number | null
+          icms_st_reducao_base: number | null
+          icms_st_valor: number | null
+          icms_valor: number | null
+          id: string
+          inclui_no_total: boolean
+          ipi_aliquota: number | null
+          ipi_base: number | null
+          ipi_codigo_enquadramento: string | null
+          ipi_situacao_tributaria: string | null
+          ipi_valor: number | null
+          ncm: string | null
+          numero_item: number
+          origem_mercadoria: string | null
+          pis_aliquota: number | null
+          pis_base: number | null
+          pis_situacao_tributaria: string | null
+          pis_valor: number | null
+          product_id: string | null
+          quantidade_comercial: number
+          quantidade_tributavel: number | null
+          unidade_comercial: string | null
+          unidade_tributavel: string | null
+          valor_bruto: number
+          valor_desconto: number
+          valor_frete: number
+          valor_outras_despesas: number
+          valor_seguro: number
+          valor_unitario_comercial: number
+          valor_unitario_tributavel: number | null
+        }
+        Insert: {
+          cbs_aliquota?: number | null
+          cbs_base?: number | null
+          cbs_valor?: number | null
+          cclasstrib?: string | null
+          cest?: string | null
+          cfop?: string | null
+          codigo_produto: string
+          cofins_aliquota?: number | null
+          cofins_base?: number | null
+          cofins_situacao_tributaria?: string | null
+          cofins_valor?: number | null
+          created_at?: string
+          descricao: string
+          fcp_aliquota?: number | null
+          fcp_base?: number | null
+          fcp_valor?: number | null
+          fiscal_document_id: string
+          ibs_aliquota?: number | null
+          ibs_base?: number | null
+          ibs_cbs_situacao_tributaria?: string | null
+          ibs_valor?: number | null
+          icms_aliquota?: number | null
+          icms_base?: number | null
+          icms_modalidade_base_calculo?: string | null
+          icms_reducao_base?: number | null
+          icms_situacao_tributaria?: string | null
+          icms_st_aliquota?: number | null
+          icms_st_base?: number | null
+          icms_st_modalidade_base_calculo?: string | null
+          icms_st_mva?: number | null
+          icms_st_reducao_base?: number | null
+          icms_st_valor?: number | null
+          icms_valor?: number | null
+          id?: string
+          inclui_no_total?: boolean
+          ipi_aliquota?: number | null
+          ipi_base?: number | null
+          ipi_codigo_enquadramento?: string | null
+          ipi_situacao_tributaria?: string | null
+          ipi_valor?: number | null
+          ncm?: string | null
+          numero_item: number
+          origem_mercadoria?: string | null
+          pis_aliquota?: number | null
+          pis_base?: number | null
+          pis_situacao_tributaria?: string | null
+          pis_valor?: number | null
+          product_id?: string | null
+          quantidade_comercial: number
+          quantidade_tributavel?: number | null
+          unidade_comercial?: string | null
+          unidade_tributavel?: string | null
+          valor_bruto: number
+          valor_desconto?: number
+          valor_frete?: number
+          valor_outras_despesas?: number
+          valor_seguro?: number
+          valor_unitario_comercial: number
+          valor_unitario_tributavel?: number | null
+        }
+        Update: {
+          cbs_aliquota?: number | null
+          cbs_base?: number | null
+          cbs_valor?: number | null
+          cclasstrib?: string | null
+          cest?: string | null
+          cfop?: string | null
+          codigo_produto?: string
+          cofins_aliquota?: number | null
+          cofins_base?: number | null
+          cofins_situacao_tributaria?: string | null
+          cofins_valor?: number | null
+          created_at?: string
+          descricao?: string
+          fcp_aliquota?: number | null
+          fcp_base?: number | null
+          fcp_valor?: number | null
+          fiscal_document_id?: string
+          ibs_aliquota?: number | null
+          ibs_base?: number | null
+          ibs_cbs_situacao_tributaria?: string | null
+          ibs_valor?: number | null
+          icms_aliquota?: number | null
+          icms_base?: number | null
+          icms_modalidade_base_calculo?: string | null
+          icms_reducao_base?: number | null
+          icms_situacao_tributaria?: string | null
+          icms_st_aliquota?: number | null
+          icms_st_base?: number | null
+          icms_st_modalidade_base_calculo?: string | null
+          icms_st_mva?: number | null
+          icms_st_reducao_base?: number | null
+          icms_st_valor?: number | null
+          icms_valor?: number | null
+          id?: string
+          inclui_no_total?: boolean
+          ipi_aliquota?: number | null
+          ipi_base?: number | null
+          ipi_codigo_enquadramento?: string | null
+          ipi_situacao_tributaria?: string | null
+          ipi_valor?: number | null
+          ncm?: string | null
+          numero_item?: number
+          origem_mercadoria?: string | null
+          pis_aliquota?: number | null
+          pis_base?: number | null
+          pis_situacao_tributaria?: string | null
+          pis_valor?: number | null
+          product_id?: string | null
+          quantidade_comercial?: number
+          quantidade_tributavel?: number | null
+          unidade_comercial?: string | null
+          unidade_tributavel?: string | null
+          valor_bruto?: number
+          valor_desconto?: number
+          valor_frete?: number
+          valor_outras_despesas?: number
+          valor_seguro?: number
+          valor_unitario_comercial?: number
+          valor_unitario_tributavel?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_document_items_fiscal_document_id_fkey"
+            columns: ["fiscal_document_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fiscal_document_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fiscal_documents: {
+        Row: {
+          ambiente: Database["public"]["Enums"]["fiscal_ambiente"]
+          branch_id: string
+          chave: string | null
+          chave_referenciada: string | null
+          consumidor_final: boolean | null
+          created_at: string
+          created_by: string | null
+          data_emissao: string | null
+          destinatario_bairro: string | null
+          destinatario_cep: string | null
+          destinatario_cnpj: string | null
+          destinatario_cpf: string | null
+          destinatario_indicador_ie: string | null
+          destinatario_inscricao_estadual: string | null
+          destinatario_logradouro: string | null
+          destinatario_municipio: string | null
+          destinatario_nome: string | null
+          destinatario_numero: string | null
+          destinatario_pais: string | null
+          destinatario_telefone: string | null
+          destinatario_uf: string | null
+          emitente_bairro: string | null
+          emitente_cep: string | null
+          emitente_cnpj: string | null
+          emitente_inscricao_estadual: string | null
+          emitente_logradouro: string | null
+          emitente_municipio: string | null
+          emitente_nome: string | null
+          emitente_nome_fantasia: string | null
+          emitente_numero: string | null
+          emitente_regime_tributario: string | null
+          emitente_uf: string | null
+          finalidade: number | null
+          id: string
+          indicador_presenca: number | null
+          informacoes_adicionais: string | null
+          local_destino: number | null
+          mensagem_sefaz: string | null
+          modalidade_frete: number | null
           model: Database["public"]["Enums"]["fiscal_document_model"]
+          natureza_operacao: string | null
           numero: string | null
           pdf_content: string | null
           pdf_path: string | null
@@ -657,21 +989,69 @@ export type Database = {
           serie: string | null
           status: Database["public"]["Enums"]["fiscal_document_status"]
           status_sefaz: string | null
+          tipo_documento: number | null
+          total_cbs: number | null
+          total_cofins: number | null
+          total_desconto: number | null
+          total_fcp: number | null
+          total_frete: number | null
+          total_ibs: number | null
+          total_icms: number | null
+          total_icms_base: number | null
+          total_icms_st: number | null
+          total_icms_st_base: number | null
+          total_ipi: number | null
+          total_nota: number | null
+          total_outras_despesas: number | null
+          total_pis: number | null
+          total_produtos: number | null
+          total_seguro: number | null
           updated_at: string
           xml_content: string | null
           xml_path: string | null
         }
         Insert: {
+          ambiente?: Database["public"]["Enums"]["fiscal_ambiente"]
           branch_id: string
-          cancel_justificativa?: string | null
-          cancel_xml_content?: string | null
-          cancel_xml_path?: string | null
           chave?: string | null
+          chave_referenciada?: string | null
+          consumidor_final?: boolean | null
           created_at?: string
           created_by?: string | null
+          data_emissao?: string | null
+          destinatario_bairro?: string | null
+          destinatario_cep?: string | null
+          destinatario_cnpj?: string | null
+          destinatario_cpf?: string | null
+          destinatario_indicador_ie?: string | null
+          destinatario_inscricao_estadual?: string | null
+          destinatario_logradouro?: string | null
+          destinatario_municipio?: string | null
+          destinatario_nome?: string | null
+          destinatario_numero?: string | null
+          destinatario_pais?: string | null
+          destinatario_telefone?: string | null
+          destinatario_uf?: string | null
+          emitente_bairro?: string | null
+          emitente_cep?: string | null
+          emitente_cnpj?: string | null
+          emitente_inscricao_estadual?: string | null
+          emitente_logradouro?: string | null
+          emitente_municipio?: string | null
+          emitente_nome?: string | null
+          emitente_nome_fantasia?: string | null
+          emitente_numero?: string | null
+          emitente_regime_tributario?: string | null
+          emitente_uf?: string | null
+          finalidade?: number | null
           id?: string
+          indicador_presenca?: number | null
+          informacoes_adicionais?: string | null
+          local_destino?: number | null
           mensagem_sefaz?: string | null
+          modalidade_frete?: number | null
           model?: Database["public"]["Enums"]["fiscal_document_model"]
+          natureza_operacao?: string | null
           numero?: string | null
           pdf_content?: string | null
           pdf_path?: string | null
@@ -683,21 +1063,69 @@ export type Database = {
           serie?: string | null
           status: Database["public"]["Enums"]["fiscal_document_status"]
           status_sefaz?: string | null
+          tipo_documento?: number | null
+          total_cbs?: number | null
+          total_cofins?: number | null
+          total_desconto?: number | null
+          total_fcp?: number | null
+          total_frete?: number | null
+          total_ibs?: number | null
+          total_icms?: number | null
+          total_icms_base?: number | null
+          total_icms_st?: number | null
+          total_icms_st_base?: number | null
+          total_ipi?: number | null
+          total_nota?: number | null
+          total_outras_despesas?: number | null
+          total_pis?: number | null
+          total_produtos?: number | null
+          total_seguro?: number | null
           updated_at?: string
           xml_content?: string | null
           xml_path?: string | null
         }
         Update: {
+          ambiente?: Database["public"]["Enums"]["fiscal_ambiente"]
           branch_id?: string
-          cancel_justificativa?: string | null
-          cancel_xml_content?: string | null
-          cancel_xml_path?: string | null
           chave?: string | null
+          chave_referenciada?: string | null
+          consumidor_final?: boolean | null
           created_at?: string
           created_by?: string | null
+          data_emissao?: string | null
+          destinatario_bairro?: string | null
+          destinatario_cep?: string | null
+          destinatario_cnpj?: string | null
+          destinatario_cpf?: string | null
+          destinatario_indicador_ie?: string | null
+          destinatario_inscricao_estadual?: string | null
+          destinatario_logradouro?: string | null
+          destinatario_municipio?: string | null
+          destinatario_nome?: string | null
+          destinatario_numero?: string | null
+          destinatario_pais?: string | null
+          destinatario_telefone?: string | null
+          destinatario_uf?: string | null
+          emitente_bairro?: string | null
+          emitente_cep?: string | null
+          emitente_cnpj?: string | null
+          emitente_inscricao_estadual?: string | null
+          emitente_logradouro?: string | null
+          emitente_municipio?: string | null
+          emitente_nome?: string | null
+          emitente_nome_fantasia?: string | null
+          emitente_numero?: string | null
+          emitente_regime_tributario?: string | null
+          emitente_uf?: string | null
+          finalidade?: number | null
           id?: string
+          indicador_presenca?: number | null
+          informacoes_adicionais?: string | null
+          local_destino?: number | null
           mensagem_sefaz?: string | null
+          modalidade_frete?: number | null
           model?: Database["public"]["Enums"]["fiscal_document_model"]
+          natureza_operacao?: string | null
           numero?: string | null
           pdf_content?: string | null
           pdf_path?: string | null
@@ -709,6 +1137,23 @@ export type Database = {
           serie?: string | null
           status?: Database["public"]["Enums"]["fiscal_document_status"]
           status_sefaz?: string | null
+          tipo_documento?: number | null
+          total_cbs?: number | null
+          total_cofins?: number | null
+          total_desconto?: number | null
+          total_fcp?: number | null
+          total_frete?: number | null
+          total_ibs?: number | null
+          total_icms?: number | null
+          total_icms_base?: number | null
+          total_icms_st?: number | null
+          total_icms_st_base?: number | null
+          total_ipi?: number | null
+          total_nota?: number | null
+          total_outras_despesas?: number | null
+          total_pis?: number | null
+          total_produtos?: number | null
+          total_seguro?: number | null
           updated_at?: string
           xml_content?: string | null
           xml_path?: string | null
@@ -2026,6 +2471,7 @@ export type Database = {
         Row: {
           aliquota_cofins: number | null
           aliquota_icms: number | null
+          aliquota_ipi: number | null
           aliquota_pis: number | null
           cclasstrib: string | null
           code: string
@@ -2034,13 +2480,16 @@ export type Database = {
           cst_cofins: string | null
           cst_ibs_cbs: string | null
           cst_icms: string | null
+          cst_ipi: string | null
           cst_pis: string | null
           id: string
           name: string
+          reducao_base_icms: number | null
         }
         Insert: {
           aliquota_cofins?: number | null
           aliquota_icms?: number | null
+          aliquota_ipi?: number | null
           aliquota_pis?: number | null
           cclasstrib?: string | null
           code: string
@@ -2049,13 +2498,16 @@ export type Database = {
           cst_cofins?: string | null
           cst_ibs_cbs?: string | null
           cst_icms?: string | null
+          cst_ipi?: string | null
           cst_pis?: string | null
           id?: string
           name: string
+          reducao_base_icms?: number | null
         }
         Update: {
           aliquota_cofins?: number | null
           aliquota_icms?: number | null
+          aliquota_ipi?: number | null
           aliquota_pis?: number | null
           cclasstrib?: string | null
           code?: string
@@ -2064,9 +2516,11 @@ export type Database = {
           cst_cofins?: string | null
           cst_ibs_cbs?: string | null
           cst_icms?: string | null
+          cst_ipi?: string | null
           cst_pis?: string | null
           id?: string
           name?: string
+          reducao_base_icms?: number | null
         }
         Relationships: []
       }
@@ -3032,6 +3486,7 @@ export type Database = {
         Returns: {
           aliquota_cofins: number | null
           aliquota_icms: number | null
+          aliquota_ipi: number | null
           aliquota_pis: number | null
           cclasstrib: string | null
           code: string
@@ -3040,9 +3495,11 @@ export type Database = {
           cst_cofins: string | null
           cst_ibs_cbs: string | null
           cst_icms: string | null
+          cst_ipi: string | null
           cst_pis: string | null
           id: string
           name: string
+          reducao_base_icms: number | null
         }[]
         SetofOptions: {
           from: "*"
@@ -3102,6 +3559,7 @@ export type Database = {
       financial_entry_origin_kind: "manual" | "venda" | "compra" | "devolucao"
       financial_entry_status: "aberto" | "baixado" | "cancelado"
       financial_entry_type: "a_pagar" | "a_receber"
+      fiscal_ambiente: "homologacao" | "producao"
       fiscal_document_model: "nfe" | "nfce"
       fiscal_document_status:
         | "processando_autorizacao"
@@ -3109,6 +3567,12 @@ export type Database = {
         | "cancelado"
         | "erro_autorizacao"
         | "denegado"
+      fiscal_event_type:
+        | "autorizacao"
+        | "rejeicao"
+        | "cancelamento"
+        | "carta_correcao"
+        | "inutilizacao"
       purchase_status: "confirmed" | "cancelled"
       sale_order_status: "aberto" | "convertido" | "cancelado"
       sale_payment_method:
@@ -3254,6 +3718,7 @@ export const Constants = {
       financial_entry_origin_kind: ["manual", "venda", "compra", "devolucao"],
       financial_entry_status: ["aberto", "baixado", "cancelado"],
       financial_entry_type: ["a_pagar", "a_receber"],
+      fiscal_ambiente: ["homologacao", "producao"],
       fiscal_document_model: ["nfe", "nfce"],
       fiscal_document_status: [
         "processando_autorizacao",
@@ -3261,6 +3726,13 @@ export const Constants = {
         "cancelado",
         "erro_autorizacao",
         "denegado",
+      ],
+      fiscal_event_type: [
+        "autorizacao",
+        "rejeicao",
+        "cancelamento",
+        "carta_correcao",
+        "inutilizacao",
       ],
       purchase_status: ["confirmed", "cancelled"],
       sale_order_status: ["aberto", "convertido", "cancelado"],

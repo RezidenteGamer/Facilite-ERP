@@ -73,8 +73,16 @@ export function buildSimulatedXml(issue: SimulatedIssue): FiscalArtifact {
           <ICMS>
             ${tag("orig", item.icms_origem)}
             ${tag("CST", item.icms_situacao_tributaria)}
+            ${item.icms_reducao_base_calculo === undefined ? "" : `<pRedBC>${money(item.icms_reducao_base_calculo)}</pRedBC>`}
             ${item.icms_valor === undefined ? "" : `<vICMS>${money(item.icms_valor)}</vICMS>`}
           </ICMS>
+          ${
+            item.ipi_situacao_tributaria
+              ? `<IPI>${tag("CST", item.ipi_situacao_tributaria)}${
+                  item.ipi_valor === undefined ? "" : `<vIPI>${money(item.ipi_valor)}</vIPI>`
+                }</IPI>`
+              : ""
+          }
           ${item.pis_situacao_tributaria ? `<PIS>${tag("CST", item.pis_situacao_tributaria)}</PIS>` : ""}
           ${item.cofins_situacao_tributaria ? `<COFINS>${tag("CST", item.cofins_situacao_tributaria)}</COFINS>` : ""}
         </imposto>
