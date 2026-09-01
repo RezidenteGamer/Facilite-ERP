@@ -2169,3 +2169,215 @@ que prova isso e quebra o build se alguém remover a trava no futuro.
   mesmo assim (best-effort, cobre o caso de nunca ter sido vendido), mas a
   partir da primeira execução bem-sucedida esse delete sempre falha em
   silêncio — de propósito, documentado em `tests/concurrency/README.md`.
+
+### Decisão arquitetural: contrato fiscal de 7 métodos e núcleo compartilhado (A2) + modelo canônico do documento fiscal (A3) (01/09/2026)
+
+Etapa 1 do "Mínimo pra vender", tarefas A2 e A3, feitas juntas porque uma
+descreve o contrato e a outra o dado que esse contrato produz. **A1 (a Edge
+Function `fiscal-emit` e a troca dos três pontos de emissão do front) não foi
+começada** — é prompt separado, e as duas tarefas aqui foram desenhadas para
+não quebrar nada no intervalo entre elas e a A1.
+
+#### A2 — o núcleo fiscal mudou de casa, e o contrato de 3 para 7 métodos
+
+O alias `@fiscal-core` existia desde 29/08/2026 em `vite.config.ts` e
+`vitest.config.ts` apontando para uma pasta vazia. Agora ela tem código: sete
+arquivos saíram de `src/lib/fiscal/` para `supabase/functions/_shared/fiscal/`
+(`git mv`, o histórico segue junto), e os imports relativos ganharam `.ts`
+explícito — exigência do Deno, aceita sem reclamar pelo Vite e pelo `tsc`
+(`allowImportingTsExtensions` já estava ligado).
+
+- **`tsconfig.app.json` ganhou `paths`** para o mesmo alias. Sem isso `tsc -b`
+  não resolveria `@fiscal-core/*` a partir de `src/`, e o build passaria a
+  depender só do Vite. São **quatro** arquivos que precisam concordar sobre esse
+  alias agora (`vite.config.ts`, `vitest.config.ts`, `tsconfig.app.json`,
+  `tsconfig.tests.json`) — está anotado em cada um.
+- **`src/lib/fiscal/*` continua existindo como camada fina de reexport.**
+  Nenhum importador precisou mudar: `invoiceMapping.ts`, `ProductsPage.tsx`,
+  `CnpjLookupField.tsx`, `useInvoicesData.ts`, `useSaleReturnsData.ts`,
+  `fiscalDocumentsRepository.ts`, os três `scripts/*-check.mjs` e
+  `tests/unit/taxRules.test.ts` seguem importando de onde importavam.
+  `types.ts` usa `export type *` (e não `export *`) porque lá não há nada em
+  tempo de execução — o arquivo some inteiro na compilação, como sumia antes.
+- **O contrato saiu de `types.ts` e virou
+  `supabase/functions/_shared/fiscal/provider.ts`**, ao lado do erro que ele
+  pode lançar. `types.ts` ficou só com dado (payload e resultados).
+- **Sete métodos**: os três de sempre (`emit`, `query`, `cancel`) mais
+  `correctionLetter`, `invalidateRange`, `getXml` e `getDanfe`. Com isso a ação
+  "Carta de correção" de `InvoicesPage.tsx` — desabilitada desde a etapa 8
+  justamente porque o contrato não a cobria — passa a ter destino.
+
+##### Um desvio do desenho de partida do plano, pelo mesmo critério da etapa F1
+
+`getXml`/`getDanfe` devolvem **`FiscalArtifact | null`**, não `FiscalArtifact`.
+Uma nota em `processando_autorizacao` ainda não tem XML e uma em
+`erro_autorizacao` nunca vai ter — os dois são estados legítimos do documento,
+não erro de programa. Devolver `null` deixa a tela dizer "ainda não disponível"
+sem `try/catch`, na mesma filosofia de "rejeição não é exceção" que rege o resto
+da interface; lançar ficaria reservado ao transporte, e aí não haveria como
+distinguir "sem artefato" de "a rede caiu".
+
+##### `createFocusProvider()` e o fim do `"focus-nfe": null`
+
+O registry (`@fiscal-core/registry.ts`) não tem mais entrada valendo `null`.
+`createFocusProvider()` existe, satisfaz o contrato inteiro e **lança
+`FiscalNotConfiguredError` nas sete operações** até a tarefa A12. Isso inverte
+um modo de falha que estava errado: até aqui,
+`VITE_FISCAL_PROVIDER="focus-nfe"` caía de volta no simulado com um aviso no
+console — ou seja, quem configurasse o provedor real seguia emitindo documento
+sem valor fiscal, e o único sinal era uma linha de log que ninguém lê. Agora
+recebe um erro explícito na operação exata que tentou (e
+`emitInvoiceForSale`/`emitFiscalDocumentForSale` já capturam qualquer exceção e
+a transformam em mensagem acionável na tela — nada quebra visualmente).
+**Valor desconhecido continua caindo no simulado com aviso**: esse fallback é o
+que protege contra erro de digitação, e é diferente de um nome válido escrito de
+propósito.
+
+- **A leitura da variável de ambiente ficou no front**, não no núcleo: no
+  navegador é `import.meta.env` (Vite), na Edge Function será `Deno.env`, e um
+  dos dois quebraria o outro. O registry recebe o valor já lido
+  (`resolveFiscalProviderId`). A decisão de a configuração ser env var, e não
+  linha no banco, continua valendo (etapa F1).
+
+##### O simulado ganhou os quatro métodos, com a mesma coerência de estado dos três antigos
+
+- **Carta de correção**: texto de 15 a 1000 caracteres (a regra da CC-e é mais
+  folgada que a do cancelamento, 15 a 255, de propósito); só para documento
+  `autorizado`; numera `nSeqEvento` de 1 a 20 e recusa a vigésima primeira;
+  **não muda o status do documento** — é o que a distingue do cancelamento.
+- **Inutilização de faixa**: idempotente por `ref` como a emissão; recusa faixa
+  invertida, faixa sobreposta a outra já inutilizada (SEFAZ 563) e faixa que
+  contém número que já virou nota; e **a numeração seguinte pula a faixa
+  inutilizada** — número inutilizado não volta a ser usado, que é exatamente o
+  que a inutilização declara. O cUF do XML vem da opção de reserva porque o
+  pedido de inutilização não carrega UF nenhuma — nem aqui nem no provedor real,
+  onde a SEFAZ a deriva do cadastro do CNPJ na conta.
+- **`getXml`/`getDanfe`** devolvem o artefato guardado, ou `null`.
+- **Os dois métodos de evento ainda precisam de conferência de grafia contra a
+  documentação da Focus.** Os campos de emissão foram checados linha a linha na
+  etapa F1; `correctionLetter`/`invalidateRange` foram modelados no formato dos
+  endpoints de evento (`POST /v2/nfe/<ref>/carta_correcao`,
+  `POST /v2/nfe/inutilizacao`) **sem** a mesma conferência. Quem fizer A12
+  reconfere, não assume — está anotado em `focusProvider.ts`.
+
+##### Bateria nova: `tests/unit/fiscalProvider.test.ts`
+
+19 testes, sem banco e sem login (o simulado não faz I/O), rodando em
+`npm test`. Herda o papel de `scripts/fiscal-cycle-check.mjs` para a parte que é
+do provedor — o script continua existindo porque exercita o mapeamento a partir
+de uma venda real, que é outra coisa. Cobre o ciclo dos três métodos antigos, os
+quatro novos com todos os caminhos de recusa, os sete métodos do provedor Focus
+lançando, e o registry.
+
+##### Três bugs que a revisão (`/code-review high`) pegou, todos corrigidos
+
+1. **`invalidateRange` ignorava `request.serie`** e usava a série em que o
+   provedor emite. Inutilizar a faixa 10–20 da série 2 gravava a faixa como
+   sendo da série 1, gerava XML com `<serie>1</serie>` e fazia um pedido
+   legítimo posterior para a série 1 ser recusado com 563. Corrigido, com teste
+   de regressão que é o único caso da bateria que existe só por causa disto.
+2. **`configured in PROVIDER_FACTORIES`** (a checagem que existia desde a etapa
+   F1) aceitava propriedade herdada de `Object.prototype`:
+   `VITE_FISCAL_PROVIDER="toString"` passava pelo `in`, resolvia para
+   `Object.prototype.toString` — truthy, então nem o segundo guarda pegava — e
+   `getFiscalProvider()` devolvia uma string no lugar de um provedor, quebrando
+   a emissão com "provider.emit is not a function" em vez de cair no simulado.
+   Virou `Object.prototype.hasOwnProperty.call(...)`.
+3. **`emit`/`query` vazavam o estado interno** do simulado (`{ ...stored }`
+   entregava `protocoloNumerico`, e os campos novos de A2 teriam ampliado o
+   vazamento). Nasceu `toDocument()`, que lista os campos do contrato um a um —
+   custa uma linha por campo e, em troca, quebra a compilação se
+   `FiscalDocument` ganhar um campo novo.
+
+#### A3 — o XML deixa de ser fonte da verdade e vira saída do modelo
+
+`supabase/migrations/00000000000003_a3_modelo_canonico_documento_fiscal.sql`.
+**A migration NÃO foi aplicada no banco remoto** — é revisada em conversa
+própria antes de ir para produção, mesmo cuidado das tarefas anteriores.
+
+Até aqui `fiscal_documents` guardava o **resultado** da emissão (chave,
+protocolo, status, XML) e nada do **conteúdo**: emitente, destinatário, itens e
+impostos só existiam dentro do `NfePayload` montado em memória por
+`invoiceMapping.ts`, e o único lugar onde sobreviviam era dentro da string do
+XML — que, no provedor simulado, é gerada no navegador. Não dava para responder
+"quanto de ICMS essa nota destacou no item 2?" sem parsear XML, e reemitir
+dependia de remontar o payload a partir de uma venda que pode ter mudado desde
+então.
+
+- **`fiscal_documents` ganhou o cabeçalho da nota**: `ambiente` (enum novo
+  `fiscal_ambiente`, default `homologacao` — falha fechado), `data_emissao`,
+  `natureza_operacao`, `tipo_documento`, `finalidade`, `consumidor_final`,
+  `indicador_presenca`, `local_destino`, `modalidade_frete`,
+  `chave_referenciada`, o snapshot de emitente (11 colunas) e destinatário (13),
+  e 16 `total_*`. Tudo nulável: **nenhuma linha existente ganha snapshot
+  retroativo**, porque não há de onde tirar o dado sem inventá-lo.
+- **Snapshot, e não FK**, para emitente e destinatário — mesmo raciocínio já
+  registrado para o endereço de venda (13/08/2026): a nota descreve o que foi
+  declarado à SEFAZ naquele momento, e uma FK a faria mudar retroativamente
+  quando o cadastro mudasse.
+- **`fiscal_document_items`** (nova): uma linha por item, com o snapshot do
+  produto (`product_id` é FK só como rastro, `on delete set null`) e as colunas
+  por imposto que a Etapa 2 vai preencher — ICMS, ICMS-ST, FCP, PIS, COFINS,
+  IPI, IBS e CBS. **Nulo aqui significa "não calculado", nunca zero.** É o lugar
+  canônico do CFOP do item, que hoje é gravado em `sale_items.cfop` depois da
+  autorização (quem para de escrever lá é a A1).
+  - **Redução de base só existe para ICMS e ICMS-ST** (`pRedBC`/`pRedBCST`).
+    PIS/COFINS/IPI/IBS/CBS não têm campo equivalente no schema da SEFAZ, então
+    não ganharam coluna — seria dado sem destino no XML. É o único ponto em que
+    a migration não segue ao pé da letra o "base, redução, alíquota e valor para
+    todos" da instrução.
+- **`fiscal_document_events`** (nova): autorização, rejeição, cancelamento,
+  carta de correção e inutilização, com `request_payload`/`response_payload`
+  crus e o XML do evento.
+  - **É a única das duas tabelas novas com `branch_id` próprio**, e isso não é
+    inconsistência: quatro dos cinco tipos pertencem a um documento e herdariam
+    a filial por ele, mas **a inutilização não tem documento nenhum** — ela
+    declara uma faixa de números que nunca virou nota. Sem `branch_id`, essas
+    linhas ficariam sem âncora de RLS. `fiscal_document_id` é nulável, com
+    `CHECK` amarrando as duas formas, e o trigger
+    `fiscal_document_events_branch_matches` garante que, quando há documento, a
+    filial dos dois é a mesma — a mesma disciplina de `create_sale`, que valida
+    antes de confiar.
+- **RLS**: uma policy só em cada tabela nova, `select`, com
+  `has_permission('notas-emitidas', 'view')` + `has_branch_access`. **Nenhuma
+  policy de insert/update/delete**, mais `revoke` explícito de
+  INSERT/UPDATE/DELETE para `anon`/`authenticated` por cima — a proteção não
+  depende de uma camada só. Quem escreve é a Edge Function (A1), com
+  `service_role`, que não passa por RLS.
+
+##### O que a migration deliberadamente NÃO faz, e por quê
+
+As duas coisas têm o mesmo motivo: **não quebrar o sistema no intervalo entre
+A3 e A1.**
+
+- **Não remove as colunas `cancel_*` de `fiscal_documents`**, que
+  `fiscal_document_events` torna redundantes. `persistCancelResult`
+  (`fiscalDocumentsRepository.ts`) ainda escreve nelas; removê-las agora
+  quebraria o cancelamento hoje. Ficaram marcadas como obsoletas por
+  `comment on column`, e o `drop` é a última etapa da A1.
+- **Não remove as policies de `insert`/`update` de `fiscal_documents`**, pelo
+  mesmo motivo: hoje quem grava a nota é o cliente sob RLS. Elas saem quando a
+  Edge Function assumir a escrita, e aí `fiscal_documents` fica igual às duas
+  tabelas novas.
+
+#### Testado
+
+`npm run build`, `npm run lint` e `npm test` limpos — o lint só com os avisos
+pré-existentes (quatro `only-export-components`, um `no-useless-escape`, um
+`exhaustive-deps`), e o `npm test` com 28 testes passando mais as duas baterias
+que dependem de credencial em `.env.local` (`tests/isolation` e
+`tests/concurrency`) falhando alto por falta de configuração, como é o desenho
+delas. **Nada foi testado no navegador**: A2 não tem superfície de UI (nenhuma
+tela passou a chamar os quatro métodos novos — isso é A1/A4) e A3 é uma
+migration não aplicada.
+
+#### Fora de escopo
+
+A1 inteira (Edge Function `fiscal-emit`, tirar a geração fiscal do navegador,
+mudar os três pontos de emissão do front, gravar nas tabelas novas, remover as
+colunas `cancel_*` e as policies de escrita de `fiscal_documents`); A12 (a
+chamada HTTP de verdade da Focus); ligar as ações "Carta de correção" e
+"Inutilizar numeração" em `InvoicesPage.tsx` (o contrato passou a suportar, a
+tela ainda não expõe); o motor tributário que preenche as colunas por imposto de
+`fiscal_document_items` (Etapa 2); FCP-ST (`vFCPST`) por item — cabe no mesmo
+padrão das colunas de FCP quando virar assunto; aplicar a migration no banco.

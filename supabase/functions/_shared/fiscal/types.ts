@@ -1,0 +1,414 @@
+/**
+ * Tipos de dado da emissão fiscal (NF-e / NFC-e) — payload de entrada e
+ * resultados de saída. **O contrato em si (`FiscalProvider`) mora em
+ * `./provider.ts`**, ao lado do erro que ele pode lançar.
+ *
+ * Mesmo papel que `ModuleDataRepository<T>` cumpre para dado de módulo: os
+ * módulos que emitem nota (Notas Emitidas, NFC-e, Devolução) falam só com
+ * esse contrato, nunca com um provedor concreto. Hoje a única implementação
+ * completa é o `SimulatedFiscalProvider`, que não faz chamada de rede nenhuma;
+ * `createFocusProvider()` já existe no mesmo contrato, mas ainda é esqueleto
+ * (todos os métodos lançam `FiscalNotConfiguredError` até a tarefa A12).
+ *
+ * ## Por que este arquivo mora em `supabase/functions/_shared/fiscal/`
+ *
+ * Desde A2 (01/09/2026) o núcleo fiscal é compartilhado entre as duas bordas:
+ * a Edge Function que emite (Deno, que exige a extensão `.ts` explícita nos
+ * imports — daí `./types.ts` e não `./types`) e o front, que o consome pelo
+ * alias `@fiscal-core` **só para prévia na tela, nunca para emitir**.
+ * `src/lib/fiscal/*` continua existindo como camada fina de reexport, para
+ * quem já importava de lá não quebrar.
+ *
+ * ## Por que o payload usa snake_case em português
+ *
+ * `NfePayload` reproduz **literalmente** o corpo JSON que a API da Focus NFe
+ * espera (referência: https://doc.focusnfe.com.br/reference/emitir_nfe e a
+ * tabela completa de campos em https://campos.focusnfe.com.br/nfe/NotaFiscalXML.html).
+ * Isso quebra a convenção camelCase do resto do projeto de propósito, e é a
+ * decisão central desta etapa: a diferença entre o simulado e o real tem que
+ * ser **transporte** (gerar localmente vs. um POST numa API), não **estrutura**.
+ * Com os nomes iguais aos do provedor, o `emit` do provedor real é literalmente
+ * um `JSON.stringify(payload)`; com nomes inventados agora, a troca depois
+ * viraria reescrita de todo mundo que monta payload.
+ *
+ * Os nomes também não são invenção da Focus: são a tradução 1:1 do schema
+ * oficial da NF-e da SEFAZ (grupos `ide`, `emit`, `dest`, `det`/`prod`/`imposto`,
+ * `total`), que é o denominador comum de qualquer provedor sério. PlugNotas,
+ * Nuvem Fiscal e NFe.io expõem os mesmos conceitos com grafias próprias — a
+ * conversão para eles seria um mapa de nomes, não uma remodelagem.
+ *
+ * ## Por que o retorno NÃO usa snake_case
+ *
+ * O caminho inverso: o resultado é pequeno (uma dúzia de campos) e é o que os
+ * nossos módulos guardam e exibem. Normalizar aqui custa uma função de adaptação
+ * dentro do provedor real, e é justamente o que permite um segundo provedor
+ * (com outros nomes de resposta) entrar sem tocar em Notas Emitidas. O nome
+ * correspondente na Focus está anotado campo a campo abaixo.
+ */
+
+/** Modelo do documento: 55 = NF-e, 65 = NFC-e. Decide o endpoint no provedor real. */
+export type FiscalModel = "nfe" | "nfce";
+
+/**
+ * Estados possíveis de um documento, com os mesmos nomes que a Focus usa.
+ *
+ * `processando_autorizacao` existe no tipo mesmo o simulado nunca devolvendo
+ * esse valor: a emissão real é **assíncrona por padrão** (a API responde 202 e
+ * a autorização sai depois, por consulta ou webhook). Deixar o estado de fora
+ * faria os módulos nascerem sem tratar o caso mais comum do provedor real.
+ */
+export type FiscalStatus =
+  | "processando_autorizacao"
+  | "autorizado"
+  | "cancelado"
+  | "erro_autorizacao"
+  | "denegado"
+  | "nao_encontrado";
+
+/** Estados possíveis de um pedido de cancelamento (resposta do DELETE na Focus). */
+export type FiscalCancelStatus = "cancelado" | "erro_cancelamento" | "nao_encontrado";
+
+/**
+ * Estados possíveis dos **eventos que não são cancelamento** — carta de
+ * correção e inutilização de faixa (A2, 01/09/2026).
+ *
+ * Vocabulário próprio, e não `FiscalCancelStatus` reaproveitado, porque
+ * "cancelado" não descreve o que acontece nos dois: uma CC-e registrada não
+ * cancela nada, e uma faixa inutilizada tampouco. `registrado` é o termo que a
+ * própria SEFAZ usa no retorno dos dois eventos ("Evento registrado e vinculado
+ * a NF-e" / "Inutilização de número homologada").
+ */
+export type FiscalEventStatus = "registrado" | "erro_evento" | "nao_encontrado";
+
+/**
+ * Um arquivo produzido pela emissão (XML da nota, DANFE/DANFCE, XML de
+ * cancelamento).
+ *
+ * Os dois campos são excludentes e nomeiam exatamente a diferença de transporte:
+ * o simulado **gera o conteúdo localmente** (`content` preenchido, `path` nulo);
+ * a Focus **guarda o arquivo no servidor dela** e devolve o caminho de download
+ * (`path` preenchido — `caminho_xml_nota_fiscal` / `caminho_danfe` —, `content`
+ * nulo até alguém baixar). Quem exibe escreve um helper só, que serve os dois.
+ */
+export type FiscalArtifact = {
+  content: string | null;
+  path: string | null;
+  contentType: string;
+};
+
+/**
+ * O documento fiscal do ponto de vista de quem consome esta interface.
+ * Entre parênteses, o campo correspondente na resposta da Focus.
+ */
+export type FiscalDocument = {
+  /** Identificador gerado por nós (Focus: `ref`) — ver `FiscalEmitRequest.ref`. */
+  ref: string;
+  model: FiscalModel;
+  status: FiscalStatus;
+  /** Chave de acesso de 44 dígitos (Focus: `chave_nfe`). Nula enquanto não autorizada. */
+  chave: string | null;
+  /** Número sequencial da nota (Focus: `numero`). */
+  numero: string | null;
+  /** Série (Focus: `serie`). */
+  serie: string | null;
+  /** Protocolo de autorização da SEFAZ (Focus: `protocolo`). */
+  protocolo: string | null;
+  /** Código de retorno da SEFAZ, ex.: "100" (Focus: `status_sefaz`). */
+  statusSefaz: string | null;
+  /** Mensagem legível da SEFAZ (Focus: `mensagem_sefaz`). */
+  mensagemSefaz: string | null;
+  /** XML da nota autorizada (Focus: `caminho_xml_nota_fiscal`). */
+  xml: FiscalArtifact | null;
+  /** DANFE/DANFCE para impressão (Focus: `caminho_danfe`). */
+  pdf: FiscalArtifact | null;
+  /** XML do evento de cancelamento (Focus: `caminho_xml_cancelamento`). */
+  xmlCancelamento: FiscalArtifact | null;
+  /**
+   * URL de consulta do QR Code (Focus: `qrcode_url`) — **só existe para NFC-e**;
+   * `null` em documentos NF-e. O CSC (Código de Segurança do Contribuinte) que
+   * assina o QR Code **não é campo de payload nem de resposta**: no provedor
+   * real ele é configurado por fora, por CNPJ+UF, direto no painel da Focus —
+   * não viaja em `NfePayload` nem em `FiscalDocument` (confirmado contra a
+   * documentação pública da Focus antes de desenhar este campo).
+   */
+  qrCodeUrl: string | null;
+};
+
+/**
+ * Resultado de um cancelamento. Mais estreito que `FiscalDocument` de propósito:
+ * é o que a Focus devolve no DELETE (status + retorno da SEFAZ + XML do evento),
+ * sem repetir chave/número/protocolo que quem cancelou já tem em mãos.
+ */
+export type FiscalCancelResult = {
+  ref: string;
+  status: FiscalCancelStatus;
+  statusSefaz: string | null;
+  mensagemSefaz: string | null;
+  xmlCancelamento: FiscalArtifact | null;
+};
+
+export type FiscalEmitRequest = {
+  /**
+   * Identificador da emissão **gerado por nós** e único para sempre (Focus: `ref`,
+   * passado na query string do POST e usado como chave do GET e do DELETE).
+   *
+   * Este é o desvio mais importante em relação ao desenho de partida do plano,
+   * que passava a `chave` para `cancel`/`query`. No provedor real a chave de
+   * acesso **não serve como identificador**: ela só existe depois da autorização,
+   * e uma emissão que ainda está processando (ou que falhou) não tem chave
+   * nenhuma — mas precisa ser consultada do mesmo jeito. Manter `chave` como
+   * chave de busca obrigaria o provedor real a manter um mapa chave→ref e
+   * deixaria a consulta de nota em processamento sem resposta possível.
+   */
+  ref: string;
+  model: FiscalModel;
+  payload: NfePayload;
+};
+
+export type FiscalCancelRequest = {
+  ref: string;
+  /** Focus: `justificativa`, obrigatória, de 15 a 255 caracteres (regra da SEFAZ). */
+  justificativa: string;
+};
+
+/**
+ * Resultado de um evento que não é cancelamento: carta de correção e
+ * inutilização de faixa (A2, 01/09/2026).
+ *
+ * Um tipo só para os dois, e não um por evento, porque o que volta é
+ * literalmente o mesmo conjunto: o retorno da SEFAZ (código + mensagem), o
+ * protocolo do evento, o número sequencial (quando o evento tem um) e o XML
+ * do próprio evento. O que diferencia CC-e de inutilização está na
+ * **requisição**, não na resposta — e é lá que os tipos divergem.
+ */
+export type FiscalEventResult = {
+  /** A mesma `ref` da requisição — identifica o evento, não o documento. */
+  ref: string;
+  status: FiscalEventStatus;
+  /** Código de retorno da SEFAZ, ex.: "135" (Focus: `status_sefaz`). */
+  statusSefaz: string | null;
+  mensagemSefaz: string | null;
+  /** Protocolo do evento (Focus: `protocolo`). Nulo quando o evento foi recusado. */
+  protocolo: string | null;
+  /**
+   * Número sequencial do evento — a CC-e é numerada de 1 a 20 por NF-e (regra
+   * da SEFAZ), e é isso que distingue a terceira correção da primeira.
+   * `null` na inutilização, que não é um evento *de um documento* e por isso
+   * não tem sequência.
+   */
+  numeroSequencial: number | null;
+  /** XML do evento (Focus: `caminho_xml_carta_correcao` / `caminho_xml`). */
+  xml: FiscalArtifact | null;
+};
+
+/**
+ * Carta de correção eletrônica (CC-e, evento 110110).
+ *
+ * Corrige erro que **não** altera valores, destinatário nem mercadoria — para
+ * isso o caminho é cancelar ou emitir nota de devolução, não corrigir. A SEFAZ
+ * exige texto de 15 a 1000 caracteres, e cada NF-e aceita no máximo 20 cartas;
+ * a última substitui as anteriores.
+ */
+export type FiscalCorrectionRequest = {
+  /** A `ref` do **documento** que está sendo corrigido (Focus: `{ref}` na URL). */
+  ref: string;
+  /** Focus: `correcao`. 15 a 1000 caracteres (regra da SEFAZ). */
+  correcao: string;
+};
+
+/**
+ * Inutilização de faixa de numeração (evento 110111 não — é um serviço
+ * próprio, `nfeInutilizacao`).
+ *
+ * **Não é um evento de um documento**, e essa é a diferença que o tipo precisa
+ * dizer sozinho: ela declara à SEFAZ que uma faixa de números de uma série
+ * nunca foi (e nunca será) usada — tipicamente porque a emissão falhou e o
+ * número ficou pelo caminho. Por isso identifica CNPJ + modelo + série + faixa,
+ * e não uma `ref` de nota; a `ref` daqui é do **pedido**, gerada por nós, e é o
+ * que torna o pedido idempotente igual à emissão.
+ */
+export type FiscalInvalidateRequest = {
+  /** Identificador do pedido, gerado por nós — idempotência, igual à emissão. */
+  ref: string;
+  /** CNPJ do emitente (Focus: `cnpj`). */
+  cnpj: string;
+  /** 55 (NF-e) ou 65 (NFC-e) — a faixa é por modelo. */
+  model: FiscalModel;
+  /** Focus: `serie`. */
+  serie: number;
+  /** Focus: `numero_inicial`. */
+  numeroInicial: number;
+  /** Focus: `numero_final`. */
+  numeroFinal: number;
+  /** Focus: `justificativa`, de 15 a 255 caracteres (mesma regra do cancelamento). */
+  justificativa: string;
+};
+
+/* ------------------------------------------------------------------------ */
+/* Payload — espelho do corpo JSON da Focus NFe (v2)                         */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Um item da nota (grupo `det`/`prod`/`imposto` do schema da SEFAZ).
+ *
+ * Os campos de **valor** de imposto (`icms_valor`, `pis_valor`, ...) são todos
+ * opcionais porque quem os calcula é o módulo Tributações (etapa 7), que ainda
+ * não existe. Ficam declarados aqui desde já para essa etapa ter onde gravar
+ * sem mexer no tipo — esta etapa não sabe nada sobre alíquota.
+ */
+export type NfePayloadItem = {
+  numero_item: number;
+  codigo_produto: string;
+  descricao: string;
+  /** Vem de `sale_items.cfop`; quem decide o CFOP é Tributações. */
+  cfop: string;
+  /** `products.ncm`. */
+  codigo_ncm: string;
+  /** `products.cest`. */
+  codigo_cest?: string;
+  quantidade_comercial: number;
+  valor_unitario_comercial: number;
+  valor_bruto: number;
+  /** `products.unidade_comercial`. */
+  unidade_comercial?: string;
+  quantidade_tributavel?: number;
+  valor_unitario_tributavel?: number;
+  /** `products.unidade_tributavel`. */
+  unidade_tributavel?: string;
+  valor_desconto?: number;
+  valor_frete?: number;
+  /** 1 = soma no total da nota, 0 = não soma. */
+  inclui_no_total?: number;
+
+  /** `products.origem_mercadoria` (0 a 8). */
+  icms_origem: string;
+  /** `products.cst_icms` **ou** `products.csosn`, conforme o regime da filial. */
+  icms_situacao_tributaria: string;
+  icms_modalidade_base_calculo?: string;
+  icms_base_calculo?: number;
+  icms_aliquota?: number;
+  icms_valor?: number;
+
+  /** `products.cst_ipi`. */
+  ipi_situacao_tributaria?: string;
+  ipi_base_calculo?: number;
+  ipi_aliquota?: number;
+  ipi_valor?: number;
+
+  /** `products.cst_pis`. */
+  pis_situacao_tributaria?: string;
+  pis_base_calculo?: number;
+  pis_aliquota_porcentual?: number;
+  pis_valor?: number;
+
+  /** `products.cst_cofins`. */
+  cofins_situacao_tributaria?: string;
+  cofins_base_calculo?: number;
+  cofins_aliquota_porcentual?: number;
+  cofins_valor?: number;
+};
+
+/**
+ * Nota referenciada (grupo `ide`/`NFref`, tag XML `refNFe`) — obrigatória na
+ * **nota de devolução**: a NF-e de entrada com `finalidade_emissao: 4` precisa
+ * apontar a chave de acesso da nota original que está sendo devolvida.
+ *
+ * O nome do campo (`notas_referenciadas`, com `chave_nfe` dentro) veio da
+ * tabela completa de campos da Focus NFe
+ * (https://campos.focusnfe.com.br/nfe/NotaFiscalXML.html) — a página de
+ * referência do endpoint (`doc.focusnfe.com.br/reference/emitir_nfe`) **não**
+ * documenta este grupo, exatamente a mesma divisão de documentação já
+ * registrada na etapa F1 para os campos de valor de imposto.
+ */
+export type NfePayloadNotaReferenciada = {
+  /** Chave de acesso de 44 dígitos da nota referenciada (Focus: `chave_nfe`, XML: `refNFe`). */
+  chave_nfe: string;
+};
+
+/** Forma de pagamento (grupo `pag`). Obrigatória na NFC-e. */
+export type NfePayloadPagamento = {
+  /** Código da SEFAZ: 01 = dinheiro, 03 = cartão de crédito, 17 = PIX, 90 = sem pagamento. */
+  forma_pagamento: string;
+  valor_pagamento: number;
+};
+
+/**
+ * O corpo da emissão. Um tipo só para NF-e e NFC-e porque a Focus usa o mesmo
+ * formato nos dois endpoints (`/v2/nfe` e `/v2/nfce`); o que muda é qual
+ * subconjunto é obrigatório — `presenca_comprador` e `formas_pagamento` na
+ * NFC-e, endereço completo do destinatário na NF-e.
+ */
+export type NfePayload = {
+  /* --- ide: identificação da operação --- */
+  natureza_operacao: string;
+  /** ISO 8601 com fuso, ex.: "2026-08-18T14:35:00-03:00". */
+  data_emissao: string;
+  data_entrada_saida?: string;
+  /** 0 = entrada, 1 = saída. */
+  tipo_documento: number;
+  /** 1 = operação interna, 2 = interestadual, 3 = exterior. */
+  local_destino?: number;
+  /** 1 = normal, 2 = complementar, 3 = ajuste, 4 = devolução. */
+  finalidade_emissao: number;
+  /** 0 = não, 1 = sim (consumidor final). */
+  consumidor_final?: number;
+  /** 0 = não se aplica, 1 = presencial, 4 = entrega a domicílio, 9 = não presencial. */
+  presenca_comprador?: number;
+
+  /* --- emit: a filial (branches) --- */
+  cnpj_emitente: string;
+  nome_emitente: string;
+  nome_fantasia_emitente?: string;
+  logradouro_emitente?: string;
+  numero_emitente?: string;
+  bairro_emitente?: string;
+  municipio_emitente?: string;
+  uf_emitente?: string;
+  cep_emitente?: string;
+  /** `branches.inscricao_estadual`. */
+  inscricao_estadual_emitente?: string;
+  /** `branches.regime_tributario` (CRT): 1 = Simples, 2 = Simples c/ excesso, 3 = Normal. */
+  regime_tributario_emitente?: number;
+
+  /* --- dest: o cliente (contacts) --- */
+  nome_destinatario?: string;
+  cnpj_destinatario?: string;
+  cpf_destinatario?: string;
+  inscricao_estadual_destinatario?: string;
+  /** 1 = contribuinte, 2 = isento, 9 = não contribuinte. */
+  indicador_inscricao_estadual_destinatario?: number;
+  logradouro_destinatario?: string;
+  numero_destinatario?: string;
+  bairro_destinatario?: string;
+  municipio_destinatario?: string;
+  uf_destinatario?: string;
+  cep_destinatario?: string;
+  pais_destinatario?: string;
+  telefone_destinatario?: string;
+
+  /* --- total --- */
+  valor_produtos: number;
+  valor_total: number;
+  valor_desconto?: number;
+  valor_frete?: number;
+  valor_seguro?: number;
+  valor_outras_despesas?: number;
+  icms_base_calculo?: number;
+  icms_valor_total?: number;
+  valor_ipi?: number;
+  valor_pis?: number;
+  valor_cofins?: number;
+  /** 0 = por conta do emitente ... 9 = sem frete. */
+  modalidade_frete?: number;
+
+  /**
+   * Notas referenciadas (grupo `NFref`). Preenchido só pela nota de devolução
+   * (`finalidade_emissao: 4`), com a chave da nota original.
+   */
+  notas_referenciadas?: NfePayloadNotaReferenciada[];
+
+  items: NfePayloadItem[];
+  formas_pagamento?: NfePayloadPagamento[];
+
+  informacoes_adicionais_contribuinte?: string;
+};

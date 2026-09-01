@@ -1,12 +1,15 @@
 /**
- * **O ponto único onde se decide qual provedor fiscal está ativo.**
+ * **O ponto único onde o front descobre qual provedor fiscal está ativo.**
  *
  * Nenhum módulo que emite nota (Notas Emitidas, NFC-e, Devolução) pode ter um
  * `if` de provedor: todos chamam `getFiscalProvider()` e recebem um
- * `FiscalProvider`. Quando a etapa de ativação real chegar, trocar o provedor é
- * mudar uma variável de ambiente e acrescentar uma linha em `PROVIDER_FACTORIES`
- * — nenhum arquivo de módulo é tocado. Esse é o critério que essa etapa
- * precisava garantir.
+ * `FiscalProvider`.
+ *
+ * Desde A2 (01/09/2026) a lista de provedores e a regra de fallback moram no
+ * núcleo compartilhado (`@fiscal-core/registry.ts`), que roda também na Edge
+ * Function. O que continua sendo responsabilidade **deste** arquivo é só o que
+ * é específico da borda navegador: ler `import.meta.env.VITE_FISCAL_PROVIDER`
+ * (a Edge Function lê `Deno.env`) e guardar a instância única da sessão.
  *
  * ## Por que variável de ambiente, e não linha no banco nem constante
  *
@@ -21,50 +24,26 @@
  *   back-end eu falo" (`VITE_SUPABASE_URL`), e mantém provedor e credencial no
  *   mesmo lugar.
  *
- * Falha fechado: valor ausente ou desconhecido cai no simulado. O modo de falha
- * importa — um erro de digitação em `VITE_FISCAL_PROVIDER` no máximo deixa de
- * emitir de verdade; o contrário emitiria nota fiscal real sem querer.
+ * ## Mudança de comportamento em A2, que vale conhecer
+ *
+ * `VITE_FISCAL_PROVIDER="focus-nfe"` **não cai mais no simulado**. Até A2 a
+ * fábrica do provedor real era `null` e o registry devolvia o simulado com um
+ * aviso no console — ou seja, uma configuração pedindo emissão real gerava
+ * documento sem valor fiscal, e o único sinal era uma linha de log. Agora o
+ * provedor existe como esqueleto e lança `FiscalNotConfiguredError` na
+ * operação pedida (até a tarefa A12 plugar a chamada HTTP). Valor **inválido**
+ * continua caindo no simulado com aviso — esse fallback é o que protege contra
+ * erro de digitação.
  */
 
-import { createSimulatedFiscalProvider } from "./simulatedFiscalProvider";
-import type { FiscalProvider } from "./types";
+import type { FiscalProvider } from "@fiscal-core/provider.ts";
+import {
+  createFiscalProvider,
+  resolveFiscalProviderId,
+  type FiscalProviderId,
+} from "@fiscal-core/registry.ts";
 
-export type FiscalProviderId = "simulado" | "focus-nfe";
-
-/**
- * Cada provedor implementado, por id. `focus-nfe` ainda não existe — a entrada
- * entra aqui junto com a implementação, na etapa de ativação real (primeiro
- * cliente real, ou etapas 0 a 9 concluídas em modo simulado, o que vier antes).
- */
-const PROVIDER_FACTORIES: Record<FiscalProviderId, (() => FiscalProvider) | null> = {
-  simulado: () => createSimulatedFiscalProvider(),
-  "focus-nfe": null,
-};
-
-const DEFAULT_PROVIDER: FiscalProviderId = "simulado";
-
-function resolveConfiguredId(): FiscalProviderId {
-  const configured = import.meta.env.VITE_FISCAL_PROVIDER?.trim();
-  if (!configured) return DEFAULT_PROVIDER;
-
-  if (!(configured in PROVIDER_FACTORIES)) {
-    console.warn(
-      `[fiscal] VITE_FISCAL_PROVIDER="${configured}" não é um provedor conhecido. ` +
-        `Usando "${DEFAULT_PROVIDER}".`,
-    );
-    return DEFAULT_PROVIDER;
-  }
-
-  const id = configured as FiscalProviderId;
-  if (!PROVIDER_FACTORIES[id]) {
-    console.warn(
-      `[fiscal] O provedor "${id}" ainda não foi implementado. Usando "${DEFAULT_PROVIDER}".`,
-    );
-    return DEFAULT_PROVIDER;
-  }
-
-  return id;
-}
+export type { FiscalProviderId };
 
 let instance: FiscalProvider | null = null;
 
@@ -75,9 +54,10 @@ let instance: FiscalProvider | null = null;
  */
 export function getFiscalProvider(): FiscalProvider {
   if (!instance) {
-    const factory = PROVIDER_FACTORIES[resolveConfiguredId()];
-    // `resolveConfiguredId` só devolve id com fábrica; o `??` é a garantia de tipo.
-    instance = (factory ?? PROVIDER_FACTORIES[DEFAULT_PROVIDER]!)();
+    const id = resolveFiscalProviderId(import.meta.env.VITE_FISCAL_PROVIDER, (message) =>
+      console.warn(message),
+    );
+    instance = createFiscalProvider(id);
   }
   return instance;
 }

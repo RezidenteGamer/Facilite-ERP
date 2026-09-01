@@ -20,7 +20,18 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /*
+     * Núcleo fiscal compartilhado com a Edge Function (Deno), em
+     * supabase/functions/_shared/fiscal. Mesmo alias declarado em
+     * vite.config.ts (build), vitest.config.ts (teste) e tsconfig.tests.json —
+     * os quatro precisam concordar. Os arquivos do núcleo entram na compilação
+     * por serem importados, então `tsc -b` também os checa.
+     */
+    "paths": {
+      "@fiscal-core/*": ["./supabase/functions/_shared/fiscal/*"]
+    }
   },
   "include": ["src"]
 }
