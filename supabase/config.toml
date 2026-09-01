@@ -1,0 +1,22 @@
+# Configuração do CLI da Supabase para o projeto Facilite ERP.
+#
+# O projeto remoto é `Facilite-ERP` (id `ifmdedruuetbbqjbnrkd`, região sa-east-1).
+# Este arquivo NÃO contém segredo nenhum — a chave de serviço e a senha do banco
+# continuam fora do repositório (ver .env.example).
+#
+# Até 29/08/2026 nenhum SQL era versionado: as ~52 funções, as policies de RLS e
+# os triggers viviam só na Supabase, descritos em prosa no AGENTS.md. Isso é o
+# que este diretório passa a corrigir — ver supabase/migrations/README.md.
+
+project_id = "ifmdedruuetbbqjbnrkd"
+
+[db]
+# Versão do Postgres do projeto remoto — mantenha igual ao remoto para que
+# `supabase db diff` e `supabase db reset` locais reproduzam o mesmo schema.
+major_version = 17
+
+[functions.admin-users]
+# Cria usuário e reseta senha com service_role. Autentica o chamador por JWT
+# dentro da própria função (can_manage_users), então não usa a verificação
+# automática do gateway.
+verify_jwt = false

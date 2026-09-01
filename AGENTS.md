@@ -2070,3 +2070,70 @@ Com CFOP em produção (601 opções), um `<select>` nativo obrigava rolar a lis
 #### Fora de escopo
 
 Recalcular/concatenar descrição hierárquica do NCM (pai + filho). Reconciliar os 18 CFOP que faltam contra uma segunda fonte. Referência cruzada `table`↔`generic` no motor (a checagem exige o mesmo tipo dos dois lados). Verificação no navegador — bloqueada nesta sessão pelo limite de 5 servidores de preview por pasta (todos ocupados por outras sessões); `tsc -b`/`oxlint` limpos nos arquivos tocados, e o schema/dados foram conferidos por SQL (contagens, amostra de acentuação, `EXPLAIN` não rodado).
+
+### Decisão estrutural: o backend passa a ser versionado, e o projeto ganha testes (29/08/2026)
+
+Ponto de partida do "Mínimo pra vender" (as 33 tarefas do `Plano de Obra do
+Facilite`, benchmark contra 4 ERPs). Antes de qualquer uma delas, duas lacunas
+tornavam o resto irrevisável.
+
+- **Nasce `supabase/` no repositório.** Até aqui as ~52 funções `security
+  definer`, as policies de RLS e os triggers existiam **só** no projeto
+  Supabase, e a única descrição deles era prosa neste arquivo. Ninguém
+  conseguia revisar uma RPC num diff, e nenhum teste conseguia afirmar o que
+  uma policy faz. Agora: `supabase/config.toml`, `supabase/migrations/`
+  (convenções em `migrations/README.md`) e `supabase/functions/`.
+  - **O código da Edge Function `admin-users` foi recuperado da Supabase e
+    versionado** em `supabase/functions/admin-users/index.ts` — ele existia
+    apenas implantado. É uma transcrição do que está rodando: **diferencie
+    contra o deployado antes de re-implantar**.
+  - **O baseline do schema ainda não existe.** Gerá-lo exige a senha do banco,
+    que não deve passar por uma sessão de agente — o comando está em
+    `supabase/migrations/GERAR-BASELINE.md`, para o usuário rodar.
+- **Nasce `tests/` com Vitest** e `npm test`. `vitest.config.ts` é separado de
+  `vite.config.ts` de propósito (o de build carrega o plugin do React e
+  `manualChunks`, que não têm nada a ver com rodar teste em Node).
+  `tsconfig.tests.json` entra nas referências de `tsconfig.json`, então
+  `npm run build` também checa os tipos dos testes.
+  - `tests/unit/taxRules.test.ts` — porte de `scripts/tax-rule-resolution-check.mjs`,
+    o único dos cinco scripts que já não falava com o banco. O script foi
+    **aposentado**: duas fontes de verdade para a mesma regra é pior que uma.
+  - `tests/isolation/` — bateria C1 (isolamento entre filiais). Ela **falha
+    alto** se as contas de fixture não estiverem configuradas, em vez de pular:
+    uma bateria de segurança que se auto-desliga dá verde falso, que é pior que
+    não ter bateria. Preparo em `tests/isolation/README.md` — depende de existir
+    uma **segunda filial**, que hoje não existe.
+- **Alias `@fiscal-core`** (em `vite.config.ts` e `vitest.config.ts`, os dois
+  precisam concordar) → `supabase/functions/_shared/fiscal`. É onde o núcleo
+  fiscal puro vai morar, para rodar nas duas bordas: a Edge Function
+  `fiscal-emit` (Deno, que exige `.ts` explícito no import) e o front, **só
+  para prévia na tela, nunca para emitir**.
+- **Credenciais saíram do repositório.** `scripts/fiscal-cycle-check.mjs`,
+  `nfce-emission-check.mjs` e `wizard-invoice-check.mjs` traziam
+  `claude.testes@facilite.com` / `claude2026` em texto claro e versionados —
+  quem clonasse o projeto levava junto uma conta real. Agora leem de
+  `.env.local` via `scripts/testAccount.mjs`. **A senha que ficou exposta
+  precisa ser trocada** (ela está no histórico do git).
+
+#### O que a auditoria do banco encontrou (e corrige o relatório num ponto)
+
+Lido direto do catálogo (`pg_get_functiondef`), antes de o baseline existir:
+
+- **C4 (baixa de estoque atômica) já está feito.** Todas as seis funções que
+  escrevem em `products.stock` — `create_sale`, `create_conditional`,
+  `create_purchase`, `create_sale_return`, `adjust_stock_batch`,
+  `register_conditional_return` — fazem `select ... from products where id = ...
+  for update` antes de calcular o saldo. O relatório afirma que "a checagem
+  acontece no cliente"; o que acontece no cliente é só a **tradução** do erro
+  que volta. `create_sale_order` não trava porque não mexe em estoque (pedido
+  não reserva — decisão de 17/08/2026). Falta só o teste de concorrência que
+  impeça a regressão.
+- **C3 (decisões que valem dinheiro) é pior que o descrito.** Nenhuma função lê
+  `products.sale_price`. `create_sale` seleciona `id, stock, branch_id` do
+  produto e grava o `unit_price` que veio no payload — e o `v_items_total` que
+  a validação de pagamentos confere é calculado **a partir desse mesmo preço**.
+  Ou seja: mandar `unit_price: 0.01` e pagar um centavo passa por toda a
+  validação. Vale para as sete funções que montam item de documento
+  (`create_sale`, `create_sale_order`, `update_sale_order`, `create_conditional`,
+  `create_sale_return`, `convert_sale_order_to_sale`,
+  `convert_conditional_to_sale`).

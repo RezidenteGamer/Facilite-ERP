@@ -18,7 +18,9 @@
 
 import { createServer } from "vite";
 
-const TEST_ACCOUNT = { email: "claude.testes@facilite.com", password: "claude2026" };
+import { requireTestAccount } from "./testAccount.mjs";
+
+const TEST_ACCOUNT = requireTestAccount();
 
 const results = [];
 function check(label, ok, detail = "") {

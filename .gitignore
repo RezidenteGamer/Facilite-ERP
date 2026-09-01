@@ -38,3 +38,6 @@ Recursos de Desenvolvimento/
 *.njsproj
 *.sln
 *.sw?
+
+# Cache local do CLI da Supabase — não é código do projeto.
+supabase/.temp/
