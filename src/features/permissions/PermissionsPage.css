@@ -92,3 +92,36 @@
   cursor: pointer;
   accent-color: var(--amber);
 }
+
+/* Campo de texto (desconto máximo) — diferente do checkbox, precisa de
+   fundo e cor próprios: o input herda `color` da página (var(--white)) e,
+   sem um fundo escuro, ficava texto branco sobre o branco padrão do
+   navegador, ilegível nos dois temas. */
+.permissions-table__discount-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.permissions-table__discount-input {
+  width: 72px;
+  height: 32px;
+  padding: 0 8px;
+  text-align: center;
+  color: var(--white);
+  background: var(--surface-control);
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: var(--radius-md);
+}
+
+.permissions-table__discount-input:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.permissions-table__discount-status {
+  font-size: 11px;
+  opacity: 0.7;
+  min-height: 14px;
+}

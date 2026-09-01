@@ -91,6 +91,10 @@ export default function PermissionsPage() {
   const [showNewRole, setShowNewRole] = useState(false);
   /** Rascunho de texto por papel — permite digitar livremente antes de salvar no blur. */
   const [discountDrafts, setDiscountDrafts] = useState<Record<string, string>>({});
+  /** Feedback visual de "salvando.../salvo" por papel — sem isso, um campo de
+   * texto não tem como o usuário perceber que a gravação aconteceu (diferente
+   * de um checkbox, que continua marcado sozinho). "saved" some sozinho. */
+  const [discountStatus, setDiscountStatus] = useState<Record<string, "saving" | "saved">>({});
 
   const canManagePermissions = Boolean(profile?.canManagePermissions);
 
@@ -135,6 +139,7 @@ export default function PermissionsPage() {
       return;
     }
 
+    setDiscountStatus((prev) => ({ ...prev, [roleId]: "saving" }));
     try {
       await setRoleMaxDiscount(roleId, value);
       setActionError(null);
@@ -143,8 +148,21 @@ export default function PermissionsPage() {
         delete next[roleId];
         return next;
       });
+      setDiscountStatus((prev) => ({ ...prev, [roleId]: "saved" }));
+      window.setTimeout(() => {
+        setDiscountStatus((prev) => {
+          const next = { ...prev };
+          delete next[roleId];
+          return next;
+        });
+      }, 2000);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Erro ao salvar teto de desconto.");
+      setDiscountStatus((prev) => {
+        const next = { ...prev };
+        delete next[roleId];
+        return next;
+      });
     }
   }
 
@@ -252,14 +270,14 @@ export default function PermissionsPage() {
                       }
                     />
                   </td>
-                  <td className="permissions-table__checkbox-cell">
+                  <td className="permissions-table__discount-cell">
                     <input
+                      className="permissions-table__discount-input"
                       type="text"
                       inputMode="decimal"
                       placeholder="Sem teto"
                       aria-label={`Desconto máximo — ${role.name}`}
                       title="Soma do desconto por item e do desconto de cabeçalho, sobre o valor bruto. Vazio = sem teto."
-                      style={{ width: 72, textAlign: "center" }}
                       value={
                         discountDrafts[role.id] ??
                         (role.maxDiscountPercent === null ? "" : String(role.maxDiscountPercent))
@@ -269,6 +287,10 @@ export default function PermissionsPage() {
                       }
                       onBlur={() => handleCommitMaxDiscount(role.id)}
                     />
+                    <span className="permissions-table__discount-status" aria-live="polite">
+                      {discountStatus[role.id] === "saving" && "Salvando…"}
+                      {discountStatus[role.id] === "saved" && "Salvo"}
+                    </span>
                   </td>
                 </tr>
               ))}
