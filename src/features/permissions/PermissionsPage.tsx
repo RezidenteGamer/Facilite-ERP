@@ -290,19 +290,19 @@ export default function PermissionsPage() {
                           if (event.key === "Enter") handleCommitMaxDiscount(role.id);
                         }}
                       />
-                      {/* Só aparece quando há algo digitado ainda não salvo — clicar fora
-                          do campo NÃO salva mais nada sozinho, de propósito: o usuário
-                          pediu uma confirmação explícita, não uma gravação silenciosa. */}
-                      {discountDrafts[role.id] !== undefined && (
-                        <button
-                          className="permissions-table__discount-save"
-                          type="button"
-                          disabled={discountStatus[role.id] === "saving"}
-                          onClick={() => handleCommitMaxDiscount(role.id)}
-                        >
-                          Salvar
-                        </button>
-                      )}
+                      {/* Sempre visível — some-e-aparece-conforme-digita gerava dúvida
+                          se o botão existia. Desabilitado quando não há nada digitado
+                          ainda não salvo: clicar fora do campo não salva mais nada
+                          sozinho, de propósito (o usuário pediu confirmação explícita,
+                          não gravação silenciosa). */}
+                      <button
+                        className="permissions-table__discount-save"
+                        type="button"
+                        disabled={discountDrafts[role.id] === undefined || discountStatus[role.id] === "saving"}
+                        onClick={() => handleCommitMaxDiscount(role.id)}
+                      >
+                        Salvar
+                      </button>
                     </div>
                     <span className="permissions-table__discount-status" aria-live="polite">
                       {discountStatus[role.id] === "saving" && "Salvando…"}
