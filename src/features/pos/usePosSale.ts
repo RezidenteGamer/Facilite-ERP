@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { parseAmount } from "../../lib/amount";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createPosSale } from "../../lib/repositories/posRepository";
@@ -42,6 +43,8 @@ export type PosPausedSale = {
 const STOCK_ERROR = /^Estoque insuficiente para o produto ([0-9a-f-]{36})\.$/i;
 const PAYMENTS_MISMATCH_ERROR =
   /^A soma dos pagamentos \(([\d.,-]+)\) não bate com o total da venda \(([\d.,-]+)\)\.$/;
+/** `assert_discount_within_cap` (tarefa C3, 29/08/2026) — teto de `roles.max_discount_percent`. */
+const DISCOUNT_CAP_ERROR = /^Desconto de [\d.,]+% acima do limite do seu perfil \([\d.,]+%\)\.$/;
 export const NO_OPEN_SESSION_ERROR = "Abra uma sessão de caixa antes de vender.";
 
 /**
@@ -77,6 +80,8 @@ function extractErrorMessage(err: unknown, cart: PosCartLine[]): string {
     return `A soma dos pagamentos (${formatMoney(paid)}) não bate com o total da venda (${formatMoney(total)}).`;
   }
 
+  if (DISCOUNT_CAP_ERROR.test(raw)) return raw;
+
   const KNOWN_MESSAGES = [
     "Sem permissão para vender no ponto de venda.",
     "Sem permissão para criar vendas.",
@@ -85,6 +90,8 @@ function extractErrorMessage(err: unknown, cart: PosCartLine[]): string {
     "A venda precisa de ao menos uma forma de pagamento.",
     "Produto não encontrado.",
     "Produto não pertence à filial da venda.",
+    "Quantidade inválida em um dos itens.",
+    "Desconto do item maior que o valor do item.",
   ];
   if (KNOWN_MESSAGES.includes(raw)) return raw;
 
@@ -185,7 +192,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     () => cart.reduce((sum, line) => sum + line.product.salePrice * line.quantity, 0),
     [cart],
   );
-  const discountValueRaw = Math.max(0, Number(discount.replace(",", ".")) || 0);
+  const discountValueRaw = Math.max(0, parseAmount(discount) ?? 0);
   const discountValue = discountMode === "percent" ? Math.min(discountValueRaw, 100) : discountValueRaw;
   const discountAmount = discountMode === "percent" ? subtotal * (discountValue / 100) : discountValue;
   const total = Math.max(0, subtotal - discountAmount);

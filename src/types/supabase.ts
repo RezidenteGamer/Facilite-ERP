@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -1441,6 +1441,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          max_discount_percent: number | null
           name: string
         }
         Insert: {
@@ -1451,6 +1452,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          max_discount_percent?: number | null
           name: string
         }
         Update: {
@@ -1461,6 +1463,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          max_discount_percent?: number | null
           name?: string
         }
         Relationships: []
@@ -2335,6 +2338,10 @@ export type Database = {
         Args: { p_branch_id: string; p_items: Json }
         Returns: undefined
       }
+      assert_discount_within_cap: {
+        Args: { p_discount: number; p_gross: number }
+        Returns: undefined
+      }
       assert_module_workflow_editable: {
         Args: { p_module_id: string }
         Returns: undefined
@@ -2701,6 +2708,7 @@ export type Database = {
         }
         Returns: string
       }
+      current_role_max_discount_percent: { Args: never; Returns: number }
       delete_module_situation: { Args: { p_id: string }; Returns: undefined }
       delete_module_transition: { Args: { p_id: string }; Returns: undefined }
       delete_module_transition_action: {
@@ -2986,6 +2994,21 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      search_ncm_codes: {
+        Args: { p_term?: string }
+        Returns: {
+          codigo: string
+          created_at: string
+          descricao: string
+          id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ncm_codes"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       search_returnable_sales: {
         Args: { p_branch_id: string; p_term?: string }
         Returns: {
@@ -3003,21 +3026,6 @@ export type Database = {
           name: string
           operator_code: string
         }[]
-      }
-      search_ncm_codes: {
-        Args: { p_term?: string }
-        Returns: {
-          codigo: string
-          created_at: string
-          descricao: string
-          id: string
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "ncm_codes"
-          isOneToOne: false
-          isSetofReturn: true
-        }
       }
       search_tax_groups: {
         Args: { p_term?: string }

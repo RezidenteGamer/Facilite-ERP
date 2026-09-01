@@ -101,10 +101,10 @@ export default function ProdutosStep({ draft, branchId }: ProdutosStepProps) {
                           type="text"
                           inputMode="decimal"
                           aria-label={`Preço unitário — ${line.product.description}`}
-                          value={line.unitPrice}
-                          onChange={(e) =>
-                            draft.updateLine(line.lineId, { unitPrice: Number(e.target.value.replace(",", ".")) || 0 })
-                          }
+                          title="O preço vem do cadastro do produto — edite lá para mudar."
+                          value={formatMoney(line.unitPrice)}
+                          disabled
+                          readOnly
                         />
                         <input
                           className="sale__cart-line-input"

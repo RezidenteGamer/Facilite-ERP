@@ -84,11 +84,13 @@ function NewRoleModal({
 export default function PermissionsPage() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const { roles, modules, error, cellFor, setPermission, setRoleCapability, createRole } =
+  const { roles, modules, error, cellFor, setPermission, setRoleCapability, setRoleMaxDiscount, createRole } =
     usePermissionsData();
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [showNewRole, setShowNewRole] = useState(false);
+  /** Rascunho de texto por papel — permite digitar livremente antes de salvar no blur. */
+  const [discountDrafts, setDiscountDrafts] = useState<Record<string, string>>({});
 
   const canManagePermissions = Boolean(profile?.canManagePermissions);
 
@@ -118,6 +120,31 @@ export default function PermissionsPage() {
       setActionError(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Erro ao salvar permissão.");
+    }
+  }
+
+  /** Vazio = sem teto (null). Erro de validação/banco aparece no lugar do campo, não trava a digitação. */
+  async function handleCommitMaxDiscount(roleId: string) {
+    const draft = discountDrafts[roleId];
+    if (draft === undefined) return;
+
+    const trimmed = draft.trim();
+    const value = trimmed === "" ? null : Number(trimmed.replace(",", "."));
+    if (value !== null && Number.isNaN(value)) {
+      setActionError("Teto de desconto precisa ser um número.");
+      return;
+    }
+
+    try {
+      await setRoleMaxDiscount(roleId, value);
+      setActionError(null);
+      setDiscountDrafts((prev) => {
+        const next = { ...prev };
+        delete next[roleId];
+        return next;
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Erro ao salvar teto de desconto.");
     }
   }
 
@@ -171,6 +198,7 @@ export default function PermissionsPage() {
                 ))}
                 <th rowSpan={2}>Gerenciar permissões</th>
                 <th rowSpan={2}>Gerenciar usuários</th>
+                <th rowSpan={2}>Desconto máximo</th>
               </tr>
               <tr>
                 {modules.map((module) =>
@@ -222,6 +250,24 @@ export default function PermissionsPage() {
                       onChange={(event) =>
                         handleToggleCapability(role.id, "canManageUsers", event.target.checked)
                       }
+                    />
+                  </td>
+                  <td className="permissions-table__checkbox-cell">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Sem teto"
+                      aria-label={`Desconto máximo — ${role.name}`}
+                      title="Soma do desconto por item e do desconto de cabeçalho, sobre o valor bruto. Vazio = sem teto."
+                      style={{ width: 72, textAlign: "center" }}
+                      value={
+                        discountDrafts[role.id] ??
+                        (role.maxDiscountPercent === null ? "" : String(role.maxDiscountPercent))
+                      }
+                      onChange={(event) =>
+                        setDiscountDrafts((prev) => ({ ...prev, [role.id]: event.target.value }))
+                      }
+                      onBlur={() => handleCommitMaxDiscount(role.id)}
                     />
                   </td>
                 </tr>

@@ -17,4 +17,6 @@ export type Role = {
   description: string | null;
   canManagePermissions: boolean;
   canManageUsers: boolean;
+  /** Teto de desconto (%) que o papel pode aplicar numa venda/pedido — nulo = sem teto (tarefa C3, 29/08/2026). */
+  maxDiscountPercent: number | null;
 };

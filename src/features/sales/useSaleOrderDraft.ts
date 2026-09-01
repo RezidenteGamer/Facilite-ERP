@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOpenWindows } from "../../components/openWindows";
+import { parseAmount } from "../../lib/amount";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { fetchProductsByIds } from "../../lib/repositories/productsRepository";
@@ -69,6 +70,10 @@ function extractErrorMessage(err: unknown): string {
 
   if (!raw) return "Não foi possível salvar o pedido. Tente novamente — se o problema continuar, acione o suporte.";
 
+  // `assert_discount_within_cap` (tarefa C3, 29/08/2026) — já vem pronta em
+  // português, com os valores formatados; só repassamos.
+  if (/^Desconto de [\d.,]+% acima do limite do seu perfil \([\d.,]+%\)\.$/.test(raw)) return raw;
+
   const KNOWN_MESSAGES = [
     "Sem permissão para criar pedidos de venda.",
     "Sem permissão para editar pedidos de venda.",
@@ -78,6 +83,8 @@ function extractErrorMessage(err: unknown): string {
     "Produto não pertence à filial do pedido.",
     "Pedido não encontrado.",
     "Só é possível editar pedido em aberto.",
+    "Quantidade inválida em um dos itens.",
+    "Desconto do item maior que o valor do item.",
   ];
   if (KNOWN_MESSAGES.includes(raw)) return raw;
 
@@ -294,7 +301,9 @@ export function useSaleOrderDraft(
     });
   }
 
-  function updateLine(lineId: string, patch: Partial<Pick<SaleOrderCartLine, "quantity" | "unitPrice" | "discountAmount">>) {
+  // `unitPrice` não entra no patch — a RPC lê o preço sempre de
+  // `products.sale_price` (tarefa C3, 29/08/2026).
+  function updateLine(lineId: string, patch: Partial<Pick<SaleOrderCartLine, "quantity" | "discountAmount">>) {
     setCart((current) => current.map((line) => (line.lineId === lineId ? { ...line, ...patch } : line)));
   }
 
@@ -317,8 +326,8 @@ export function useSaleOrderDraft(
   }
 
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + lineTotal(line), 0), [cart]);
-  const freightValue = Math.max(0, Number(freight.replace(",", ".")) || 0);
-  const discountValue = Math.max(0, Number(discount.replace(",", ".")) || 0);
+  const freightValue = Math.max(0, parseAmount(freight) ?? 0);
+  const discountValue = Math.max(0, parseAmount(discount) ?? 0);
   const total = Math.max(0, subtotal + freightValue - discountValue);
 
   /* Em modo edição, o pedido tem que ter carregado e continuar `aberto` — a

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOpenWindows } from "../../components/openWindows";
+import { parseAmount } from "../../lib/amount";
 import { formatContactAddress, type Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createSale, type CreateSaleInput } from "../../lib/repositories/salesRepository";
@@ -99,6 +100,8 @@ const UNDO_TIMEOUT_MS = 6000;
 
 const STOCK_ERROR = /^Estoque insuficiente para o produto ([0-9a-f-]{36})\.$/i;
 const PAYMENTS_MISMATCH_ERROR = /^A soma dos pagamentos \(([\d.,-]+)\) não bate com o total da venda \(([\d.,-]+)\)\.$/;
+/** `assert_discount_within_cap` (tarefa C3, 29/08/2026) — teto de `roles.max_discount_percent`. */
+const DISCOUNT_CAP_ERROR = /^Desconto de ([\d.,]+)% acima do limite do seu perfil \(([\d.,]+)%\)\.$/;
 
 /**
  * A RPC `create_sale` já levanta mensagens em português para as regras de
@@ -147,6 +150,11 @@ function extractErrorMessage(err: unknown, cart: CartLine[]): SaleSubmitError {
     return `A soma dos pagamentos (${formatMoney(paid)}) não bate com o total da venda (${formatMoney(total)}).`;
   }
 
+  // A RPC já devolve a mensagem pronta em português — só repassamos,
+  // sem regex, porque os valores já vêm formatados com "%" e não precisam
+  // de reformatação como os casos acima (que usam formatMoney).
+  if (DISCOUNT_CAP_ERROR.test(raw)) return raw;
+
   // Mensagens conhecidas da RPC (permissão, filial, item/pagamento obrigatório,
   // produto não encontrado/fora da filial) já vêm prontas em português — passa direto.
   const KNOWN_MESSAGES = [
@@ -156,6 +164,8 @@ function extractErrorMessage(err: unknown, cart: CartLine[]): SaleSubmitError {
     "A venda precisa de ao menos uma forma de pagamento.",
     "Produto não encontrado.",
     "Produto não pertence à filial da venda.",
+    "Quantidade inválida em um dos itens.",
+    "Desconto do item maior que o valor do item.",
   ];
   if (KNOWN_MESSAGES.includes(raw)) return raw;
 
@@ -313,7 +323,10 @@ export function useSaleDraft(
     });
   }
 
-  function updateLine(lineId: string, patch: Partial<Pick<CartLine, "quantity" | "unitPrice" | "discountAmount">>) {
+  // `unitPrice` não entra no patch — a RPC lê o preço sempre de
+  // `products.sale_price`, então deixar o tipo aceitar essa edição
+  // sugeriria uma capacidade que não existe mais (tarefa C3, 29/08/2026).
+  function updateLine(lineId: string, patch: Partial<Pick<CartLine, "quantity" | "discountAmount">>) {
     setCart((current) => current.map((line) => (line.lineId === lineId ? { ...line, ...patch } : line)));
   }
 
@@ -363,8 +376,8 @@ export function useSaleDraft(
   }
 
   const subtotal = useMemo(() => cart.reduce((sum, line) => sum + lineTotal(line), 0), [cart]);
-  const freightValue = Math.max(0, Number(freight.replace(",", ".")) || 0);
-  const discountValue = Math.max(0, Number(discount.replace(",", ".")) || 0);
+  const freightValue = Math.max(0, parseAmount(freight) ?? 0);
+  const discountValue = Math.max(0, parseAmount(discount) ?? 0);
   const total = Math.max(0, subtotal + freightValue - discountValue);
   const paymentsTotal = useMemo(() => payments.reduce((sum, p) => sum + p.amount, 0), [payments]);
   const paymentsMatch = cart.length > 0 && Math.abs(paymentsTotal - total) < 0.01;

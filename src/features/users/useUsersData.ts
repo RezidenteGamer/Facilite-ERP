@@ -56,6 +56,7 @@ export function useUsersData() {
           description: role.description,
           canManagePermissions: role.can_manage_permissions,
           canManageUsers: role.can_manage_users,
+          maxDiscountPercent: role.max_discount_percent,
         })),
       );
     } catch (err) {

@@ -62,6 +62,7 @@ export function usePermissionsData() {
           description: role.description,
           canManagePermissions: role.can_manage_permissions,
           canManageUsers: role.can_manage_users,
+          maxDiscountPercent: role.max_discount_percent,
         })),
       );
       setModules((modulesResult.data ?? []).map((m) => ({ id: m.id, label: m.label })));
@@ -131,6 +132,24 @@ export function usePermissionsData() {
     setRoles((prev) => prev.map((role) => (role.id === roleId ? { ...role, [field]: value } : role)));
   }
 
+  /**
+   * `value` nulo = sem teto. Validado no banco (`assert_discount_within_cap`)
+   * de qualquer forma — esta função só evita mandar um valor fora de 0–100
+   * e uma volta desnecessária ao servidor para descobrir isso.
+   */
+  async function setRoleMaxDiscount(roleId: string, value: number | null) {
+    if (value !== null && (Number.isNaN(value) || value < 0 || value > 100)) {
+      throw new Error("O teto de desconto precisa ser um número entre 0 e 100, ou vazio para não ter teto.");
+    }
+    const client = assertSupabase();
+    const { error: updateError } = await client
+      .from("roles")
+      .update({ max_discount_percent: value })
+      .eq("id", roleId);
+    if (updateError) throw updateError;
+    setRoles((prev) => prev.map((role) => (role.id === roleId ? { ...role, maxDiscountPercent: value } : role)));
+  }
+
   async function createRole(name: string, description: string) {
     const client = assertSupabase();
     const { error: insertError } = await client.from("roles").insert({ name, description: description || null });
@@ -138,5 +157,5 @@ export function usePermissionsData() {
     await reload();
   }
 
-  return { roles, modules, loading, error, cellFor, setPermission, setRoleCapability, createRole };
+  return { roles, modules, loading, error, cellFor, setPermission, setRoleCapability, setRoleMaxDiscount, createRole };
 }

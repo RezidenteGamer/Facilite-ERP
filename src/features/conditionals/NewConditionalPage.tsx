@@ -216,14 +216,12 @@ export default function NewConditionalPage() {
                               />
                               <input
                                 className="sale__cart-line-input"
-                                type="number"
-                                min={0}
-                                step="0.01"
+                                type="text"
                                 aria-label={`Preço unitário — ${line.product.description}`}
-                                value={line.unitPrice}
-                                onChange={(e) =>
-                                  draft.updateLine(line.lineId, { unitPrice: Number(e.target.value) || 0 })
-                                }
+                                title="O preço vem do cadastro do produto — edite lá para mudar."
+                                value={formatConditionalTotal(line.unitPrice)}
+                                disabled
+                                readOnly
                               />
                               <span className="sale__cart-line-total">{formatConditionalTotal(draft.lineTotal(line))}</span>
                               <button

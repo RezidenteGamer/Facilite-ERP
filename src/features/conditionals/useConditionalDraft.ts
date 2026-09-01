@@ -99,7 +99,9 @@ export function useConditionalDraft(branchId: string | null, windowId?: string |
     });
   }
 
-  function updateLine(lineId: string, patch: Partial<Pick<ConditionalCartLine, "quantity" | "unitPrice">>) {
+  // `unitPrice` não entra no patch — a RPC lê o preço sempre de
+  // `products.sale_price` (tarefa C3, 29/08/2026).
+  function updateLine(lineId: string, patch: Partial<Pick<ConditionalCartLine, "quantity">>) {
     setCart((current) => current.map((line) => (line.lineId === lineId ? { ...line, ...patch } : line)));
   }
 
