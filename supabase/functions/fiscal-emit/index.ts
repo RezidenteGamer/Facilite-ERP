@@ -72,7 +72,13 @@ import {
 import type { SimulatedFiscalProviderSeed } from "../_shared/fiscal/simulatedFiscalProvider.ts";
 import type { FiscalArtifact, FiscalModel, FiscalStatus, NfePayload } from "../_shared/fiscal/types.ts";
 
-import { FiscalDataError, readSaleForInvoice, readSaleReturnForInvoice, readTaxRules } from "./data.ts";
+import {
+  FiscalDataError,
+  readMvaRules,
+  readSaleForInvoice,
+  readSaleReturnForInvoice,
+  readTaxRules,
+} from "./data.ts";
 import {
   persistCancel,
   persistEmission,
@@ -214,7 +220,9 @@ async function buildPayload(
   origin: FiscalDocumentOrigin,
   model: FiscalModel,
 ): Promise<{ ok: true; payload: NfePayload } | { ok: false; errors: string[] }> {
-  const rules = await readTaxRules(ctx.admin);
+  // Os dois cadastros que o mapeamento consulta: CFOP pela operação e MVA por
+  // NCM × UF de destino. Lidos em paralelo — são independentes entre si.
+  const [rules, mvaRules] = await Promise.all([readTaxRules(ctx.admin), readMvaRules(ctx.admin)]);
 
   if ("saleReturnId" in origin) {
     if (model !== "nfe") {
@@ -224,7 +232,7 @@ async function buildPayload(
     if (branchId !== ctx.branchId) {
       return { ok: false, errors: ["A devolução não pertence à filial informada."] };
     }
-    const built = buildReturnNfePayload(saleReturn, rules);
+    const built = buildReturnNfePayload(saleReturn, rules, mvaRules);
     return built.ok ? { ok: true, payload: built.payload } : { ok: false, errors: built.errors };
   }
 
@@ -232,7 +240,10 @@ async function buildPayload(
   if (branchId !== ctx.branchId) {
     return { ok: false, errors: ["A venda não pertence à filial informada."] };
   }
-  const built = model === "nfce" ? buildNfcePayloadFromSale(sale, rules) : buildNfePayloadFromSale(sale, rules);
+  const built =
+    model === "nfce"
+      ? buildNfcePayloadFromSale(sale, rules, mvaRules)
+      : buildNfePayloadFromSale(sale, rules, mvaRules);
   return built.ok ? { ok: true, payload: built.payload } : { ok: false, errors: built.errors };
 }
 

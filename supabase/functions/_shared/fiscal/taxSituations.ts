@@ -86,6 +86,60 @@ export function icmsCalculaValorProprio(situacaoTributaria: string | null | unde
 }
 
 /**
+ * CST de ICMS e CSOSN cujo grupo XML tem os campos de **ICMS-ST a recolher
+ * agora** (`modBCST`, `pMVAST`, `vBCST`, `pICMSST`, `vICMSST`) — B2,
+ * 01/09/2026.
+ *
+ * Esta é uma dimensão **diferente** de `ICMS_SEM_VALOR_PROPRIO`, e não o
+ * complemento dela: o `10` e o `70` têm ICMS próprio **e** ST; o `30` e os
+ * CSOSN `201`/`202`/`203` têm ST **sem** próprio. As duas perguntas se fazem
+ * separadamente para o mesmo item, e é por isso que são dois conjuntos.
+ *
+ * - CST `10` (tributada **com** cobrança de ST) e `70` (a mesma coisa, com
+ *   redução de base no próprio) — grupos `ICMS10`/`ICMS70`;
+ * - CST `30` (isenta/não tributada **com** cobrança de ST) — grupo `ICMS30`,
+ *   que só tem os campos de ST, nenhum do próprio;
+ * - CSOSN `201` (com crédito de Simples e com ST), `202` e `203` (com ST, sem
+ *   crédito) — grupos `ICMSSN201`/`ICMSSN202`. O `pCredSN` do `201` é B8; a
+ *   parte de ST deles é aqui.
+ *
+ * **Ficam de fora, e cada um por um motivo próprio:**
+ *
+ * - CST `60` e CSOSN `500` — ICMS **já retido anteriormente** na cadeia. O
+ *   grupo XML deles (`ICMS60`/`ICMSSN500`) tem `vBCSTRet`/`vICMSSTRet`, que
+ *   declaram o que outro contribuinte reteve lá atrás, sem MVA nenhuma. O dado
+ *   ("quanto de ST veio embutido no custo da compra") este sistema não guarda,
+ *   e inventá-lo seria pior do que a omissão — fora do escopo de B2.
+ * - CST `90` e CSOSN `900` ("Outros") — os grupos deles **aceitam** ST, mas
+ *   como catch-all: são o código que se usa quando nenhum outro serve, e a ST
+ *   neles é opcional. Incluí-los aqui obrigaria toda venda com CST 90 a ter
+ *   MVA cadastrada, recusando emissões que hoje saem corretas. Quem precisar
+ *   de ST tem `10`/`30`/`70` para dizê-lo explicitamente.
+ */
+const ICMS_COM_SUBSTITUICAO_TRIBUTARIA = new Set([
+  // CST — Regime Normal (CRT 3)
+  "10",
+  "30",
+  "70",
+  // CSOSN — Simples Nacional (CRT 1 e 2)
+  "201",
+  "202",
+  "203",
+]);
+
+/**
+ * O item com este CST/CSOSN declara ICMS-ST a recolher nesta operação?
+ *
+ * Ao contrário de `icmsCalculaValorProprio`, aqui a lista é de **inclusão**:
+ * código desconhecido devolve `false`. O motivo é o oposto do de lá — o risco
+ * daquela função é suprimir imposto em silêncio, e o desta é **exigir um
+ * cadastro de MVA que ninguém tem** e recusar a emissão. Na dúvida, não há ST.
+ */
+export function icmsCalculaSubstituicaoTributaria(situacaoTributaria: string | null | undefined): boolean {
+  return ICMS_COM_SUBSTITUICAO_TRIBUTARIA.has(normalizeCode(situacaoTributaria));
+}
+
+/**
  * CST de PIS/COFINS (tabela 4.3.3 da SEFAZ) que **não** aceitam
  * `vBC` + alíquota percentual + valor.
  *

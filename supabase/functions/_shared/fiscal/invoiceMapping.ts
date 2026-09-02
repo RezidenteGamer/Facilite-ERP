@@ -47,8 +47,19 @@
  */
 
 import { onlyDigits } from "./accessKey.ts";
+import {
+  aliquotaInterestadual,
+  mvaAjustada,
+  resolveMvaRule,
+  type MvaRuleRow,
+} from "./mvaRules.ts";
 import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
-import { icmsCalculaValorProprio, ipiCalculaValor, pisCofinsCalculaValor } from "./taxSituations.ts";
+import {
+  icmsCalculaSubstituicaoTributaria,
+  icmsCalculaValorProprio,
+  ipiCalculaValor,
+  pisCofinsCalculaValor,
+} from "./taxSituations.ts";
 import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "./types.ts";
 import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "./taxRules.ts";
 
@@ -191,6 +202,9 @@ type ResolvedItems = {
   items: NfePayloadItem[];
   icmsBaseCalculoTotal?: number;
   icmsValorTotal?: number;
+  icmsStBaseCalculoTotal?: number;
+  icmsStValorTotal?: number;
+  fcpStValorTotal?: number;
   ipiValorTotal?: number;
   pisValorTotal?: number;
   cofinsValorTotal?: number;
@@ -225,8 +239,22 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  *
  * Redução de base só existe para ICMS porque só o ICMS tem `pRedBC` no leiaute
  * — ver o campo `reducaoBaseIcms` em `taxGroups.ts`.
+ *
+ * ## O ICMS-ST depois de B2 (01/09/2026)
+ *
+ * Para os CST/CSOSN que declaram ST (`icmsCalculaSubstituicaoTributaria`), o
+ * cálculo do próprio acima ganha uma segunda camada, resolvida em
+ * `resolveSubstituicaoTributaria`: MVA vinda de `mva_rules` por NCM × UF de
+ * destino, ajustada quando a operação é interestadual, base majorada e o valor
+ * do ST descontado do ICMS próprio que o mesmo item já destacou. Item sem ST
+ * no CST não consulta `mva_rules` e sai exatamente como saía em B1.
  */
-function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: TaxRuleQuery): ItemsResolution {
+function resolveItemsForSale(
+  sale: SaleForInvoice,
+  rules: TaxRuleRow[],
+  query: TaxRuleQuery,
+  mvaRules: MvaRuleRow[],
+): ItemsResolution {
   const errors: string[] = [];
   if (sale.items.length === 0) errors.push("Venda sem itens.");
 
@@ -270,6 +298,22 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
     const icmsAliquota = icmsDeclara ? group.aliquotaIcms! : undefined;
     const icmsReducao = icmsDeclara && group.reducaoBaseIcms ? group.reducaoBaseIcms : undefined;
     const icmsBase = icmsDeclara ? reducedBase(base, icmsReducao) : undefined;
+    const icmsValor = icmsBase !== undefined ? taxAmount(icmsBase, icmsAliquota!) : undefined;
+
+    // ICMS-ST — a segunda camada, só para os CST/CSOSN que a têm.
+    const st = icmsCalculaSubstituicaoTributaria(icmsSituacaoTributaria)
+      ? resolveSubstituicaoTributaria({
+          group,
+          query,
+          mvaRules,
+          ncm: item.product.ncm!,
+          origemMercadoria: item.product.origemMercadoria,
+          basePropria: icmsBase ?? base,
+          icmsProprio: icmsValor ?? 0,
+        })
+      : null;
+    if (st && !st.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${st.reason}`);
+    const stDeclarado = st?.ok ? st : null;
 
     /**
      * CST de IPI: o grupo tributário manda, o cadastro do produto é fallback
@@ -317,7 +361,17 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
       icms_base_calculo: icmsBase,
       icms_reducao_base_calculo: icmsReducao,
       icms_aliquota: icmsAliquota,
-      icms_valor: icmsBase !== undefined ? taxAmount(icmsBase, icmsAliquota!) : undefined,
+      icms_valor: icmsValor,
+
+      icms_modalidade_base_calculo_st: stDeclarado?.modalidadeBaseCalculo,
+      icms_margem_valor_adicionado_st: stDeclarado?.mva,
+      icms_base_calculo_st: stDeclarado?.base,
+      icms_aliquota_st: stDeclarado?.aliquota,
+      icms_valor_st: stDeclarado?.valor,
+
+      fcp_base_calculo_st: stDeclarado?.fcpBase,
+      fcp_percentual_st: stDeclarado?.fcpAliquota,
+      fcp_valor_st: stDeclarado?.fcpValor,
 
       ipi_situacao_tributaria: cstIpi,
       ipi_base_calculo: ipiBase,
@@ -340,13 +394,193 @@ function resolveItemsForSale(sale: SaleForInvoice, rules: TaxRuleRow[], query: T
 
   const icmsBaseCalculoTotal = totalDeclarado(items, (item) => item.icms_base_calculo);
   const icmsValorTotal = totalDeclarado(items, (item) => item.icms_valor);
+  const icmsStBaseCalculoTotal = totalDeclarado(items, (item) => item.icms_base_calculo_st);
+  const icmsStValorTotal = totalDeclarado(items, (item) => item.icms_valor_st);
+  const fcpStValorTotal = totalDeclarado(items, (item) => item.fcp_valor_st);
   const ipiValorTotal = totalDeclarado(items, (item) => item.ipi_valor);
   const pisValorTotal = totalDeclarado(items, (item) => item.pis_valor);
   const cofinsValorTotal = totalDeclarado(items, (item) => item.cofins_valor);
 
   return {
     ok: true,
-    data: { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal },
+    data: {
+      cfop,
+      items,
+      icmsBaseCalculoTotal,
+      icmsValorTotal,
+      icmsStBaseCalculoTotal,
+      icmsStValorTotal,
+      fcpStValorTotal,
+      ipiValorTotal,
+      pisValorTotal,
+      cofinsValorTotal,
+    },
+  };
+}
+
+/** O maior valor que `fiscal_document_items.icms_st_mva` (`numeric(7,4)`) guarda. */
+const MVA_MAXIMA_PERSISTIVEL = 999.9999;
+
+/**
+ * O que um item declara de ICMS-ST, ou o motivo de a emissão não poder sair.
+ *
+ * Recusa em vez de calcular errado, e a recusa é do mesmo tipo que B1 criou
+ * para "CST de IPI sem alíquota": **inconsistência de cadastro**, não falha de
+ * sistema. O CST do item afirma que há ST; se a MVA não está cadastrada, o
+ * cadastro se contradiz, e emitir sem ST produziria uma nota autorizada com
+ * imposto a menos — o desfecho pior. Mercadoria **sem** ST não passa por aqui:
+ * o CST dela não está em `icmsCalculaSubstituicaoTributaria`.
+ */
+type SubstituicaoTributaria =
+  | {
+      ok: true;
+      modalidadeBaseCalculo: string;
+      mva: number;
+      base: number;
+      aliquota: number;
+      valor: number;
+      fcpBase?: number;
+      fcpAliquota?: number;
+      fcpValor?: number;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * As quatro contas do ICMS-ST, na ordem em que os estados as publicam.
+ *
+ * 1. **Alíquota interna do destino.** Aproximada por `group.aliquotaIcms` —
+ *    ver a decisão registrada no AGENTS.md (B2) e o cabeçalho de `mvaRules.ts`.
+ *    Sem ela não há como calcular nada, e a recusa é explícita.
+ * 2. **MVA efetiva.** Interestadual usa a ajustada; interna usa a original.
+ *    A exceção que quase todo mundo esquece: o **Simples Nacional na condição
+ *    de substituto não aplica MVA ajustada nem em operação interestadual**
+ *    (Convênio ICMS 35/2011, cláusula primeira) — usa sempre a original. Por
+ *    isso o ajuste depende do regime de quem emite, não só das UFs.
+ * 3. **Base do ST** = base do próprio (já reduzida, quando há redução)
+ *    × (1 + MVA/100).
+ * 4. **Valor do ST** = base do ST × alíquota interna − **o ICMS próprio já
+ *    destacado neste item**. A subtração é o ponto do cálculo: o ICMS-ST é o
+ *    imposto de toda a cadeia menos o que a operação própria já cobrou, não o
+ *    valor cheio sobre a base majorada.
+ *
+ * ## Duas limitações conhecidas da subtração, as duas por falta de dado
+ *
+ * As duas estão registradas na entrada de B2 do AGENTS.md e **não** foram
+ * corrigidas aqui, porque as duas exigem mexer em decisões que são de outra
+ * tarefa. Estão anotadas onde acontecem para ninguém redescobri-las com uma
+ * nota já autorizada na mão:
+ *
+ * 1. **Interestadual: o ICMS próprio que se deduz está calculado com a
+ *    alíquota interna.** `resolveItemsForSale` usa `group.aliquotaIcms` para o
+ *    `vICMS` de qualquer operação — B1 nunca aplicou alíquota interestadual ao
+ *    próprio. Numa venda SP→BA de 1.000 com alíquota de grupo 18%, o item
+ *    destaca 180 de próprio (o correto seria 70, a 7%) e a dedução leva o
+ *    mesmo 180, então o **ST sai a menos**. O ajuste da MVA usa a alíquota
+ *    interestadual correta; o próprio, não. Corrigir isso é corrigir B1.
+ * 2. **Simples Nacional: não há dedução nenhuma.** Os CSOSN `201`/`202`/`203`
+ *    não declaram `vICMS` no XML (o ICMS próprio é pago no DAS), então
+ *    `icmsProprio` chega zero e o ST sai cheio sobre a base majorada. A prática
+ *    corrente permite deduzir a alíquota devida aplicada sobre o valor da
+ *    operação própria, mas esse número não existe em lugar nenhum do cadastro
+ *    e varia por estado — é assunto de B8, junto do resto do Simples.
+ */
+function resolveSubstituicaoTributaria(input: {
+  group: TaxGroup;
+  query: TaxRuleQuery;
+  mvaRules: MvaRuleRow[];
+  ncm: string;
+  origemMercadoria: string | null;
+  /** Base do ICMS próprio já reduzida; o valor bruto do item quando o CST não declara próprio (ex.: CST 30). */
+  basePropria: number;
+  /** O `vICMS` deste item; zero quando o CST não declara ICMS próprio. */
+  icmsProprio: number;
+}): SubstituicaoTributaria {
+  const { group, query, mvaRules, ncm, origemMercadoria, basePropria, icmsProprio } = input;
+
+  const aliquotaInterna = group.aliquotaIcms;
+  if (aliquotaInterna === null) {
+    return {
+      ok: false,
+      reason:
+        `o CST/CSOSN do grupo tributário "${group.name}" declara ICMS-ST, mas o grupo não tem alíquota de ` +
+        `ICMS cadastrada — é ela que o cálculo usa como alíquota interna do destino. ` +
+        `Complete o cadastro em Grupos tributários.`,
+    };
+  }
+  // `aliquota_icms` nasceu em 19/08/2026 **sem** check de 0–100 (B1 registrou
+  // que pôr constraint retroativa em coluna com dado em produção é mudança de
+  // outra natureza). Aqui isso importa mais do que no ICMS próprio: a alíquota
+  // interna é o **divisor** da MVA ajustada, e um cadastro tipo `90` no lugar
+  // de `9,0` produz uma MVA de milhares por cento — que estoura
+  // `fiscal_document_items.icms_st_mva numeric(7,4)` **depois** de a SEFAZ ter
+  // autorizado a nota. Recusar antes de emitir é a única correção barata.
+  if (aliquotaInterna < 0 || aliquotaInterna >= 100) {
+    return {
+      ok: false,
+      reason:
+        `o CST/CSOSN do grupo tributário "${group.name}" declara ICMS-ST, mas a alíquota de ICMS ` +
+        `cadastrada (${aliquotaInterna}%) está fora da faixa aceitável de 0 a 100 — ela é usada como ` +
+        `alíquota interna do destino e como divisor do ajuste da MVA. Corrija em Grupos tributários.`,
+    };
+  }
+
+  const resolucao = resolveMvaRule({ ncm, ufDestino: query.ufDestino }, mvaRules);
+  if (!resolucao.found) {
+    return {
+      ok: false,
+      reason: `o CST/CSOSN do grupo tributário "${group.name}" declara ICMS-ST, mas ${resolucao.reason}`,
+    };
+  }
+  const rule = resolucao.rule;
+
+  const interestadual = query.ufOrigem.trim().toUpperCase() !== query.ufDestino.trim().toUpperCase();
+  // Regime 3 é o Normal; 1 e 2 são Simples Nacional (mesmo código de `branches.regime_tributario`).
+  const ajusta = interestadual && query.regime.trim() === "3";
+  const mva = ajusta
+    ? mvaAjustada(
+        rule.mvaOriginal,
+        aliquotaInterestadual(query.ufOrigem, query.ufDestino, origemMercadoria),
+        aliquotaInterna,
+      )
+    : rule.mvaOriginal;
+
+  // `icms_st_mva` é `numeric(7,4)`: 999,9999 é o maior valor que a coluna
+  // guarda. Uma alíquota interna alta (mas dentro de 0–100) ainda consegue
+  // levar a MVA ajustada além disso — com 300% de MVA original e 95% de
+  // interna, o ajuste passa de 1.700%. Mesmo motivo da checagem acima: sem esta
+  // recusa a nota é autorizada e só então a gravação falha.
+  if (mva > MVA_MAXIMA_PERSISTIVEL) {
+    return {
+      ok: false,
+      reason:
+        `o ajuste da MVA para esta operação resultou em ${mva}%, acima do máximo que o sistema registra ` +
+        `(${MVA_MAXIMA_PERSISTIVEL}%). Confira a MVA cadastrada em MVA (ICMS-ST) e a alíquota de ICMS ` +
+        `do grupo tributário "${group.name}".`,
+    };
+  }
+
+  const base = toCents(basePropria * (1 + mva / 100));
+  // `Math.max(0, …)`: um ST negativo não existe no leiaute. Só acontece com
+  // cadastro incoerente (MVA zero e alíquota interna menor que a do próprio),
+  // e zerar é o resultado correto — nada a recolher — em vez de um campo que a
+  // SEFAZ rejeita.
+  const valor = Math.max(0, toCents(taxAmount(base, aliquotaInterna) - icmsProprio));
+
+  const fcp = rule.fcpAliquota;
+  return {
+    ok: true,
+    // Sempre "4" (Margem de Valor Agregado) — ver `icms_modalidade_base_calculo_st` em `types.ts`.
+    modalidadeBaseCalculo: "4",
+    mva,
+    base,
+    aliquota: aliquotaInterna,
+    valor,
+    // Base do FCP-ST é a mesma do ICMS-ST (confirmado antes de decidir; é como
+    // os emissores de referência preenchem `vBCFCPST`). Nula quando o NCM/UF
+    // não tem FCP cadastrado — nula é "não calculado", nunca zero.
+    fcpBase: fcp !== null ? base : undefined,
+    fcpAliquota: fcp ?? undefined,
+    fcpValor: fcp !== null ? taxAmount(base, fcp) : undefined,
   };
 }
 
@@ -372,22 +606,40 @@ function totalDeclarado(
 }
 
 /**
- * Total da nota com o IPI somado (`vNF` = `vProd` − `vDesc` + … + `vIPI`, regra
- * W16-10 do validador da SEFAZ).
+ * Total da nota com os impostos **por fora** somados.
  *
- * O IPI é imposto **por fora**: ele não está no preço da venda, é acrescido ao
- * total do documento. Enquanto nenhum grupo tributário tiver alíquota de IPI
- * — o estado de todos eles hoje, já que a coluna nasce nula em B1 — isto
- * devolve exatamente `sale.totalAmount` e nada muda. Quando alguém cadastrar
- * IPI, o total da nota passa a ser maior que o total da venda; isso é o que o
- * leiaute exige, e mandar `vNF` sem o `vIPI` que os itens declaram é rejeição
- * na validação.
+ * A regra W16-10 do validador da SEFAZ define `vNF` como
+ * `vProd − vDesc − vICMSDeson + vST + vFCPST + vFrete + vSeg + vOutro + vII +
+ * vIPI + …`. Três dessas parcelas este motor calcula: **IPI** (desde B1),
+ * **ICMS-ST** e **FCP-ST** (B2). Nenhuma delas está no preço da venda — são
+ * acrescidas ao documento —, então declará-las nos itens sem somá-las no total
+ * é rejeição garantida.
+ *
+ * Nasceu em B1 como `totalComIpi`, com um parâmetro só; virou variádica em B2,
+ * quando deixou de existir um único imposto por fora. Enquanto nenhum grupo
+ * tiver IPI e nenhum item tiver ST — o estado de hoje, já que as colunas
+ * nascem nulas —, devolve exatamente `sale.totalAmount` e nada muda. Quando
+ * passar a haver, **o total da nota fica maior que o total da venda**: correto
+ * pelo leiaute, e a diferença mais visível que B1 e B2 introduzem.
  */
-function totalComIpi(total: number, ipiValorTotal: number | undefined): number {
-  return ipiValorTotal === undefined ? total : toCents(total + ipiValorTotal);
+function totalComImpostosPorFora(total: number, ...porFora: (number | undefined)[]): number {
+  const declarados = porFora.filter((valor): valor is number => valor !== undefined);
+  if (declarados.length === 0) return total;
+  return toCents(declarados.reduce((soma, valor) => soma + valor, total));
 }
 
-export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[]): BuildPayloadResult {
+/**
+ * `mvaRules` é opcional e vazio por padrão (B2): **não ter MVA cadastrada não
+ * é erro** — a imensa maioria das mercadorias não tem ST, e o cadastro só é
+ * consultado para os CST/CSOSN que a declaram. Quem passa a lista é a Edge
+ * Function (`readMvaRules`, em `data.ts`); os testes que não tratam de ST
+ * simplesmente a omitem.
+ */
+export function buildNfePayloadFromSale(
+  sale: SaleForInvoice,
+  rules: TaxRuleRow[],
+  mvaRules: MvaRuleRow[] = [],
+): BuildPayloadResult {
   const errors: string[] = [];
 
   if (!sale.contact) {
@@ -415,10 +667,20 @@ export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[
     tipoCliente,
   };
 
-  const resolved = resolveItemsForSale(sale, rules, query);
+  const resolved = resolveItemsForSale(sale, rules, query, mvaRules);
   if (!resolved.ok) return resolved;
-  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal } =
-    resolved.data;
+  const {
+    cfop,
+    items,
+    icmsBaseCalculoTotal,
+    icmsValorTotal,
+    icmsStBaseCalculoTotal,
+    icmsStValorTotal,
+    fcpStValorTotal,
+    ipiValorTotal,
+    pisValorTotal,
+    cofinsValorTotal,
+  } = resolved.data;
 
   const localDestino = branch.uf === contact.uf ? 1 : 2;
 
@@ -457,11 +719,14 @@ export function buildNfePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[
     telefone_destinatario: contact.phone ?? undefined,
 
     valor_produtos: sale.subtotalAmount,
-    valor_total: totalComIpi(sale.totalAmount, ipiValorTotal),
+    valor_total: totalComImpostosPorFora(sale.totalAmount, ipiValorTotal, icmsStValorTotal, fcpStValorTotal),
     valor_desconto: sale.discountAmount || undefined,
     valor_frete: sale.freightAmount || undefined,
     icms_base_calculo: icmsBaseCalculoTotal,
     icms_valor_total: icmsValorTotal,
+    icms_base_calculo_st: icmsStBaseCalculoTotal,
+    icms_valor_total_st: icmsStValorTotal,
+    fcp_valor_total_st: fcpStValorTotal,
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
@@ -533,7 +798,11 @@ function buildNfceDestinatarioFields(contact: SaleForInvoiceContact | null): Par
  *   cliente que mora em outro estado para decidir CFOP/local_destino — quem
  *   decide é onde a venda aconteceu, não onde o cliente mora.
  */
-export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow[]): BuildPayloadResult {
+export function buildNfcePayloadFromSale(
+  sale: SaleForInvoice,
+  rules: TaxRuleRow[],
+  mvaRules: MvaRuleRow[] = [],
+): BuildPayloadResult {
   const errors: string[] = [];
   if (!sale.branch.cnpj) errors.push("Filial sem CNPJ cadastrado.");
   if (!sale.branch.uf) errors.push("Filial sem UF cadastrada (cadastro de filial é só por SQL, por enquanto).");
@@ -552,10 +821,20 @@ export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow
     tipoCliente: "consumidor_final",
   };
 
-  const resolved = resolveItemsForSale(sale, rules, query);
+  const resolved = resolveItemsForSale(sale, rules, query, mvaRules);
   if (!resolved.ok) return resolved;
-  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal } =
-    resolved.data;
+  const {
+    cfop,
+    items,
+    icmsBaseCalculoTotal,
+    icmsValorTotal,
+    icmsStBaseCalculoTotal,
+    icmsStValorTotal,
+    fcpStValorTotal,
+    ipiValorTotal,
+    pisValorTotal,
+    cofinsValorTotal,
+  } = resolved.data;
 
   const payload: NfePayload = {
     natureza_operacao: sale.operationType?.trim() || "Venda de mercadoria",
@@ -580,11 +859,14 @@ export function buildNfcePayloadFromSale(sale: SaleForInvoice, rules: TaxRuleRow
     ...buildNfceDestinatarioFields(sale.contact),
 
     valor_produtos: sale.subtotalAmount,
-    valor_total: totalComIpi(sale.totalAmount, ipiValorTotal),
+    valor_total: totalComImpostosPorFora(sale.totalAmount, ipiValorTotal, icmsStValorTotal, fcpStValorTotal),
     valor_desconto: sale.discountAmount || undefined,
     valor_frete: sale.freightAmount || undefined,
     icms_base_calculo: icmsBaseCalculoTotal,
     icms_valor_total: icmsValorTotal,
+    icms_base_calculo_st: icmsStBaseCalculoTotal,
+    icms_valor_total_st: icmsStValorTotal,
+    fcp_valor_total_st: fcpStValorTotal,
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
@@ -649,7 +931,11 @@ export type SaleReturnForInvoice = {
  * Pesquisado contra a documentação da Focus NFe antes de desenhar (mesmo
  * procedimento das etapas F1/8/8.5) — ver `NfePayloadNotaReferenciada`.
  */
-export function buildReturnNfePayload(saleReturn: SaleReturnForInvoice, rules: TaxRuleRow[]): BuildPayloadResult {
+export function buildReturnNfePayload(
+  saleReturn: SaleReturnForInvoice,
+  rules: TaxRuleRow[],
+  mvaRules: MvaRuleRow[] = [],
+): BuildPayloadResult {
   const errors: string[] = [];
 
   if (!saleReturn.contact) {
@@ -697,10 +983,20 @@ export function buildReturnNfePayload(saleReturn: SaleReturnForInvoice, rules: T
     payments: [],
   };
 
-  const resolved = resolveItemsForSale(asSale, rules, query);
+  const resolved = resolveItemsForSale(asSale, rules, query, mvaRules);
   if (!resolved.ok) return resolved;
-  const { cfop, items, icmsBaseCalculoTotal, icmsValorTotal, ipiValorTotal, pisValorTotal, cofinsValorTotal } =
-    resolved.data;
+  const {
+    cfop,
+    items,
+    icmsBaseCalculoTotal,
+    icmsValorTotal,
+    icmsStBaseCalculoTotal,
+    icmsStValorTotal,
+    fcpStValorTotal,
+    ipiValorTotal,
+    pisValorTotal,
+    cofinsValorTotal,
+  } = resolved.data;
 
   const payload: NfePayload = {
     natureza_operacao: "Devolução de venda",
@@ -737,10 +1033,18 @@ export function buildReturnNfePayload(saleReturn: SaleReturnForInvoice, rules: T
     telefone_destinatario: contact.phone ?? undefined,
 
     valor_produtos: saleReturn.totalAmount,
-    valor_total: totalComIpi(saleReturn.totalAmount, ipiValorTotal),
+    valor_total: totalComImpostosPorFora(
+      saleReturn.totalAmount,
+      ipiValorTotal,
+      icmsStValorTotal,
+      fcpStValorTotal,
+    ),
     valor_desconto: saleReturn.discountAmount || undefined,
     icms_base_calculo: icmsBaseCalculoTotal,
     icms_valor_total: icmsValorTotal,
+    icms_base_calculo_st: icmsStBaseCalculoTotal,
+    icms_valor_total_st: icmsStValorTotal,
+    fcp_valor_total_st: fcpStValorTotal,
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,

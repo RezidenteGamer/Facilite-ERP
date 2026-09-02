@@ -2812,3 +2812,298 @@ cliente), B9 (IBPT) e B10 (IBS/CBS/IS). Também fora: filtrar `pRedBC` por CST
 `ipi_codigo_enquadramento`, que existe em `fiscal_document_items` desde A3 e
 continua nulo — é código de enquadramento legal, dado de cadastro que ninguém
 tem hoje.
+
+### Decisão arquitetural: ICMS-ST com MVA — a tabela `mva_rules`, a alíquota interestadual e o que ficou deliberadamente de fora (B2) (01/09/2026)
+
+Segunda tarefa da Etapa 2, e continuação direta de B1. B1 ensinou o motor a
+calcular o ICMS **próprio** por item; B2 acrescenta a camada de cima, o ICMS
+retido por **substituição tributária** — o que os CST `10`, `30` e `70`
+(Regime Normal) e os CSOSN `201`, `202` e `203` (Simples) declaram.
+
+As nove colunas de ST/FCP de `fiscal_document_items` e as três de total de
+`fiscal_documents` existem desde A3 e nunca foram escritas: `persist.ts`
+gravava `total_icms_st_base`/`total_icms_st`/`total_fcp` como `null` fixo, com
+o comentário "quem os preenche é o motor tributário da Etapa 2". É este.
+Nenhuma coluna nova foi criada em `fiscal_document_items`.
+
+#### `mva_rules`: por que tabela nova, e por que NCM × UF de destino
+
+Todas as alíquotas que B1 mexeu moram em `tax_groups` porque são do
+**produto** — o mesmo item tributa igual, venda para onde vender. A MVA não:
+quem a publica é o estado **de destino**, por NCM, em protocolo ou convênio
+ICMS-ST, e o mesmo produto tem MVA diferente conforme o estado que recebe.
+Pô-la em `tax_groups` obrigaria um grupo por combinação produto × UF — o
+cadastro se multiplicando para representar uma dimensão que ele não tem.
+
+`fcp_aliquota` mora na mesma tabela, pelo mesmo argumento: o Fundo de Combate
+à Pobreza é percentual do destino, publicado nos mesmos protocolos, junto da
+MVA. O coringa `'*'` em `uf_destino` é literalmente o de `tax_rules`
+(`WILDCARD_UF_DESTINO`), com o mesmo desempate — mais específico vence.
+
+O NCM é comparado **exato** (só os dígitos, então `2202.10.00` e `22021000`
+casam). Casar por prefixo faria uma linha de `2202` capturar todo o capítulo em
+silêncio, que é o oposto do que "mais específico vence" promete.
+
+#### `conteudo_importado` foi avaliado e descartado — o dado já existe
+
+O enunciado sugeria uma coluna `conteudo_importado` para a alíquota
+interestadual de 4% (Resolução do Senado 13/2012). Ela não entrou: o dado já
+está em `products.origem_mercadoria`, e a tabela de origem **é exatamente** o
+critério da resolução — `1` e `2` (importação integral), `3` (Conteúdo de
+Importação entre 40% e 70%) e `8` (acima de 70%) são os 4%; `6` e `7`
+(estrangeira **sem similar nacional**, lista CAMEX) e `4` (processo produtivo
+básico) são exceções expressas e mantêm 7%/12%. Duplicar isso numa coluna de
+`mva_rules` seria pior que redundante: importação é atributo do **produto**,
+não do par NCM × UF, e as duas cópias divergiriam no primeiro cadastro
+descuidado.
+
+#### A tabela de alíquota interestadual, e a correção ao enunciado sobre o ES
+
+`aliquotaInterestadual` (em `mvaRules.ts`) é tabela fixa no código, não
+cadastro: mudá-la exige resolução do Senado, não decisão do contador. Fonte:
+Resolução 22/1989, art. 1º, parágrafo único (7% para saídas do Sul/Sudeste com
+destino a Norte/Nordeste/Centro-Oeste e ao Espírito Santo; 12% no resto) e
+Resolução 13/2012 (4% para importado).
+
+**O enunciado listava o ES entre as origens que aplicam 7%, e isso está
+errado.** A resolução põe o Espírito Santo do lado de quem *recebe* o
+incentivo, não de quem o concede: saída **do** ES é sempre 12%, inclusive para
+o Nordeste. Conferido em duas tabelas independentes (Conta Azul e TaxUp, as
+duas com ES → BA/AM/GO = 12%) antes de codificar, porque é o ponto que quase
+todo resumo em prosa erra. As origens de 7% no código são só `MG`, `PR`, `RJ`,
+`RS`, `SC` e `SP`; há teste dedicado a esse caso.
+
+#### Decisão: `group.aliquotaIcms` é a proxy da alíquota interna do destino
+
+Esta é a **aproximação mais relevante de B2**, e está aqui de propósito para
+quem for revisar não descobri-la lendo código. O ICMS-ST precisa da alíquota
+interna do estado **de destino** em dois lugares — como divisor da MVA
+ajustada e como alíquota aplicada sobre a base majorada —, e este sistema não
+tem tabela de alíquota interna por UF × NCM. A escolha foi reaproveitar
+`tax_groups.aliquotaIcms`, que o núcleo já trata como "a alíquota de ICMS deste
+grupo", sem dimensão de UF.
+
+Isso é uma **aproximação conhecida, não uma modelagem completa**: um produto
+vendido de SP para a Bahia usa a alíquota cadastrada no grupo (tipicamente a de
+SP) como se fosse a interna baiana. Inventar uma tabela de 27 UFs sem fonte
+confiável seria pior — foi exatamente o que o enunciado mandou não fazer. Fica
+registrado como o candidato número um da próxima tarefa que tocar em ICMS.
+
+#### Convênio ICMS 35/2011: o Simples não usa MVA ajustada
+
+Regra que o enunciado não mencionava e que a pesquisa trouxe: o optante pelo
+Simples Nacional, **na condição de substituto tributário, não aplica MVA
+ajustada** nem em operação interestadual — usa sempre a MVA ST original
+(Convênio ICMS 35/2011, cláusula primeira, CONFAZ). Por isso o ajuste em
+`resolveSubstituicaoTributaria` depende do **regime de quem emite**, e não só
+das UFs: `interestadual && regime === '3'`.
+
+#### A subtração do ICMS próprio, e as duas limitações que ela carrega
+
+`vICMSST = (base ST × alíquota interna) − ICMS próprio já destacado no item`.
+Conferido em duas fontes antes de implementar — é o passo que mais se erra, e
+não é o valor cheio sobre a base majorada. A fórmula da MVA ajustada foi
+conferida contra os exemplos publicados pelas SEFAZ de PE e do PR (MVA 40%,
+inter 12%, intra 18% → 50,24%, que é exatamente o que o teste espera).
+
+Duas limitações conhecidas ficaram, as duas por falta de dado, as duas
+anotadas também no código:
+
+1. **Interestadual: o próprio que se deduz está calculado com a alíquota
+   interna.** `resolveItemsForSale` usa `group.aliquotaIcms` para o `vICMS` de
+   qualquer operação — B1 nunca aplicou alíquota interestadual ao próprio.
+   Numa venda SP→BA de R$ 1.000 com grupo de 18%, o item destaca 180 (o correto
+   seriam 70, a 7%) e a dedução leva o mesmo 180: **o ST sai a menos**. O
+   ajuste da MVA usa a interestadual correta; o próprio, não. Corrigir isso é
+   corrigir B1, e B2 recebeu instrução explícita de não mexer no que B1 fez.
+2. **Simples Nacional: não há dedução nenhuma.** Os CSOSN `201`/`202`/`203`
+   não declaram `vICMS` no XML (o próprio é pago no DAS), então o ST sai cheio
+   sobre a base majorada. A prática corrente permite deduzir a alíquota devida
+   aplicada sobre o valor da operação própria, mas esse número não existe no
+   cadastro e varia por estado — é assunto de B8.
+
+As duas têm a mesma raiz: o motor tem **uma** alíquota de ICMS por grupo e
+nenhuma dimensão de UF. Vale resolver as três juntas.
+
+#### FCP: só o retido por ST, e a base é a do ST
+
+A base do FCP é a mesma base do ICMS-ST — confirmado antes de decidir; é como
+os emissores de referência preenchem `vBCFCPST`. O FCP que B2 calcula é sempre
+o **retido por substituição** (tags `*FCPST`, campos `fcp_base_calculo_st`/
+`fcp_percentual_st`/`fcp_valor_st` no payload), nunca o da operação própria: a
+alíquota vem de `mva_rules`, que só é consultada para itens com ST. As colunas
+`fcp_base`/`fcp_aliquota`/`fcp_valor` de `fiscal_document_items` e
+`total_fcp` do cabeçalho — que A3 criou com nome genérico — guardam esse FCP-ST,
+e ganharam comentário dizendo isso.
+
+#### Os campos novos no payload, e um desvio de nomenclatura do enunciado
+
+O enunciado pedia `icms_st_valor_total` e `fcp_valor_total` no `NfePayload`.
+Os nomes usados foram `icms_valor_total_st` e `fcp_valor_total_st`, porque
+`NfePayload` é **espelho do corpo JSON da Focus NFe** (é o que diz o cabeçalho
+de `types.ts` desde a etapa F1), e é assim que a tabela de campos da Focus os
+chama. Mesma razão para os campos de item: `icms_modalidade_base_calculo_st`,
+`icms_margem_valor_adicionado_st`, `icms_base_calculo_st`, `icms_aliquota_st`,
+`icms_valor_st`. Inventar nomes próprios num tipo cuja razão de existir é
+espelhar o provedor seria uma tradução a mais para manter.
+
+`icms_modalidade_base_calculo_st` sai sempre `"4"` (Margem de Valor Agregado):
+é a única modalidade que este motor sabe calcular — as outras (`0` preço
+tabelado, `1`–`3` listas, `5` pauta, `6` valor da operação) são **valores**
+publicados pelo estado, não uma margem. As regras 932/933 do validador amarram
+os dois campos: com `modBCST = 4` o `pMVAST` é obrigatório, e com qualquer
+outra modalidade ele é proibido.
+
+#### ICMS-ST e FCP entram no total da nota
+
+`totalComIpi` (B1) virou `totalComImpostosPorFora`, variádica. A regra W16-10
+do validador define `vNF` como `vProd − vDesc − vICMSDeson + vST + vFCPST +
+vFrete + vSeg + vOutro + vII + vIPI + …` — três dessas parcelas este motor
+calcula, e declará-las nos itens sem somá-las no total é rejeição garantida.
+Enquanto ninguém cadastrar MVA nem IPI, a função devolve exatamente
+`sale.totalAmount` e nada muda. Quando cadastrar, **o total da nota fica maior
+que o total da venda**: correto pelo leiaute, e a diferença mais visível que
+B1 e B2 introduzem.
+
+#### O que ficou deliberadamente de fora, e por quê
+
+- **Frete, seguro e outras despesas na base do ST.** A base do ST deveria
+  incluí-los (LC 87/96, art. 8º, II, "b"), mas `SaleForInvoiceItem` carrega só
+  `quantity`/`unitPrice`/`discountAmount`/`totalAmount` — **não há rateio de
+  frete por item** neste sistema (o frete é campo de cabeçalho da venda).
+  Inventar um rateio seria decidir por conta própria um critério (por valor?
+  por peso? por quantidade?) que muda o imposto. Fica documentado como omissão.
+- **O IPI na base do ST.** Também deveria entrar, e é matéria contestada: a
+  inclusão depende de a operação ser entre contribuintes e destinada a
+  industrialização/comercialização (LC 87/96, art. 13, §2º, contra o art. 41 do
+  RICMS/SP para fins de ST), e há litígio ativo sobre isso. O motor tem o valor
+  do IPI por item desde B1, então incluí-lo é barato — o que falta é a decisão,
+  não o dado. Não foi feito porque o enunciado não pediu e a regra não é
+  unânime.
+- **`pRedBCST`** (`fiscal_document_items.icms_st_reducao_base`). A base do ST
+  parte da base do próprio, já com a redução do próprio aplicada; uma segunda
+  redução, só do ST, é outra dimensão de cadastro e comporia com a primeira de
+  um jeito que precisa ser decidido, não adivinhado. A coluna continua nula,
+  como está desde A3.
+- **CST `60` / CSOSN `500`** (ICMS já retido anteriormente). Precisam de
+  `vBCSTRet`/`vICMSSTRet` — quanto de ST veio embutido no custo da compra —,
+  dado que este sistema não guarda. Comportamento inalterado, com teste
+  provando que nenhum campo de ST é preenchido para eles.
+- **CST `90` / CSOSN `900`** ("Outros"). Os grupos XML deles aceitam ST, mas
+  como catch-all: é o código que se usa quando nenhum outro serve, e a ST neles
+  é opcional. Incluí-los obrigaria toda venda com CST 90 a ter MVA cadastrada,
+  recusando emissões que hoje saem corretas.
+- **CFOP de operação com ST.** `resolveTaxRule`/`tax_rules` continuam
+  resolvendo CFOP só pela forma da operação (regime/natureza/UFs/tipo de
+  cliente), **sem saber se há ST**. Na prática o CFOP de venda com ST é outro
+  (5405/6404 e afins), e hoje isso depende de o contador cadastrar uma
+  `tax_rules` própria com uma `natureza_operacao` diferente — o sistema **não**
+  escolhe essa regra sozinho. É lacuna real; redesenhar as dimensões de
+  `resolveTaxRule` é tarefa maior e separada.
+- **Nota de devolução: o ST é recalculado, não copiado.** `buildReturnNfePayload`
+  passa por `resolveItemsForSale` como qualquer venda, então a devolução usa o
+  cadastro **de hoje**. Se a MVA mudar entre a venda e a devolução, a nota de
+  entrada reverte um valor de ST diferente do que foi retido; se a linha de MVA
+  for apagada, a devolução passa a ser recusada. Os valores que a nota original
+  declarou estão em `fiscal_document_items` desde A3 e não são consultados —
+  fazer a devolução ler de lá é a correção certa, e é a mesma correção que o
+  IPI de B1 já pedia.
+
+#### Achados do `/code-review high` (duas passadas)
+
+A primeira passada trouxe três achados. Dois são as limitações da subtração
+descritas acima — **não corrigidos de propósito**, porque corrigi-los é mexer
+em B1 e em B8; ficaram documentados no código, no ponto exato em que
+acontecem. O terceiro foi corrigido:
+
+**MVA ajustada podia estourar `numeric(7,4)` depois de a nota ser autorizada.**
+`tax_groups.aliquota_icms` nasceu em 19/08/2026 sem `check` de 0–100, e ela é o
+**divisor** do ajuste: um `90` digitado no lugar de `9,0`, com MVA original
+alta, produz uma MVA ajustada de milhares por cento. `icms_st_mva` é
+`numeric(7,4)` (máximo 999,9999), então o `insert` de `fiscal_document_items`
+falharia — e falharia **depois** de o cabeçalho já estar gravado e a SEFAZ já
+ter autorizado, caindo na mensagem "a nota foi autorizada, mas houve falha ao
+gravar o detalhe". `resolveSubstituicaoTributaria` ganhou duas recusas de
+cadastro antes de emitir: alíquota interna fora de 0–100, e MVA resultante
+acima de 999,9999. As duas têm teste.
+
+A segunda passada trouxe o achado da devolução (acima), também documentado em
+vez de corrigido, pelo mesmo critério de escopo.
+
+#### A migration (escrita, NÃO aplicada)
+
+`supabase/migrations/00000000000006_b2_icms_st_mva.sql`. Cria a tabela
+`mva_rules` (`id`, `ncm`, `uf_destino`, `mva_original`, `fcp_aliquota`,
+`created_at`), a unique `(ncm, uf_destino)` — que é o que torna o desempate
+"mais específico vence" determinístico —, dois `check` (MVA de 0 a 300, porque
+bebidas e combustíveis passam de 100% de verdade; FCP de 0 a 100), um índice de
+lookup, RLS com as **quatro policies separadas** atreladas ao módulo
+`mva-icms-st`, e os `comment on` de tabela e colunas.
+
+**O módulo `mva-icms-st` não existia** — conferido em `modules`/`module_fields`
+antes de escrever. Sem ele as policies recusariam tudo (`has_permission` de um
+módulo inexistente é sempre falso) e ninguém teria como cadastrar uma MVA pela
+aplicação: a tabela ficaria inalcançável dos dois lados. A migration cria a
+linha em `modules` (`storage_kind = 'table'`, `data_table = 'mva_rules'`,
+`sort_order` 92 — na faixa dos cadastros fiscais, sem renumerar nada),
+os quatro `module_fields`, e copia as permissões de quem já tem
+`grupos-tributarios` (em vez de fixar um papel pelo nome, para continuar
+correta num banco recriado do zero).
+
+Nenhum campo aponta `reference_module_id`, e é decisão: `uf_destino` aceita o
+coringa `*` (um campo de referência só ofereceria siglas reais de `ufs` e
+apagaria o coringa em silêncio na primeira edição — mesma decisão de
+`tax_rules.uf_destino`, 28/08/2026), e `ncm` é texto livre porque `ncm_codes`
+nunca virou módulo. Consequência prática: **o NCM é digitado à mão aqui**, sem
+o `SearchCombobox` que Produtos tem. Ligar a mesma busca a este módulo é
+melhoria de tela, não de schema. Como nenhuma linha tem `reference_module_id`,
+o trigger `module_fields_guard_reference` nem é acionado — não foi preciso
+desligá-lo, como a migration dos catálogos precisou.
+
+`src/types/supabase.ts` **não** foi tocado, ao contrário de B1: `mva_rules` só
+é lida pela Edge Function (que não tem `Database`) e pela `GenericModulePage`,
+que resolve tabela dinâmica com o cliente destipado (`as unknown as
+SupabaseClient`, o mesmo caminho já usado por `tax_rules`). Não há front novo
+nesta tarefa.
+
+#### Testado
+
+`npm run build` e `npm run lint` limpos (61 avisos, exatamente os mesmos de
+antes da tarefa, e zero erros). `deno check supabase/functions/fiscal-emit/index.ts`
+limpo — a Edge Function não passa pelo `tsc -b`, e vale rodar isto sempre que
+o núcleo mudar. `npm test` com **140 testes passando** (2 a mais que B1) e as
+duas baterias que dependem de credencial em `.env.local` falhando alto, como é
+o desenho delas.
+
+`tests/unit/invoiceTaxesSt.test.ts` é a bateria nova, separada de
+`invoiceTaxes.test.ts` porque são duas dimensões diferentes do mesmo item — o
+próprio (B1) e o ST (B2). Entra por `buildNfePayloadFromSale`, como a de B1, e
+as contas continuam escritas por extenso nos comentários. Cobre: a fórmula da
+MVA ajustada isolada (12%, 7%, 4%, alíquotas iguais, divisor zero), a tabela
+interestadual inteira (inclusive o ES como origem), MVA original em operação
+interna, MVA ajustada em interestadual, o Simples sem ajuste, a subtração do
+próprio, a base já reduzida, o CST 30 sem desconto, o coringa perdendo para a
+UF exata, o NCM com pontuação, as cinco recusas de cadastro, FCP presente,
+ausente e zero, e os totais somando no `vNF`.
+
+Um detalhe de arredondamento ficou anotado no teste interestadual: a base do ST
+dá 1587,805 e o motor grava 1587,80, porque 1587,805 não é representável em
+binário (o mais próximo é 1587,80499…). É o mesmo `Math.round` que o motor usa
+desde a etapa 8; trocá-lo por causa de um teste mudaria o valor de toda nota.
+
+`tests/unit/invoiceTaxes.test.ts` (a bateria de B1) ganhou uma `mva_rules`
+cadastrada. Sem ela, os testes de CST `10`/`30`/`70` e CSOSN `201`/`202`/`203`
+passariam a ser recusados por falta de MVA — e eles não tratam de ST nenhum,
+tratam do ICMS próprio. Nenhuma expectativa de B1 mudou.
+
+**Nada foi testado no navegador nem no banco**: a migration não foi aplicada e
+a Edge Function não foi implantada — as duas coisas ficaram para a sessão de
+coordenação, junto com a revisão independente.
+
+#### Fora de escopo
+
+B5 (PIS/COFINS por CST — monofásico, cálculo por unidade), B8 (Simples
+Nacional completo: `pCredSN` do CSOSN 101/201, e a dedução do próprio no ST
+descrita acima), B9 (IBPT) e B10 (IBS/CBS/IS). Também fora: tudo da seção "o
+que ficou deliberadamente de fora", e a alíquota interna por UF × NCM, que é a
+correção de raiz das três limitações registradas aqui.

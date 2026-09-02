@@ -303,6 +303,45 @@ export type NfePayloadItem = {
   icms_aliquota?: number;
   icms_valor?: number;
 
+  /* --- ICMS-ST (B2, 01/09/2026) --- */
+
+  /**
+   * `modBCST` — modalidade de determinação da base de cálculo do ICMS-ST.
+   *
+   * Este motor emite sempre `"4"` (Margem de Valor Agregado, em %), porque é a
+   * única modalidade que ele sabe calcular: as outras (`0` preço tabelado, `1`
+   * a `3` listas, `5` pauta, `6` valor da operação) são **valores** publicados
+   * pelo estado, não uma margem, e exigiriam outra tabela de cadastro. As
+   * regras 932/933 do validador amarram os dois campos: com `modBCST = 4` o
+   * `pMVAST` é obrigatório, e com qualquer outra modalidade ele é proibido.
+   */
+  icms_modalidade_base_calculo_st?: string;
+  /** `pMVAST` — a MVA **efetivamente usada**, já ajustada quando a operação é interestadual. */
+  icms_margem_valor_adicionado_st?: number;
+  /** `pRedBCST`. Nunca preenchido hoje — ver a entrada de B2 no AGENTS.md. */
+  icms_reducao_base_calculo_st?: number;
+  /** `vBCST` — base do próprio item majorada pela MVA. */
+  icms_base_calculo_st?: number;
+  /** `pICMSST` — a alíquota **interna do estado de destino** (hoje aproximada pela do grupo). */
+  icms_aliquota_st?: number;
+  /** `vICMSST` — (base ST × alíquota interna) − o ICMS próprio já destacado neste item. */
+  icms_valor_st?: number;
+
+  /* --- FCP retido por ST (B2, 01/09/2026) --- */
+
+  /**
+   * `vBCFCPST` — a base do FCP-ST, que é **a mesma base do ICMS-ST**.
+   *
+   * O FCP calculado aqui é sempre o **retido por substituição tributária**
+   * (tags `*FCPST`), não o FCP da operação própria (`*FCP`): a alíquota vem de
+   * `mva_rules`, que só é consultada quando o item tem ST.
+   */
+  fcp_base_calculo_st?: number;
+  /** `pFCPST` — percentual do Fundo de Combate à Pobreza no estado de destino. */
+  fcp_percentual_st?: number;
+  /** `vFCPST`. */
+  fcp_valor_st?: number;
+
   /** `tax_groups.cst_ipi`, com `products.cst_ipi` de fallback (ver `taxGroups.ts`). */
   ipi_situacao_tributaria?: string;
   ipi_base_calculo?: number;
@@ -409,6 +448,16 @@ export type NfePayload = {
   valor_outras_despesas?: number;
   icms_base_calculo?: number;
   icms_valor_total?: number;
+  /**
+   * `vBCST` do grupo `total` — a soma das bases de ICMS-ST dos itens (B2).
+   * O nome repete o do campo de item porque é o que a Focus usa nos dois
+   * lugares; o que os distingue é o nível em que aparecem.
+   */
+  icms_base_calculo_st?: number;
+  /** `vST` — a soma do ICMS-ST dos itens (B2). Entra no `valor_total`. */
+  icms_valor_total_st?: number;
+  /** `vFCPST` do grupo `total` — a soma do FCP-ST dos itens (B2). Entra no `valor_total`. */
+  fcp_valor_total_st?: number;
   valor_ipi?: number;
   valor_pis?: number;
   valor_cofins?: number;

@@ -200,12 +200,17 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
     total_ipi: toNumberOrNull(payload.valor_ipi),
     total_pis: toNumberOrNull(payload.valor_pis),
     total_cofins: toNumberOrNull(payload.valor_cofins),
-    // ICMS-ST, FCP, IBS e CBS ficam nulos: o mapeamento de hoje não os calcula,
-    // e nulo em `total_*` significa "não calculado", nunca zero (A3). Quem os
-    // preenche é o motor tributário da Etapa 2.
-    total_icms_st_base: null,
-    total_icms_st: null,
-    total_fcp: null,
+    // ICMS-ST e FCP passaram a ser calculados em B2 (01/09/2026) e deixaram de
+    // ser `null` fixo. Continuam nulos quando nenhum item da nota tem ST — e
+    // nulo em `total_*` significa "não calculado", nunca zero (A3).
+    total_icms_st_base: toNumberOrNull(payload.icms_base_calculo_st),
+    total_icms_st: toNumberOrNull(payload.icms_valor_total_st),
+    // `total_fcp` recebe o FCP **retido por ST** (`vFCPST`), o único que este
+    // motor calcula: a alíquota vem de `mva_rules`, consultada só para itens
+    // com ST. O FCP da operação própria continua sem quem o preencha.
+    total_fcp: toNumberOrNull(payload.fcp_valor_total_st),
+    // IBS e CBS seguem nulos: são a Reforma Tributária (B10), que ainda não tem
+    // motor nenhum.
     total_ibs: null,
     total_cbs: null,
 
@@ -217,11 +222,15 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
  * `NfePayloadItem[]` → linhas de `fiscal_document_items`.
  *
  * Grava **o que foi declarado**, não uma segunda opinião sobre a tributação: as
- * colunas de ICMS/PIS/COFINS recebem exatamente os valores que foram para o
- * XML, e ficam nulas onde o mapeamento de hoje não calcula nada (ICMS-ST, FCP,
- * IPI, IBS, CBS e as reduções de base). Fosse o contrário — modelo em branco e
+ * colunas recebem exatamente os valores que foram para o XML, e ficam nulas
+ * onde o mapeamento não calcula nada. Fosse o contrário — modelo em branco e
  * XML com imposto —, as duas metades de A3 contariam histórias diferentes sobre
  * a mesma nota.
+ *
+ * A lista do que fica nulo encolheu duas vezes: B1 (01/09/2026) passou a
+ * preencher IPI e `icms_reducao_base`, e B2 (mesmo dia) o ICMS-ST e o FCP.
+ * Restam `ibs_*`/`cbs_*` (B10), `ipi_codigo_enquadramento` (dado de cadastro
+ * que ninguém tem) e `icms_st_reducao_base`.
  */
 function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record<string, unknown>[] {
   return payload.items.map((item) => ({
@@ -256,6 +265,22 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     icms_reducao_base: toNumberOrNull(item.icms_reducao_base_calculo),
     icms_aliquota: toNumberOrNull(item.icms_aliquota),
     icms_valor: toNumberOrNull(item.icms_valor),
+
+    // ICMS-ST e FCP-ST (B2): as seis colunas de ST e as três de FCP existem
+    // desde A3 e só agora têm quem as preencha. `icms_st_reducao_base`
+    // (`pRedBCST`) continua fora — ver a entrada de B2 no AGENTS.md.
+    icms_st_modalidade_base_calculo: item.icms_modalidade_base_calculo_st ?? null,
+    icms_st_mva: toNumberOrNull(item.icms_margem_valor_adicionado_st),
+    icms_st_base: toNumberOrNull(item.icms_base_calculo_st),
+    icms_st_reducao_base: toNumberOrNull(item.icms_reducao_base_calculo_st),
+    icms_st_aliquota: toNumberOrNull(item.icms_aliquota_st),
+    icms_st_valor: toNumberOrNull(item.icms_valor_st),
+
+    // As colunas `fcp_*` guardam o FCP **retido por ST** — o único que o
+    // mapeamento calcula. Ver `total_fcp` em `headerFromPayload`.
+    fcp_base: toNumberOrNull(item.fcp_base_calculo_st),
+    fcp_aliquota: toNumberOrNull(item.fcp_percentual_st),
+    fcp_valor: toNumberOrNull(item.fcp_valor_st),
 
     pis_situacao_tributaria: item.pis_situacao_tributaria ?? null,
     pis_base: toNumberOrNull(item.pis_base_calculo),

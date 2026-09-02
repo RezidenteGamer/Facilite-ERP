@@ -5,6 +5,7 @@ import {
   type SaleForInvoice,
   type SaleForInvoiceItem,
 } from "@fiscal-core/invoiceMapping.ts";
+import type { MvaRuleRow } from "@fiscal-core/mvaRules.ts";
 import type { TaxGroup } from "@fiscal-core/taxGroups.ts";
 import type { TaxRuleRow } from "@fiscal-core/taxRules.ts";
 
@@ -24,6 +25,20 @@ import type { TaxRuleRow } from "@fiscal-core/taxRules.ts";
  * não é exportada — e não deve ser: o que interessa provar é o item que sai no
  * payload, não o formato intermediário.
  */
+
+/**
+ * MVA cadastrada para o NCM de teste, acrescentada em B2 (01/09/2026).
+ *
+ * B1 escreveu esta bateria quando nenhum CST exigia MVA. Depois de B2, os
+ * CST 10/30/70 e os CSOSN 201/202/203 **declaram ICMS-ST**, e emitir sem MVA
+ * cadastrada passou a ser recusa de cadastro — o que quebraria testes que não
+ * tratam de ST nenhum. Cadastrar uma MVA aqui mantém cada teste medindo a
+ * dimensão que ele veio medir (o ICMS próprio, o IPI, a redução de base); o
+ * ICMS-ST em si tem bateria própria em `invoiceTaxesSt.test.ts`.
+ */
+const MVA_CADASTRADA: MvaRuleRow[] = [
+  { id: "mva-teste", ncm: "22021000", ufDestino: "*", mvaOriginal: 40, fcpAliquota: null },
+];
 
 const REGRA_VENDA_INTERNA: TaxRuleRow = {
   id: "venda-interna",
@@ -127,7 +142,7 @@ function comCstIpiNoProduto(group: TaxGroup, cstIpi: string): Partial<SaleForInv
 
 /** Emite e devolve o primeiro item do payload, falhando alto se a montagem recusar. */
 function primeiroItem(group: TaxGroup, itemOverrides: Partial<SaleForInvoiceItem> = {}) {
-  const resultado = buildNfePayloadFromSale(sale([item(group, itemOverrides)]), [REGRA_VENDA_INTERNA]);
+  const resultado = buildNfePayloadFromSale(sale([item(group, itemOverrides)]), [REGRA_VENDA_INTERNA], MVA_CADASTRADA);
   if (!resultado.ok) throw new Error(`Emissão recusada: ${resultado.errors.join(" | ")}`);
   return { item: resultado.payload.items[0], payload: resultado.payload };
 }
@@ -345,7 +360,7 @@ describe("CST/CSOSN sem valor próprio de ICMS", () => {
       vendaSimples.branch.regimeTributario = "1";
       const regra: TaxRuleRow = { ...REGRA_VENDA_INTERNA, id: "simples", regime: "1" };
 
-      const resultado = buildNfePayloadFromSale(vendaSimples, [regra]);
+      const resultado = buildNfePayloadFromSale(vendaSimples, [regra], MVA_CADASTRADA);
       expect(resultado.ok).toBe(true);
       if (!resultado.ok) return;
       const linha = resultado.payload.items[0];
@@ -362,7 +377,7 @@ describe("CST/CSOSN sem valor próprio de ICMS", () => {
     vendaSimples.branch.regimeTributario = "1";
     const regra: TaxRuleRow = { ...REGRA_VENDA_INTERNA, id: "simples", regime: "1" };
 
-    const resultado = buildNfePayloadFromSale(vendaSimples, [regra]);
+    const resultado = buildNfePayloadFromSale(vendaSimples, [regra], MVA_CADASTRADA);
     expect(resultado.ok).toBe(true);
     if (!resultado.ok) return;
     expect(resultado.payload.items[0].icms_base_calculo).toBe(1000);

@@ -32,6 +32,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 import type { SaleForInvoice, SaleReturnForInvoice } from "../_shared/fiscal/invoiceMapping.ts";
+import { MVA_RULE_COLUMNS, toMvaRuleRow, type MvaRuleRow } from "../_shared/fiscal/mvaRules.ts";
 import { TAX_GROUP_COLUMNS, toTaxGroup } from "../_shared/fiscal/taxGroups.ts";
 import { toTaxRuleRow, type TaxRuleRow } from "../_shared/fiscal/taxRules.ts";
 
@@ -153,6 +154,7 @@ type SaleReturnQueryRow = {
 };
 
 type TaxRuleQueryRow = Parameters<typeof toTaxRuleRow>[0];
+type MvaRuleQueryRow = Parameters<typeof toMvaRuleRow>[0];
 
 function toInvoiceBranch(branch: BranchRow): SaleForInvoice["branch"] {
   return {
@@ -315,4 +317,19 @@ export async function readTaxRules(admin: SupabaseClient): Promise<TaxRuleRow[]>
     .select("id, regime, natureza_operacao, uf_origem, uf_destino, tipo_cliente, cfop");
   if (error) throw error;
   return ((data ?? []) as unknown as TaxRuleQueryRow[]).map(toTaxRuleRow);
+}
+
+/**
+ * As MVAs cadastradas (módulo MVA (ICMS-ST)) — quem as aplica é
+ * `resolveMvaRule`, dentro do mapeamento.
+ *
+ * Lê a tabela inteira, como `readTaxRules` já fazia com `tax_rules`, e pelo
+ * mesmo motivo: são poucas linhas (uma por NCM × UF que o contador cadastrar),
+ * o filtro depende do NCM de cada item da venda, e uma consulta por item
+ * trocaria uma leitura por N idas ao banco dentro do laço de montagem.
+ */
+export async function readMvaRules(admin: SupabaseClient): Promise<MvaRuleRow[]> {
+  const { data, error } = await admin.from("mva_rules").select(MVA_RULE_COLUMNS);
+  if (error) throw error;
+  return ((data ?? []) as unknown as MvaRuleQueryRow[]).map(toMvaRuleRow);
 }
