@@ -59,6 +59,7 @@ import {
   icmsCalculaValorProprio,
   ipiCalculaValor,
   pisCofinsCalculaValor,
+  pisCofinsCalculaValorPorUnidade,
 } from "./taxSituations.ts";
 import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "./types.ts";
 import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "./taxRules.ts";
@@ -240,6 +241,16 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  * Redução de base só existe para ICMS porque só o ICMS tem `pRedBC` no leiaute
  * — ver o campo `reducaoBaseIcms` em `taxGroups.ts`.
  *
+ * ## PIS/COFINS por unidade de medida depois de B5 (01/09/2026)
+ *
+ * O CST `03` tributa **ad rem**: um valor em reais por unidade vendida, no
+ * grupo XML `PISQtde`/`COFINSQtde` (`qBCProd` × `vAliqProd`), sem `vBC` nem
+ * alíquota percentual. B1 tinha deixado esses itens sem PIS/COFINS nenhum
+ * — não errado (não declarava percentual no grupo errado), mas incompleto.
+ * Quem resolve os dois caminhos, e escolhe entre eles pelo CST, é
+ * `resolvePisCofins`. PIS e COFINS passam por lá **separadamente**: nada
+ * impede um grupo com PIS ad rem e COFINS percentual.
+ *
  * ## O ICMS-ST depois de B2 (01/09/2026)
  *
  * Para os CST/CSOSN que declaram ST (`icmsCalculaSubstituicaoTributaria`), o
@@ -333,11 +344,33 @@ function resolveItemsForSale(
     const ipiDeclara = group.aliquotaIpi !== null && ipiCalculaValor(cstIpi);
     const ipiBase = ipiDeclara ? base : undefined;
 
-    // PIS/COFINS: mesma regra do ICMS, com a tabela de CST própria deles.
-    const pisAliquota =
-      group.aliquotaPis !== null && pisCofinsCalculaValor(group.cstPis) ? group.aliquotaPis : undefined;
-    const cofinsAliquota =
-      group.aliquotaCofins !== null && pisCofinsCalculaValor(group.cstCofins) ? group.aliquotaCofins : undefined;
+    // PIS e COFINS, cada um pelo caminho que o CST dele manda — percentual
+    // (`PISAliq`/`PISOutr`) ou por unidade de medida (`PISQtde`). São duas
+    // chamadas independentes de propósito: o grupo tributário pode ter um dos
+    // dois ad rem e o outro percentual, e o XML os declara separadamente.
+    const pis = resolvePisCofins({
+      group,
+      imposto: "PIS",
+      cst: group.cstPis,
+      aliquotaPorcentual: group.aliquotaPis,
+      aliquotaPorUnidade: group.aliquotaPisValor,
+      base,
+      quantidade: item.quantity,
+    });
+    if (!pis.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${pis.reason}`);
+    const pisDeclarado = pis.ok ? pis : null;
+
+    const cofins = resolvePisCofins({
+      group,
+      imposto: "COFINS",
+      cst: group.cstCofins,
+      aliquotaPorcentual: group.aliquotaCofins,
+      aliquotaPorUnidade: group.aliquotaCofinsValor,
+      base,
+      quantidade: item.quantity,
+    });
+    if (!cofins.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${cofins.reason}`);
+    const cofinsDeclarado = cofins.ok ? cofins : null;
 
     return {
       numero_item: index + 1,
@@ -379,14 +412,18 @@ function resolveItemsForSale(
       ipi_valor: ipiBase !== undefined ? taxAmount(ipiBase, group.aliquotaIpi!) : undefined,
 
       pis_situacao_tributaria: group.cstPis ?? undefined,
-      pis_base_calculo: pisAliquota !== undefined ? base : undefined,
-      pis_aliquota_porcentual: pisAliquota,
-      pis_valor: pisAliquota !== undefined ? taxAmount(base, pisAliquota) : undefined,
+      pis_base_calculo: pisDeclarado?.base,
+      pis_aliquota_porcentual: pisDeclarado?.aliquotaPorcentual,
+      pis_quantidade_vendida: pisDeclarado?.quantidadeVendida,
+      pis_aliquota_valor: pisDeclarado?.aliquotaValor,
+      pis_valor: pisDeclarado?.valor,
 
       cofins_situacao_tributaria: group.cstCofins ?? undefined,
-      cofins_base_calculo: cofinsAliquota !== undefined ? base : undefined,
-      cofins_aliquota_porcentual: cofinsAliquota,
-      cofins_valor: cofinsAliquota !== undefined ? taxAmount(base, cofinsAliquota) : undefined,
+      cofins_base_calculo: cofinsDeclarado?.base,
+      cofins_aliquota_porcentual: cofinsDeclarado?.aliquotaPorcentual,
+      cofins_quantidade_vendida: cofinsDeclarado?.quantidadeVendida,
+      cofins_aliquota_valor: cofinsDeclarado?.aliquotaValor,
+      cofins_valor: cofinsDeclarado?.valor,
     };
   });
 
@@ -582,6 +619,123 @@ function resolveSubstituicaoTributaria(input: {
     fcpAliquota: fcp ?? undefined,
     fcpValor: fcp !== null ? taxAmount(base, fcp) : undefined,
   };
+}
+
+/**
+ * O que um item declara de PIS **ou** de COFINS, ou o motivo de a emissão não
+ * poder sair (B5, 01/09/2026).
+ *
+ * Os dois impostos têm exatamente a mesma estrutura no leiaute — mesmos grupos,
+ * mesmos campos, só as tags mudam de nome —, então uma função só serve aos
+ * dois; `imposto` existe apenas para a mensagem de erro dizer qual deles está
+ * com o cadastro incompleto.
+ *
+ * Os campos são mutuamente exclusivos por construção: ou vêm `base` +
+ * `aliquotaPorcentual` (grupos `PISAliq`/`PISOutr`), ou vêm `quantidadeVendida`
+ * + `aliquotaValor` (grupo `PISQtde`), ou não vem nada (grupo `PISNT`, ou
+ * alíquota não cadastrada). Misturar os dois pares é rejeição de schema — o
+ * `PISOutr` trata as duas formas como `xs:choice`.
+ */
+type PisCofinsDeclarado =
+  | {
+      ok: true;
+      /** `vBC` — só no caminho percentual. */
+      base?: number;
+      /** `pPIS`/`pCOFINS`, em porcentagem — só no caminho percentual. */
+      aliquotaPorcentual?: number;
+      /** `qBCProd` — só no caminho por unidade de medida. */
+      quantidadeVendida?: number;
+      /** `vAliqProd`, em reais por unidade — só no caminho por unidade de medida. */
+      aliquotaValor?: number;
+      /** `vPIS`/`vCOFINS`. Ausente quando nada é declarado. */
+      valor?: number;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * Qual dos dois caminhos de PIS/COFINS este item segue, e com que valores.
+ *
+ * A decisão é do **CST**, não do que está cadastrado: `taxSituations.ts`
+ * responde, para cada código, qual grupo XML ele usa e o que aquele grupo tem
+ * onde escrever. Os três desfechos, na ordem em que são testados:
+ *
+ * 1. **Por unidade de medida** (CST `03`, grupo `PISQtde`). A conta é
+ *    `vPIS = qBCProd × vAliqProd` — quantidade vendida vezes a alíquota em
+ *    reais por unidade —, arredondada a centavos como todo valor de imposto
+ *    deste motor. Confirmado contra o MOC (leiaute 4.00) e a tabela de campos
+ *    da Focus antes de implementar.
+ *
+ *    `qBCProd` sai na **quantidade comercial** do item. A rigor o leiaute pede
+ *    a quantidade na unidade a que a lei prende a alíquota específica (o litro,
+ *    a unidade), que é a `unidade_tributavel` do cadastro quando ela difere da
+ *    comercial — mas este sistema não guarda **fator de conversão** entre as
+ *    duas: `products` tem `unidade_comercial` e `unidade_tributavel`, e
+ *    `SaleForInvoiceItem` carrega uma quantidade só. Inventar a conversão sem
+ *    fonte seria decidir por conta própria um número que muda o imposto. Está
+ *    documentado como limitação na entrada de B5 do AGENTS.md; enquanto as duas
+ *    unidades forem iguais — o caso de todo cadastro de hoje — a quantidade é a
+ *    mesma pelos dois critérios.
+ *
+ *    **Sem a alíquota em reais cadastrada, recusa.** Mesma família de recusa
+ *    que B1 criou para "CST de IPI sem alíquota" e B2 para "CST com ST sem
+ *    MVA": o CST afirma que o item é tributado ad rem; se o valor por unidade
+ *    não está no cadastro, o cadastro se contradiz, e emitir com zero — ou sem
+ *    o grupo — produziria nota autorizada com imposto a menos.
+ *
+ * 2. **Percentual** (`01`/`02` e a faixa `49`–`99`), exatamente como antes de
+ *    B5: `vPIS = vBC × pPIS`, sobre a base cheia do item. A redução de base do
+ *    ICMS não alcança PIS/COFINS — o leiaute não tem `pRedBC` para eles (ver
+ *    `reducaoBaseIcms` em `taxGroups.ts`).
+ *
+ * 3. **Nada** — CST `04`–`09` (grupo `PISNT`, só o CST), ou alíquota
+ *    percentual não cadastrada. Campos ausentes, que é "não calculado".
+ *
+ * A alíquota em reais cadastrada num CST que **não** é `03` é ignorada em
+ * silêncio, pelo mesmo critério com que a percentual já era ignorada num CST
+ * `04`: o CST manda, e um cadastro com as duas alíquotas preenchidas descreve
+ * um grupo que serve a produtos de CSTs diferentes, não uma contradição.
+ */
+function resolvePisCofins(input: {
+  group: TaxGroup;
+  imposto: "PIS" | "COFINS";
+  cst: string | null;
+  aliquotaPorcentual: number | null;
+  aliquotaPorUnidade: number | null;
+  /** Valor bruto do item — a base do caminho percentual. */
+  base: number;
+  /** Quantidade comercial do item — o `qBCProd` do caminho por unidade. */
+  quantidade: number;
+}): PisCofinsDeclarado {
+  const { group, imposto, cst, aliquotaPorcentual, aliquotaPorUnidade, base, quantidade } = input;
+
+  if (pisCofinsCalculaValorPorUnidade(cst)) {
+    if (aliquotaPorUnidade === null) {
+      return {
+        ok: false,
+        reason:
+          `o grupo tributário "${group.name}" tem CST de ${imposto} ${cst} (alíquota por unidade de ` +
+          `medida), mas não tem a alíquota de ${imposto} em reais por unidade cadastrada — é ela que ` +
+          `o cálculo multiplica pela quantidade vendida. Complete o cadastro em Grupos tributários.`,
+      };
+    }
+    return {
+      ok: true,
+      quantidadeVendida: quantidade,
+      aliquotaValor: aliquotaPorUnidade,
+      valor: toCents(quantidade * aliquotaPorUnidade),
+    };
+  }
+
+  if (aliquotaPorcentual !== null && pisCofinsCalculaValor(cst)) {
+    return {
+      ok: true,
+      base,
+      aliquotaPorcentual,
+      valor: taxAmount(base, aliquotaPorcentual),
+    };
+  }
+
+  return { ok: true };
 }
 
 /**

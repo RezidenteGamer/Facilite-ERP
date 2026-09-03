@@ -148,9 +148,11 @@ export function icmsCalculaSubstituicaoTributaria(situacaoTributaria: string | n
  *   todos caem no grupo `PISNT`/`COFINSNT`, que tem **só** o CST.
  * - `03` é o caso diferente e por isso vale o comentário: ele *é* tributado,
  *   mas por **unidade de medida** (grupo `PISQtde`, com `qBCProd` e
- *   `vAliqProd`), não por percentual. O motor de B1 só sabe calcular
- *   percentual; declarar `vBC` + `pPIS` aqui seria escrever no grupo errado.
- *   Quem ensina o motor a calcular por unidade é B5.
+ *   `vAliqProd`), não por percentual. Declarar `vBC` + `pPIS` aqui seria
+ *   escrever no grupo errado — e é por isso que ele continua nesta lista
+ *   **depois de B5**: quem calcula o `03` é `pisCofinsCalculaValorPorUnidade`,
+ *   logo abaixo, e a pergunta desta função (“tem alíquota **percentual**?”)
+ *   segue tendo `false` como resposta certa para ele.
  *
  * Todo o resto calcula: `01`/`02` (grupo `PISAliq`) e a faixa `49`–`99`
  * (grupo `PISOutr`, que também tem `vBC` + `pPIS`).
@@ -165,6 +167,47 @@ const PIS_COFINS_SEM_ALIQUOTA_PERCENTUAL = new Set(["03", "04", "05", "06", "07"
  */
 export function pisCofinsCalculaValor(cst: string | null | undefined): boolean {
   return !PIS_COFINS_SEM_ALIQUOTA_PERCENTUAL.has(normalizeCode(cst));
+}
+
+/**
+ * CST de PIS/COFINS que declaram o imposto **por unidade de medida** — o grupo
+ * `PISQtde`/`COFINSQtde`, com `qBCProd` (quantidade vendida), `vAliqProd`
+ * (alíquota em reais por unidade) e `vPIS`/`vCOFINS` (B5, 01/09/2026).
+ *
+ * Só o `03` ("Operação Tributável com Alíquota por Unidade de Medida de
+ * Produto", tabela 4.3.3). É o regime **ad rem** — combustíveis, álcool,
+ * embalagens e bebidas frias —, em que a lei fixa um valor em reais por
+ * litro/unidade em vez de um percentual sobre a receita.
+ *
+ * Lista de **inclusão**, como a do IPI e a de ST, e pelo mesmo motivo delas:
+ * código desconhecido devolve `false`, porque o risco desta função é o oposto
+ * do de `pisCofinsCalculaValor` — aqui a resposta `true` **exige um cadastro
+ * que ninguém tem** (a alíquota em reais) e recusa a emissão. Na dúvida, o
+ * item segue pelo caminho percentual, que é o que o sistema sempre fez.
+ *
+ * ## O que ficou de fora de propósito: a faixa `49`–`99`
+ *
+ * O grupo `PISOutr` do leiaute 4.00 é uma **escolha** (`xs:choice`): ou
+ * `vBC` + `pPIS`, ou `qBCProd` + `vAliqProd` — nunca os dois. Ou seja, um item
+ * com CST `99` também pode, legitimamente, ser tributado por unidade. Este
+ * arquivo não o inclui porque o cadastro não tem como dizer **qual das duas
+ * formas** aquele grupo usa: com as duas alíquotas preenchidas (a percentual,
+ * que existe desde sempre, e a em reais, criada por B5) não há critério para
+ * desempatar, e escolher errado é declarar o campo errado no XML. O `03` não
+ * tem essa ambiguidade — o grupo `PISQtde` só tem a forma por unidade.
+ * Continua sendo percentual, portanto, tudo que não é `03`.
+ */
+const PIS_COFINS_POR_UNIDADE = new Set(["03"]);
+
+/**
+ * O item com este CST de PIS/COFINS declara `qBCProd`/`vAliqProd`/`vPIS`?
+ *
+ * É a pergunta **irmã** de `pisCofinsCalculaValor`, não a negação dela: as duas
+ * respondem `false` para os CST `04`–`09` (grupo `PISNT`, que não tem valor
+ * nenhum), e para o `03` só esta responde `true`.
+ */
+export function pisCofinsCalculaValorPorUnidade(cst: string | null | undefined): boolean {
+  return PIS_COFINS_POR_UNIDADE.has(normalizeCode(cst));
 }
 
 /**

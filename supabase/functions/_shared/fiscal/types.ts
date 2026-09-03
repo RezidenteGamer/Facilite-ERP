@@ -348,16 +348,43 @@ export type NfePayloadItem = {
   ipi_aliquota?: number;
   ipi_valor?: number;
 
-  /** `products.cst_pis`. */
+  /** `tax_groups.cst_pis`. */
   pis_situacao_tributaria?: string;
+  /** `vBC` do grupo `PISAliq`/`PISOutr` — só no caminho percentual. */
   pis_base_calculo?: number;
+  /** `pPIS` — a alíquota em **porcentagem**. */
   pis_aliquota_porcentual?: number;
+
+  /* --- PIS/COFINS por unidade de medida, grupo `PISQtde` (B5, 01/09/2026) --- */
+
+  /**
+   * `qBCProd` — a quantidade vendida que serve de base ao PIS ad rem (CST 03).
+   *
+   * Vai **no lugar** de `pis_base_calculo`/`pis_aliquota_porcentual`, nunca
+   * junto: o grupo `PISQtde` do leiaute 4.00 não tem `vBC` nem `pPIS`, e o
+   * `PISOutr` (CST 49–99) trata as duas formas como escolha exclusiva
+   * (`xs:choice`) — mandar as quatro tags é rejeição de schema.
+   *
+   * **Sai na quantidade comercial do item.** O leiaute pede a quantidade na
+   * unidade a que a lei prende a alíquota específica, e este sistema não tem
+   * fator de conversão entre `products.unidade_comercial` e
+   * `products.unidade_tributavel` — ver a entrada de B5 no AGENTS.md.
+   */
+  pis_quantidade_vendida?: number;
+  /** `vAliqProd` — a alíquota do PIS **em reais por unidade**, não em porcentagem. */
+  pis_aliquota_valor?: number;
+
+  /** `vPIS` — `vBC × pPIS` no caminho percentual, `qBCProd × vAliqProd` no por unidade. */
   pis_valor?: number;
 
-  /** `products.cst_cofins`. */
+  /** `tax_groups.cst_cofins`. */
   cofins_situacao_tributaria?: string;
   cofins_base_calculo?: number;
   cofins_aliquota_porcentual?: number;
+  /** `qBCProd` do grupo `COFINSQtde`. Ver `pis_quantidade_vendida`. */
+  cofins_quantidade_vendida?: number;
+  /** `vAliqProd` do grupo `COFINSQtde`, em reais por unidade. */
+  cofins_aliquota_valor?: number;
   cofins_valor?: number;
 };
 

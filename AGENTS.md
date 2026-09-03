@@ -3107,3 +3107,224 @@ Nacional completo: `pCredSN` do CSOSN 101/201, e a dedução do próprio no ST
 descrita acima), B9 (IBPT) e B10 (IBS/CBS/IS). Também fora: tudo da seção "o
 que ficou deliberadamente de fora", e a alíquota interna por UF × NCM, que é a
 correção de raiz das três limitações registradas aqui.
+
+### Decisão arquitetural: PIS/COFINS por unidade de medida — o CST 03, e o que a pesquisa sobre monofásico encontrou (B5) (01/09/2026)
+
+Terceira tarefa da Etapa 2. B1 ensinou o motor a calcular o ICMS próprio, o IPI
+e a redução de base, e a **parar de declarar** valor nos CST cujo grupo XML não
+tem onde escrevê-lo. B2 acrescentou o ICMS-ST. B5 fecha a única forma de
+tributar que o motor ainda não conhecia: **por unidade de medida**.
+
+#### O buraco que B1 deixou de propósito, e que esta tarefa fecha
+
+O comentário de B1 em `taxSituations.ts` já dizia qual era: o CST `03` "*é*
+tributado, mas por unidade de medida (grupo `PISQtde`, com `qBCProd` e
+`vAliqProd`), não por percentual. O motor de B1 só sabe calcular percentual;
+declarar `vBC` + `pPIS` aqui seria escrever no grupo errado". O desfecho de B1
+não era **errado** — não escrevia percentual num grupo que não o aceita —, mas
+era **incompleto**: o item saía sem PIS/COFINS nenhum, e o imposto que existe
+não era calculado.
+
+`pisCofinsCalculaValor("03")` **continua devolvendo `false` depois de B5**, e
+isso não é esquecimento: aquela função pergunta "tem `vBC` + alíquota
+**percentual**?", e a resposta para o `03` segue sendo não. O que nasceu foi uma
+função irmã, `pisCofinsCalculaValorPorUnidade`, que pergunta a outra coisa. Há
+teste em `invoiceTaxes.test.ts` (o de B1, atualizado) fixando justamente isso: o
+`03` com alíquota ad rem cadastrada **não** produz `vBC` nem `pPIS`.
+
+#### A pesquisa: os campos, a fórmula e a nuance da unidade
+
+Conferido contra o Manual de Orientação do Contribuinte (leiaute 4.00) e a
+tabela de campos da Focus NFe antes de desenhar qualquer tipo:
+
+- O grupo `PISQtde`/`COFINSQtde` tem três campos: **`qBCProd`** (quantidade
+  vendida, `Decimal[12.0-4]`), **`vAliqProd`** (a alíquota **em reais por
+  unidade**, não percentual) e **`vPIS`/`vCOFINS`**. Não tem `vBC` nem `pPIS`.
+- **A fórmula é `vPIS = qBCProd × vAliqProd`** — quantidade vezes valor por
+  unidade, sem nenhum divisor por 100 —, aqui arredondada a centavos pelo mesmo
+  `toCents` que o motor usa desde a etapa 8. O exemplo do próprio manual:
+  1.000 unidades × R$ 0,0076 = R$ 7,60.
+- Os nomes no payload são os da Focus (`pis_quantidade_vendida`,
+  `pis_aliquota_valor`, e os dois equivalentes de COFINS), pelo mesmo motivo de
+  sempre: `NfePayload` é espelho do corpo JSON dela desde a etapa F1.
+
+**A nuance da unidade, e a limitação que ela expõe.** O leiaute pede a
+quantidade na unidade a que a lei prende a alíquota específica — o litro, a
+unidade —, que é a `unidade_tributavel` do cadastro quando ela difere da
+comercial. Este sistema **não guarda fator de conversão** entre
+`products.unidade_comercial` e `products.unidade_tributavel`: as duas colunas
+existem, o número que as liga não. `SaleForInvoiceItem` carrega uma quantidade
+só (`quantity`, a comercial), e o payload nunca preencheu
+`quantidade_tributavel` — o que, na Focus, faz a `quantidade_comercial` ser
+usada no lugar dela.
+
+Por isso **`qBCProd` sai na quantidade comercial**, e a limitação fica
+registrada em vez de um campo de conversão inventado sem fonte. Enquanto as duas
+unidades forem iguais — o caso de todo cadastro de hoje — os dois critérios dão
+o mesmo número. Quando divergirem, o imposto ad rem sai na unidade errada; o
+conserto certo é um fator de conversão no cadastro de produto, que também
+resolve o `quantidade_tributavel` que nunca foi preenchido. É tarefa própria.
+
+#### A segunda pesquisa: monofásico — não há lacuna além do CST 03
+
+O enunciado do projeto ("B5 — PIS/COFINS por CST, incluindo monofásico e
+alíquota zero") levantava a dúvida de se faltava algo de monofásico além do
+cálculo ad rem. **Não falta.** A cadeia monofásica tem três posições, e as três
+já saem corretas:
+
+- **Quem revende** (atacadista, varejista) usa **CST 04** — "revenda a alíquota
+  zero" —, grupo `PISNT`, só o CST e nenhum valor. É o que B1 já faz desde
+  01/09/2026, e é o caso mais comum de todos.
+- **Quem fabrica ou importa** e recolhe a alíquota concentrada usa **CST 02**
+  ("alíquota diferenciada"), grupo `PISAliq`, com `vBC` + `pPIS`. Confirmado
+  que o caminho percentual de B1 basta: a alíquota concentrada é mais alta que
+  a básica, mas é percentual do mesmo jeito, e sai da coluna `aliquota_pis`
+  cadastrada no grupo. Nada a fazer.
+- **Quem fabrica ou importa produto de alíquota ad rem** (combustíveis, álcool,
+  bebidas frias, embalagens para bebidas frias) usa **CST 03** — e é
+  exatamente, e apenas, isto que faltava.
+
+O CST `05` (substituição tributária) também é `PISNT` e já sai só com o CST. Os
+CST de crédito (`50`–`66`) caem no grupo `PISOutr`, que tem `vBC` + `pPIS`, e
+já são calculados pelo caminho percentual desde B1 — e são códigos de
+**entrada**, que só apareceriam numa nota de devolução.
+
+#### O único achado da pesquisa que virou omissão deliberada: o `PISOutr`
+
+O grupo `PISOutr` (CST `49` a `99`) é uma **escolha** no schema (`xs:choice`):
+ou `vBC` + `pPIS`, ou `qBCProd` + `vAliqProd`, nunca os dois. Ou seja, um item
+com CST `99` também pode legitimamente ser ad rem.
+
+B5 **não** o incluiu, e o motivo é que o cadastro não tem como dizer qual das
+duas formas aquele grupo usa. Com as duas alíquotas preenchidas — a percentual,
+que existe desde sempre, e a em reais, criada aqui — não há critério para
+desempatar, e escolher errado é declarar o campo errado no XML. O `03` não tem
+essa ambiguidade: o grupo `PISQtde` só tem a forma por unidade. Continua sendo
+percentual, portanto, tudo que não é `03`, com teste fixando o comportamento.
+Resolver isso exigiria um discriminador no cadastro ("este grupo tributa PIS
+por percentual ou por unidade?"), que é decisão de modelagem, não de cálculo.
+
+#### O cálculo: `resolvePisCofins`, e por que PIS e COFINS passam por lá separados
+
+O bloco de duas linhas que B1 tinha para PIS/COFINS virou uma função com três
+desfechos — por unidade, percentual, ou nada —, chamada **duas vezes por item**,
+uma para cada imposto. Não é simetria decorativa: nada impede um grupo com PIS
+ad rem e COFINS percentual, e o XML os declara em grupos independentes. Os três
+testes de independência cobrem as combinações (um ad rem e o outro percentual,
+nos dois sentidos, e um ad rem com o outro em CST `08`).
+
+Os dois impostos compartilham a mesma função porque têm **exatamente a mesma
+estrutura** no leiaute — mesmos grupos, mesmos campos, só as tags mudam de nome.
+O parâmetro `imposto` existe só para a mensagem de erro dizer qual dos dois está
+com o cadastro incompleto; há teste provando que uma recusa de PIS não menciona
+a COFINS.
+
+**Sem a alíquota em reais cadastrada, recusa.** Mesma família de recusa que B1
+criou para "CST de IPI sem alíquota" e B2 para "CST com ST sem MVA": o CST
+afirma que o item é tributado ad rem; se o valor por unidade não está no
+cadastro, o cadastro se contradiz, e emitir sem o grupo produziria nota
+autorizada com imposto a menos — o desfecho pior. Há teste provando que a
+alíquota **percentual** cadastrada não serve de substituta: cair nela emitiria
+R$ 16,50 onde a lei manda R$ 7,60.
+
+**A alíquota ad rem cadastrada num CST que não é `03` é ignorada em silêncio**,
+pelo mesmo critério com que a percentual já era ignorada num CST `04`: o CST
+manda, e um grupo com as duas alíquotas preenchidas descreve um cadastro que
+serve a produtos de CSTs diferentes, não uma contradição.
+
+**Os valores entram nos totais pelo mesmo `totalDeclarado`** que B1 criou —
+critério de "presença do campo no item", nunca "resultado da soma". PIS e COFINS
+são impostos **por dentro** (já estão no preço), então continuam **não** somando
+no `vNF`, ao contrário do IPI e do ICMS-ST.
+
+#### A migration (escrita, NÃO aplicada)
+
+`supabase/migrations/00000000000007_b5_pis_cofins_por_unidade.sql`. Duas colunas
+em `tax_groups` (`aliquota_pis_valor`, `aliquota_cofins_valor`), quatro em
+`fiscal_document_items` (`pis_quantidade_vendida`, `pis_aliquota_valor`,
+`cofins_quantidade_vendida`, `cofins_aliquota_valor`), os `comment on column`
+das seis, e **duas linhas em `module_fields`** para `grupos-tributarios` (mesmo
+motivo de B1: o módulo roda na `GenericModulePage`, então coluna sem campo é
+coluna que ninguém preenche pela aplicação). `sort_order` 75 e 91,
+intermediários para nenhuma linha existente ser renumerada, e
+`show_in_table = false` nos dois.
+
+- **`numeric(15,4)` nas seis**, e não o `numeric(7,4)` das alíquotas
+  percentuais de B1/B2: 4 decimais são o que `vAliqProd` admite, e a parte
+  inteira é maior porque reais por unidade não têm o teto de 100 que justifica
+  o `numeric(7,4)` de um percentual. **Cadastro e item com a mesma precisão** é
+  o que impede o modo de falha que B2 documentou — um valor que cabe no
+  cadastro mas estoura a coluna do item faria a gravação falhar *depois* de a
+  SEFAZ autorizar.
+- **`check` de não-negativo apenas**, sem teto: alíquota negativa por unidade
+  produziria imposto negativo, que o leiaute não aceita; qualquer limite
+  superior seria número inventado, porque a lei fixa esses valores em reais.
+- **Não há `check` amarrando a alíquota percentual à ad rem.** Um grupo pode ter
+  as duas preenchidas sem se contradizer — ele serve a produtos, e o CST de cada
+  linha decide o caminho.
+- **Nada de RLS**, mesma constatação de B1: `tax_groups` já tem as quatro
+  policies de `grupos-tributarios`, e policy é por linha, não por coluna.
+
+**Ordem de aplicação, e é o ponto que o `/code-review alto` levantou**: esta
+migration vem **antes** do deploy da `fiscal-emit`, ao contrário da migration 4
+(A1), que só removia coisas e por isso vinha depois. São dois pontos e os dois
+derrubam a emissão inteira, não só a dos itens com CST 03: `data.ts` seleciona
+as duas colunas novas de `tax_groups` via `TAX_GROUP_COLUMNS` (PostgREST
+responde 400 para coluna inexistente), e `persist.ts` manda as quatro colunas
+novas no insert mesmo nulas (PGRST204 — e falha *depois* de a SEFAZ ter
+autorizado). Ordem correta: aplicar 5 (B1), 6 (B2) e 7 (B5) → implantar
+`fiscal-emit`. As três migrations são aditivas e não quebram a função que está
+implantada hoje.
+
+`src/types/supabase.ts` foi editado à mão (as duas colunas de `tax_groups` em
+`Row`/`Insert`/`Update` e no retorno de `search_tax_groups`, mais as quatro de
+`fiscal_document_items`), mesmo motivo de B1: o arquivo é gerado do banco real e
+o banco real ainda não tem as colunas. As duas de `tax_groups` levam `?? null`
+em `toTaxGroup`, como as três de B1 — a `search_tax_groups` que o front usa
+devolve linhas sem as colunas enquanto a migration não rodar.
+
+#### Testado
+
+`npm run build` e `npm run lint` limpos (61 avisos, exatamente os mesmos de
+antes da tarefa, e zero erros). `deno check supabase/functions/fiscal-emit/index.ts`
+limpo. `npm test` com **174 testes passando** (34 a mais que B2) e as duas
+baterias que dependem de credencial em `.env.local` falhando alto, como é o
+desenho delas.
+
+`tests/unit/invoiceTaxesQtde.test.ts` é a bateria nova, separada das outras duas
+pelo mesmo critério que separou `invoiceTaxes` de `invoiceTaxesSt`: são
+dimensões diferentes do mesmo item. Entra por `buildNfePayloadFromSale` e as
+contas continuam escritas por extenso. As alíquotas dos testes (R$ 0,0076 de PIS
+e R$ 0,0351 de COFINS) são as de refrigerante do regime especial — números
+reais, com os 4 decimais que o leiaute admite. Cobre: o cálculo com alíquota
+cadastrada, o arredondamento a centavos, quantidade fracionária, alíquota ad rem
+de zero (que declara zero, não suprime), a prova de que a quantidade é a
+comercial e não o valor bruto, as três recusas por cadastro incompleto, a
+independência entre PIS e COFINS nos dois sentidos, e as regressões — CST
+`04`–`09` sem valor mesmo com ad rem cadastrada, CST `01`/`02`/`49`–`99`
+seguindo percentual, e a faixa `PISOutr` não escorregando para o caminho por
+unidade.
+
+Duas baterias antigas ganharam duas linhas de fixture cada (`aliquotaPisValor` e
+`aliquotaCofinsValor` nulas), e **um teste de B1 mudou de conteúdo**: o que
+afirmava que o CST 03 "não vira alíquota percentual — é assunto de B5" passou a
+cadastrar a alíquota ad rem e a afirmar a mesma coisa. A afirmação continua
+verdadeira e continua sendo o motivo de o `03` seguir em
+`pisCofinsCalculaValor`; o que mudou é que agora ela é testada com o caso real,
+e não com um grupo incompleto que hoje seria recusado.
+
+**Nada foi testado no navegador nem no banco**: a migration não foi aplicada e a
+Edge Function não foi implantada — as duas coisas ficaram para a sessão de
+coordenação, junto com a revisão independente.
+
+#### Fora de escopo
+
+B8 (Simples Nacional completo: `pCredSN` do CSOSN 101/201, e a dedução do ICMS
+próprio no ST que ficou pendente de B2), B9 (IBPT) e B10 (IBS/CBS/IS). Também
+fora: a limitação de B2 sobre o ICMS próprio em venda interestadual (não foi
+tocada); a forma ad rem do grupo `PISOutr` (ver acima); o fator de conversão
+entre unidade comercial e tributável, que é a limitação que esta tarefa expôs;
+`quantidade_tributavel`/`valor_unitario_tributavel` no payload, que continuam
+nunca preenchidos desde a etapa 8; e o XML do provedor simulado, que declara
+apenas o CST de PIS/COFINS e nenhum valor — como já fazia antes de B1, e como
+também ficou para o ICMS-ST de B2.

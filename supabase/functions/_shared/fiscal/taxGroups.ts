@@ -41,8 +41,24 @@ export type TaxGroup = {
   reducaoBaseIcms: number | null;
   cstPis: string | null;
   aliquotaPis: number | null;
+  /**
+   * Alíquota de PIS **em reais por unidade** (`vAliqProd`) — B5, 01/09/2026.
+   *
+   * É a outra forma de tributar PIS/COFINS, e não uma variação da percentual:
+   * o CST `03` cai no grupo XML `PISQtde`, que tem `qBCProd` (quantidade
+   * vendida) e `vAliqProd` (o valor em reais por unidade), e **não tem** `vBC`
+   * nem `pPIS`. É o regime ad rem — combustíveis, bebidas frias, embalagens —,
+   * em que a lei fixa um valor por litro/unidade.
+   *
+   * Por isso são duas colunas e não uma: `aliquotaPis` é percentual (0 a 100),
+   * esta é em reais e não tem teto de 100. Um mesmo grupo não usa as duas ao
+   * mesmo tempo — quem escolhe é o CST.
+   */
+  aliquotaPisValor: number | null;
   cstCofins: string | null;
   aliquotaCofins: number | null;
+  /** Alíquota de COFINS em reais por unidade (`vAliqProd`). Ver `aliquotaPisValor`. */
+  aliquotaCofinsValor: number | null;
   /**
    * CST de IPI (B1, 01/09/2026). Mora aqui, e não mais só em `products.cst_ipi`,
    * porque a alíquota de IPI passou a morar no grupo: CST e alíquota são as
@@ -100,8 +116,12 @@ export function toTaxGroup(row: {
   reducao_base_icms: number | null | undefined;
   cst_pis: string | null;
   aliquota_pis: number | null;
+  /** Idem `reducao_base_icms`, agora pela migration de B5. */
+  aliquota_pis_valor: number | null | undefined;
   cst_cofins: string | null;
   aliquota_cofins: number | null;
+  /** Idem `reducao_base_icms`, agora pela migration de B5. */
+  aliquota_cofins_valor: number | null | undefined;
   /** Idem `reducao_base_icms`. */
   cst_ipi: string | null | undefined;
   /** Idem `reducao_base_icms`. */
@@ -126,8 +146,14 @@ export function toTaxGroup(row: {
     reducaoBaseIcms: row.reducao_base_icms ?? null,
     cstPis: row.cst_pis,
     aliquotaPis: row.aliquota_pis,
+    // As duas colunas de B5 levam `?? null` pelo mesmo motivo das três de B1
+    // logo acima: enquanto a migration não estiver aplicada elas chegam
+    // `undefined`, e `undefined !== null` faria todo grupo parecer ter alíquota
+    // por unidade cadastrada.
+    aliquotaPisValor: row.aliquota_pis_valor ?? null,
     cstCofins: row.cst_cofins,
     aliquotaCofins: row.aliquota_cofins,
+    aliquotaCofinsValor: row.aliquota_cofins_valor ?? null,
     cstIpi: row.cst_ipi ?? null,
     aliquotaIpi: row.aliquota_ipi ?? null,
     cstIbsCbs: row.cst_ibs_cbs,
@@ -138,4 +164,5 @@ export function toTaxGroup(row: {
 /** As colunas de `tax_groups` que `toTaxGroup` precisa — para quem monta o `select`. */
 export const TAX_GROUP_COLUMNS =
   "id, code, name, cst_icms, csosn, aliquota_icms, reducao_base_icms, cst_pis, aliquota_pis, " +
-  "cst_cofins, aliquota_cofins, cst_ipi, aliquota_ipi, cst_ibs_cbs, cclasstrib";
+  "aliquota_pis_valor, cst_cofins, aliquota_cofins, aliquota_cofins_valor, cst_ipi, aliquota_ipi, " +
+  "cst_ibs_cbs, cclasstrib";

@@ -61,8 +61,10 @@ function taxGroup(overrides: Partial<TaxGroup> = {}): TaxGroup {
     reducaoBaseIcms: null,
     cstPis: "01",
     aliquotaPis: 1.65,
+    aliquotaPisValor: null,
     cstCofins: "01",
     aliquotaCofins: 7.6,
+    aliquotaCofinsValor: null,
     cstIpi: null,
     aliquotaIpi: null,
     cstIbsCbs: null,
@@ -401,10 +403,19 @@ describe("CST de PIS/COFINS sem alíquota percentual", () => {
     },
   );
 
-  it("CST 03 (por unidade de medida) não vira alíquota percentual — é assunto de B5", () => {
-    const { item: linha } = primeiroItem(taxGroup({ cstPis: "03", cstCofins: "03" }));
+  it("CST 03 (por unidade de medida) nunca vira alíquota percentual", () => {
+    // Escrito em B1, quando o `03` saía sem valor nenhum; mantido em B5 com a
+    // alíquota ad rem cadastrada, porque o que ele afirma continua verdadeiro e
+    // é o motivo de o `03` seguir na lista de `pisCofinsCalculaValor`: o grupo
+    // `PISQtde` não tem `vBC` nem `pPIS`. O cálculo por unidade em si tem
+    // bateria própria em `invoiceTaxesQtde.test.ts`.
+    const { item: linha } = primeiroItem(
+      taxGroup({ cstPis: "03", cstCofins: "03", aliquotaPisValor: 0.0076, aliquotaCofinsValor: 0.0351 }),
+    );
     expect(linha.pis_base_calculo).toBeUndefined();
+    expect(linha.pis_aliquota_porcentual).toBeUndefined();
     expect(linha.cofins_base_calculo).toBeUndefined();
+    expect(linha.cofins_aliquota_porcentual).toBeUndefined();
   });
 
   it("CST 49 (grupo PISOutr) continua calculando por percentual", () => {

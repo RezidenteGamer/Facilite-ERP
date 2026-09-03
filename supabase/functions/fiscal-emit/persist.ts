@@ -282,14 +282,23 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     fcp_aliquota: toNumberOrNull(item.fcp_percentual_st),
     fcp_valor: toNumberOrNull(item.fcp_valor_st),
 
+    // `*_quantidade_vendida` e `*_aliquota_valor` (B5) são o caminho **por
+    // unidade de medida** (CST 03, grupo `PISQtde`); `*_base` e `*_aliquota`
+    // são o percentual. Nunca os quatro na mesma linha — quem escolhe é o CST,
+    // em `resolvePisCofins`. O par que não vale fica nulo, que é "não
+    // calculado", a convenção que A3 fixou para esta tabela.
     pis_situacao_tributaria: item.pis_situacao_tributaria ?? null,
     pis_base: toNumberOrNull(item.pis_base_calculo),
     pis_aliquota: toNumberOrNull(item.pis_aliquota_porcentual),
+    pis_quantidade_vendida: toNumberOrNull(item.pis_quantidade_vendida),
+    pis_aliquota_valor: toNumberOrNull(item.pis_aliquota_valor),
     pis_valor: toNumberOrNull(item.pis_valor),
 
     cofins_situacao_tributaria: item.cofins_situacao_tributaria ?? null,
     cofins_base: toNumberOrNull(item.cofins_base_calculo),
     cofins_aliquota: toNumberOrNull(item.cofins_aliquota_porcentual),
+    cofins_quantidade_vendida: toNumberOrNull(item.cofins_quantidade_vendida),
+    cofins_aliquota_valor: toNumberOrNull(item.cofins_aliquota_valor),
     cofins_valor: toNumberOrNull(item.cofins_valor),
 
     ipi_situacao_tributaria: item.ipi_situacao_tributaria ?? null,

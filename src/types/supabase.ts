@@ -744,7 +744,9 @@ export type Database = {
           cfop: string | null
           codigo_produto: string
           cofins_aliquota: number | null
+          cofins_aliquota_valor: number | null
           cofins_base: number | null
+          cofins_quantidade_vendida: number | null
           cofins_situacao_tributaria: string | null
           cofins_valor: number | null
           created_at: string
@@ -780,7 +782,9 @@ export type Database = {
           numero_item: number
           origem_mercadoria: string | null
           pis_aliquota: number | null
+          pis_aliquota_valor: number | null
           pis_base: number | null
+          pis_quantidade_vendida: number | null
           pis_situacao_tributaria: string | null
           pis_valor: number | null
           product_id: string | null
@@ -805,7 +809,9 @@ export type Database = {
           cfop?: string | null
           codigo_produto: string
           cofins_aliquota?: number | null
+          cofins_aliquota_valor?: number | null
           cofins_base?: number | null
+          cofins_quantidade_vendida?: number | null
           cofins_situacao_tributaria?: string | null
           cofins_valor?: number | null
           created_at?: string
@@ -841,7 +847,9 @@ export type Database = {
           numero_item: number
           origem_mercadoria?: string | null
           pis_aliquota?: number | null
+          pis_aliquota_valor?: number | null
           pis_base?: number | null
+          pis_quantidade_vendida?: number | null
           pis_situacao_tributaria?: string | null
           pis_valor?: number | null
           product_id?: string | null
@@ -866,7 +874,9 @@ export type Database = {
           cfop?: string | null
           codigo_produto?: string
           cofins_aliquota?: number | null
+          cofins_aliquota_valor?: number | null
           cofins_base?: number | null
+          cofins_quantidade_vendida?: number | null
           cofins_situacao_tributaria?: string | null
           cofins_valor?: number | null
           created_at?: string
@@ -902,7 +912,9 @@ export type Database = {
           numero_item?: number
           origem_mercadoria?: string | null
           pis_aliquota?: number | null
+          pis_aliquota_valor?: number | null
           pis_base?: number | null
+          pis_quantidade_vendida?: number | null
           pis_situacao_tributaria?: string | null
           pis_valor?: number | null
           product_id?: string | null
@@ -2470,9 +2482,11 @@ export type Database = {
       tax_groups: {
         Row: {
           aliquota_cofins: number | null
+          aliquota_cofins_valor: number | null
           aliquota_icms: number | null
           aliquota_ipi: number | null
           aliquota_pis: number | null
+          aliquota_pis_valor: number | null
           cclasstrib: string | null
           code: string
           created_at: string
@@ -2488,9 +2502,11 @@ export type Database = {
         }
         Insert: {
           aliquota_cofins?: number | null
+          aliquota_cofins_valor?: number | null
           aliquota_icms?: number | null
           aliquota_ipi?: number | null
           aliquota_pis?: number | null
+          aliquota_pis_valor?: number | null
           cclasstrib?: string | null
           code: string
           created_at?: string
@@ -2506,9 +2522,11 @@ export type Database = {
         }
         Update: {
           aliquota_cofins?: number | null
+          aliquota_cofins_valor?: number | null
           aliquota_icms?: number | null
           aliquota_ipi?: number | null
           aliquota_pis?: number | null
+          aliquota_pis_valor?: number | null
           cclasstrib?: string | null
           code?: string
           created_at?: string
@@ -3485,9 +3503,11 @@ export type Database = {
         Args: { p_term?: string }
         Returns: {
           aliquota_cofins: number | null
+          aliquota_cofins_valor: number | null
           aliquota_icms: number | null
           aliquota_ipi: number | null
           aliquota_pis: number | null
+          aliquota_pis_valor: number | null
           cclasstrib: string | null
           code: string
           created_at: string
