@@ -55,8 +55,10 @@ import {
 } from "./mvaRules.ts";
 import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
 import {
+  icmsCalculaCreditoSimples,
   icmsCalculaSubstituicaoTributaria,
   icmsCalculaValorProprio,
+  icmsStDeduzProprioNaoDestacado,
   ipiCalculaValor,
   pisCofinsCalculaValor,
   pisCofinsCalculaValorPorUnidade,
@@ -69,6 +71,20 @@ export type SaleForInvoiceBranch = {
   name: string;
   inscricaoEstadual: string | null;
   regimeTributario: string | null;
+  /**
+   * `pCredSN` — a alíquota de ICMS **dentro** da alíquota composta do Simples
+   * Nacional desta filial, em percentual (B8, 03/09/2026).
+   *
+   * Mora na filial, e não no grupo tributário, porque não é atributo do
+   * produto: é o percentual efetivo de ICMS da faixa de receita bruta dos
+   * últimos 12 meses (RBT12) em que **a filial** está enquadrada, pelo Anexo I
+   * ou II da LC 123/2006, e vale igual para toda nota que ela emite no mês —
+   * ver a decisão registrada em B8 no AGENTS.md.
+   *
+   * Nula quando ninguém a cadastrou. Aí os itens com CSOSN `101`/`201`
+   * **recusam a emissão**: os dois campos são obrigatórios nesses grupos XML.
+   */
+  aliquotaCreditoIcmsSimples: number | null;
   logradouro: string | null;
   numero: string | null;
   bairro: string | null;
@@ -259,6 +275,19 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  * destino, ajustada quando a operação é interestadual, base majorada e o valor
  * do ST descontado do ICMS próprio que o mesmo item já destacou. Item sem ST
  * no CST não consulta `mva_rules` e sai exatamente como saía em B1.
+ *
+ * ## O Simples Nacional depois de B8 (03/09/2026)
+ *
+ * Duas coisas, e as duas só valem para CSOSN:
+ *
+ * 1. **O crédito de ICMS** (`pCredSN`/`vCredICMSSN`) passou a ser declarado nos
+ *    CSOSN `101` e `201`, com a alíquota vinda da **filial** —
+ *    `resolveCreditoSimples`. É a única grandeza deste motor que não sai do
+ *    grupo tributário nem do cadastro do produto, e o porquê está lá.
+ * 2. **A dedução do ICMS próprio no ST** passou a existir para os CSOSN `201` e
+ *    `202`, que tributam a operação própria sem destacá-la — ver
+ *    `resolveSubstituicaoTributaria`. Antes de B8 o ST desses itens saía cheio
+ *    sobre a base majorada.
  */
 function resolveItemsForSale(
   sale: SaleForInvoice,
@@ -321,10 +350,25 @@ function resolveItemsForSale(
           origemMercadoria: item.product.origemMercadoria,
           basePropria: icmsBase ?? base,
           icmsProprio: icmsValor ?? 0,
+          deduzProprioNaoDestacado: icmsStDeduzProprioNaoDestacado(icmsSituacaoTributaria),
         })
       : null;
     if (st && !st.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${st.reason}`);
     const stDeclarado = st?.ok ? st : null;
+
+    // Crédito de ICMS do Simples Nacional — a terceira camada, só para os
+    // CSOSN que a declaram (`101` e `201`). A alíquota vem da **filial**, não
+    // do grupo tributário: ver `resolveCreditoSimples`.
+    const credito = icmsCalculaCreditoSimples(icmsSituacaoTributaria)
+      ? resolveCreditoSimples({
+          group,
+          branch: sale.branch,
+          situacaoTributaria: icmsSituacaoTributaria,
+          base,
+        })
+      : null;
+    if (credito && !credito.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${credito.reason}`);
+    const creditoDeclarado = credito?.ok ? credito : null;
 
     /**
      * CST de IPI: o grupo tributário manda, o cadastro do produto é fallback
@@ -405,6 +449,9 @@ function resolveItemsForSale(
       fcp_base_calculo_st: stDeclarado?.fcpBase,
       fcp_percentual_st: stDeclarado?.fcpAliquota,
       fcp_valor_st: stDeclarado?.fcpValor,
+
+      icms_aliquota_credito_simples: creditoDeclarado?.aliquota,
+      icms_valor_credito_simples: creditoDeclarado?.valor,
 
       ipi_situacao_tributaria: cstIpi,
       ipi_base_calculo: ipiBase,
@@ -500,26 +547,48 @@ type SubstituicaoTributaria =
  *    imposto de toda a cadeia menos o que a operação própria já cobrou, não o
  *    valor cheio sobre a base majorada.
  *
- * ## Duas limitações conhecidas da subtração, as duas por falta de dado
+ * ## A dedução quando o próprio não é destacado — o Simples (B8, 03/09/2026)
  *
- * As duas estão registradas na entrada de B2 do AGENTS.md e **não** foram
- * corrigidas aqui, porque as duas exigem mexer em decisões que são de outra
- * tarefa. Estão anotadas onde acontecem para ninguém redescobri-las com uma
- * nota já autorizada na mão:
+ * B2 registrou como limitação conhecida que "**Simples Nacional: não há
+ * dedução nenhuma**": os CSOSN `201`/`202`/`203` não declaram `vICMS` no XML
+ * (o ICMS próprio é pago no DAS), então `icmsProprio` chegava zero e o ST saía
+ * cheio sobre a base majorada — várias vezes o devido. B8 fecha isso.
  *
- * 1. **Interestadual: o ICMS próprio que se deduz está calculado com a
- *    alíquota interna.** `resolveItemsForSale` usa `group.aliquotaIcms` para o
- *    `vICMS` de qualquer operação — B1 nunca aplicou alíquota interestadual ao
- *    próprio. Numa venda SP→BA de 1.000 com alíquota de grupo 18%, o item
- *    destaca 180 de próprio (o correto seria 70, a 7%) e a dedução leva o
- *    mesmo 180, então o **ST sai a menos**. O ajuste da MVA usa a alíquota
- *    interestadual correta; o próprio, não. Corrigir isso é corrigir B1.
- * 2. **Simples Nacional: não há dedução nenhuma.** Os CSOSN `201`/`202`/`203`
- *    não declaram `vICMS` no XML (o ICMS próprio é pago no DAS), então
- *    `icmsProprio` chega zero e o ST sai cheio sobre a base majorada. A prática
- *    corrente permite deduzir a alíquota devida aplicada sobre o valor da
- *    operação própria, mas esse número não existe em lugar nenhum do cadastro
- *    e varia por estado — é assunto de B8, junto do resto do Simples.
+ * Quando `deduzProprioNaoDestacado` é verdadeiro (CSOSN `201`/`202`, decidido
+ * por `icmsStDeduzProprioNaoDestacado`), a dedução é calculada aqui em vez de
+ * vir de fora: `basePropria × alíquota interna` — o mesmo número que um item de
+ * Regime Normal na mesma operação teria destacado e deduzido. É o que a
+ * pesquisa de B8 encontrou convergente nas fontes: para o optante substituto,
+ * "apenas para cálculo da retenção, o ICMS da operação própria deve ser
+ * calculado aplicando-se a alíquota utilizada na operação pelos contribuintes
+ * do regime normal sobre o valor total da operação". A base legal do arranjo é
+ * o art. 13, §1º, XIII, "a", da LC 123/2006 (o ICMS-ST sai do recolhimento
+ * unificado e se observa "a legislação aplicável às demais pessoas
+ * jurídicas"); a única especialidade do optante é não usar MVA ajustada
+ * (Convênio ICMS 35/2011), que já está tratada acima.
+ *
+ * Calcular a dedução **aqui**, e não em `resolveItemsForSale`, é de propósito:
+ * ela usa a mesma `aliquotaInterna` que já foi validada logo abaixo (não nula,
+ * dentro de 0–100). Fazê-la fora duplicaria a validação ou usaria um número
+ * não validado.
+ *
+ * ## A limitação conhecida que sobrou, por falta de dado
+ *
+ * **Interestadual: o próprio que se deduz está calculado com a alíquota
+ * interna.** `resolveItemsForSale` usa `group.aliquotaIcms` para o `vICMS` de
+ * qualquer operação — B1 nunca aplicou alíquota interestadual ao próprio. Numa
+ * venda SP→BA de 1.000 com alíquota de grupo 18%, o item destaca 180 de
+ * próprio (o correto seriam 70, a 7%) e a dedução leva o mesmo 180, então o
+ * **ST sai a menos**. O ajuste da MVA usa a alíquota interestadual correta; o
+ * próprio, não. Corrigir isso é corrigir B1, e está registrado na entrada de
+ * B2 do AGENTS.md.
+ *
+ * A dedução do Simples que B8 acrescentou **herda exatamente essa limitação**,
+ * e isso também é decisão: ela usa a mesma `aliquotaInterna`, e não a
+ * interestadual, para produzir o mesmo número que o caminho de Regime Normal
+ * produz. Assim as duas metades erram junto e serão corrigidas de uma vez,
+ * quando existir tabela de alíquota interna por UF × NCM — em vez de o Simples
+ * ficar mais correto que o Regime Normal por acidente de escopo.
  */
 function resolveSubstituicaoTributaria(input: {
   group: TaxGroup;
@@ -531,6 +600,12 @@ function resolveSubstituicaoTributaria(input: {
   basePropria: number;
   /** O `vICMS` deste item; zero quando o CST não declara ICMS próprio. */
   icmsProprio: number;
+  /**
+   * O CSOSN tributa a operação própria **sem destacá-la** no XML (Simples
+   * Nacional, CSOSN `201`/`202`)? Então a dedução é calculada aqui a partir da
+   * alíquota interna, em vez de vir em `icmsProprio` — ver o cabeçalho.
+   */
+  deduzProprioNaoDestacado: boolean;
 }): SubstituicaoTributaria {
   const { group, query, mvaRules, ncm, origemMercadoria, basePropria, icmsProprio } = input;
 
@@ -597,11 +672,16 @@ function resolveSubstituicaoTributaria(input: {
   }
 
   const base = toCents(basePropria * (1 + mva / 100));
+  // A dedução: o `vICMS` destacado no item (Regime Normal) ou, quando o CSOSN
+  // tributa a operação própria sem destacá-la (Simples `201`/`202`), o valor
+  // que um item de Regime Normal na mesma operação teria destacado — ver o
+  // cabeçalho desta função.
+  const deducao = input.deduzProprioNaoDestacado ? taxAmount(basePropria, aliquotaInterna) : icmsProprio;
   // `Math.max(0, …)`: um ST negativo não existe no leiaute. Só acontece com
   // cadastro incoerente (MVA zero e alíquota interna menor que a do próprio),
   // e zerar é o resultado correto — nada a recolher — em vez de um campo que a
   // SEFAZ rejeita.
-  const valor = Math.max(0, toCents(taxAmount(base, aliquotaInterna) - icmsProprio));
+  const valor = Math.max(0, toCents(taxAmount(base, aliquotaInterna) - deducao));
 
   const fcp = rule.fcpAliquota;
   return {
@@ -619,6 +699,129 @@ function resolveSubstituicaoTributaria(input: {
     fcpAliquota: fcp ?? undefined,
     fcpValor: fcp !== null ? taxAmount(base, fcp) : undefined,
   };
+}
+
+/**
+ * O que um item declara de crédito de ICMS do Simples Nacional, ou o motivo de
+ * a emissão não poder sair (B8, 03/09/2026).
+ */
+type CreditoSimples =
+  | { ok: true; aliquota: number; valor: number }
+  | { ok: false; reason: string };
+
+/**
+ * `pCredSN` e `vCredICMSSN` — o crédito de ICMS que o destinatário pode
+ * aproveitar nos termos do art. 23 da LC 123/2006.
+ *
+ * ## O que este cálculo é
+ *
+ * O optante pelo Simples Nacional paga o ICMS embutido no DAS e **não destaca
+ * `vICMS`** na nota. Sem mais nada, o comprador de Regime Normal não teria
+ * crédito de nada — e é para isso que existe este par de campos: o vendedor
+ * informa quanto da alíquota composta que ele recolhe foi ICMS, e o comprador
+ * credita-se desse valor.
+ *
+ *     vCredICMSSN = valor da operação × pCredSN / 100
+ *
+ * A base é o **valor da operação** (o valor bruto do item), e não uma "base de
+ * cálculo de ICMS": o grupo `ICMSSN101` não tem `vBC` nenhum — os quatro
+ * campos dele são `orig`, `CSOSN`, `pCredSN` e `vCredICMSSN`. Consequência
+ * prática que vale registrar: `tax_groups.reducao_base_icms` **não alcança o
+ * crédito**, porque num CSOSN não há base própria a reduzir (desde B1
+ * `icmsCalculaValorProprio` é falso para todos eles menos o `900`).
+ *
+ * O limite legal do art. 23, §1º, *in fine* — o crédito não pode passar do
+ * "ICMS efetivamente devido pelas optantes em relação a essas aquisições" — é
+ * satisfeito por construção: `pCredSN` **é** o percentual efetivo de ICMS da
+ * faixa da filial, então o produto dele pelo valor da operação é exatamente o
+ * imposto devido naquela operação. Este motor não tem como conferir isso de
+ * outra forma (não conhece o DAS), e não precisa.
+ *
+ * ## De onde vem a alíquota, e por que da filial
+ *
+ * De `branches.aliquota_credito_icms_simples`. Ela é o percentual efetivo de
+ * ICMS calculado sobre a faixa de RBT12 em que a filial estava no **mês
+ * anterior** ao da operação (Resolução CGSN 140/2018, art. 60: `{[(RBT12 ×
+ * alíquota nominal) − parcela a deduzir] / RBT12} × percentual de distribuição
+ * do ICMS`). Não depende do produto — depende de quem emite e de quanto ele
+ * faturou. O cálculo automático do RBT12 e do enquadramento está fora de
+ * escopo por decisão registrada em B8: o número é cadastrado à mão.
+ *
+ * ## Sem a alíquota cadastrada, **recusa** — e é o ponto que a pesquisa mudou
+ *
+ * O enunciado de B8 supunha que a ausência devia sair como campo ausente ("não
+ * calculado", como o CST de IPI sem alíquota em B1). A tabela de campos do
+ * leiaute 4.00 diz o contrário: nos grupos `ICMSSN101` e `ICMSSN201` os dois
+ * campos são **obrigatórios** (`S`), e omiti-los é a rejeição de schema "o
+ * conteúdo do elemento ICMSSN101 está incompleto. Esperado pCredSN".
+ *
+ * Ou seja, não existe a emissão que hoje funciona e que a recusa quebraria:
+ * como o motor nunca declarou estes campos, **toda** nota com CSOSN `101` ou
+ * `201` já era XML inválido. Recusar antes de emitir, com mensagem que diz
+ * onde cadastrar, é estritamente melhor do que uma rejeição de schema. É a
+ * mesma família de recusa de B2 ("CST com ST sem MVA") e B5 ("CST 03 sem
+ * alíquota ad rem").
+ *
+ * A filial que **não** quer transferir crédito não precisa cadastrar nada: ela
+ * usa CSOSN `102` ("sem permissão de crédito") ou `202`, que não passam por
+ * aqui. A escolha é do CSOSN, como todo o resto deste motor — e é coerente com
+ * o art. 23, §4º, II, da LC 123/2006, que trata "não informar a alíquota" como
+ * uma decisão legítima do remetente, não como um erro.
+ *
+ * ## Duas consequências que este cálculo não trata, e por quê
+ *
+ * 1. **NFC-e também declara o crédito.** `buildNfcePayloadFromSale` passa pelo
+ *    mesmo `resolveItemsForSale`, então uma venda de PDV com CSOSN `101` sai
+ *    com `pCredSN`/`vCredICMSSN` — e o consumidor final nunca pode aproveitar
+ *    crédito (o art. 23, §1º, exige destino a comercialização ou
+ *    industrialização). Não há caso especial aqui porque a alternativa seria
+ *    emitir `ICMSSN101` **sem** os campos, que é rejeição de schema: o que está
+ *    errado nesse cenário é o CSOSN do cadastro (deveria ser `102`), e o motor
+ *    honra o CSOSN como honra em todo o resto.
+ * 2. **A nota de devolução recalcula o crédito com a alíquota de hoje.**
+ *    `buildReturnNfePayload` também reaproveita `resolveItemsForSale`, e a
+ *    alíquota da filial muda a cada virada de faixa de RBT12 — na prática, todo
+ *    mês. Uma devolução em novembro de uma venda de setembro reverte um crédito
+ *    calculado com o percentual de novembro, diferente do que a nota original
+ *    declarou. É **a mesma limitação** que B2 registrou para a MVA e B1 para o
+ *    IPI, com a mesma correção certa: fazer a devolução ler
+ *    `fiscal_document_items` (onde o percentual declarado está gravado desde
+ *    B8) em vez de recalcular. É tarefa própria, e vale para os três de uma vez.
+ */
+function resolveCreditoSimples(input: {
+  group: TaxGroup;
+  branch: SaleForInvoiceBranch;
+  situacaoTributaria: string | null;
+  /** Valor bruto do item — o "valor da operação" sobre o qual o crédito incide. */
+  base: number;
+}): CreditoSimples {
+  const { group, branch, situacaoTributaria, base } = input;
+  const aliquota = branch.aliquotaCreditoIcmsSimples;
+
+  if (aliquota === null) {
+    return {
+      ok: false,
+      reason:
+        `o CSOSN ${situacaoTributaria} do grupo tributário "${group.name}" transfere crédito de ICMS do ` +
+        `Simples Nacional, mas a filial "${branch.name}" não tem a alíquota de crédito cadastrada — o ` +
+        `leiaute da NF-e exige pCredSN e vCredICMSSN nesse CSOSN. Cadastre a alíquota em Configurações, ` +
+        `ou use um CSOSN sem permissão de crédito (102 ou 202).`,
+    };
+  }
+  // `pCredSN` é `Decimal[3.2-4]` no leiaute: no máximo 999,9999, e um
+  // percentual acima de 100 já é cadastro errado. A coluna tem `check` de
+  // 0–100, mas a recusa fica aqui também porque o número pode ter sido gravado
+  // antes da constraint — e um crédito absurdo é imposto transferido a mais.
+  if (aliquota < 0 || aliquota > 100) {
+    return {
+      ok: false,
+      reason:
+        `a alíquota de crédito do Simples Nacional cadastrada na filial "${branch.name}" ` +
+        `(${aliquota}%) está fora da faixa aceitável de 0 a 100. Corrija em Configurações.`,
+    };
+  }
+
+  return { ok: true, aliquota, valor: taxAmount(base, aliquota) };
 }
 
 /**

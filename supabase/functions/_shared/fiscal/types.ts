@@ -342,6 +342,30 @@ export type NfePayloadItem = {
   /** `vFCPST`. */
   fcp_valor_st?: number;
 
+  /* --- Crédito de ICMS do Simples Nacional (B8, 03/09/2026) --- */
+
+  /**
+   * `pCredSN` — a alíquota aplicável de cálculo do crédito do Simples Nacional,
+   * em percentual. Vem de `branches.aliquota_credito_icms_simples`: é o
+   * percentual efetivo de ICMS da faixa de RBT12 da **filial**, não um atributo
+   * do produto (ver `resolveCreditoSimples` em `invoiceMapping.ts`).
+   *
+   * Sai **apenas** nos CSOSN `101` e `201`, onde os grupos `ICMSSN101`/
+   * `ICMSSN201` o exigem (`S` na tabela de campos do leiaute 4.00). O grupo
+   * `ICMSSN900` também o aceita, mas como opcional, e este motor não o declara
+   * lá — ver `icmsCalculaCreditoSimples` em `taxSituations.ts`.
+   */
+  icms_aliquota_credito_simples?: number;
+  /**
+   * `vCredICMSSN` — o valor do crédito de ICMS que o destinatário pode
+   * aproveitar nos termos do art. 23 da LC 123/2006.
+   *
+   * `valor bruto do item × pCredSN`. A base é o **valor da operação** e não uma
+   * base de cálculo de ICMS: o grupo `ICMSSN101` não tem `vBC`, então nada
+   * disso viaja no XML além do percentual e do valor.
+   */
+  icms_valor_credito_simples?: number;
+
   /** `tax_groups.cst_ipi`, com `products.cst_ipi` de fallback (ver `taxGroups.ts`). */
   ipi_situacao_tributaria?: string;
   ipi_base_calculo?: number;

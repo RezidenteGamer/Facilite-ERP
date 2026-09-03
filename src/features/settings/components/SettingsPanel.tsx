@@ -1,4 +1,5 @@
 import { SearchIcon } from "../../../components/icons";
+import SimplesCreditSection from "./SimplesCreditSection";
 import StockPolicySection from "./StockPolicySection";
 import "./SettingsPanel.css";
 
@@ -30,6 +31,7 @@ export default function SettingsPanel() {
       </div>
 
       <StockPolicySection />
+      <SimplesCreditSection />
     </div>
   );
 }

@@ -109,6 +109,12 @@ function sale(items: SaleForInvoiceItem[]): SaleForInvoice {
       name: "Facilite Testes LTDA",
       inscricaoEstadual: "123456789",
       regimeTributario: "3",
+      // Alíquota de crédito do Simples acrescentada em B8 (03/09/2026), pelo
+      // mesmo motivo que B2 acrescentou uma MVA aqui: os CSOSN `101` e `201`
+      // passaram a **exigir** `pCredSN`/`vCredICMSSN`, e sem o cadastro os
+      // testes desta bateria — que não tratam de crédito nenhum — seriam
+      // recusados. Nenhuma expectativa de B1 mudou.
+      aliquotaCreditoIcmsSimples: 1.36,
       logradouro: "Rua Um",
       numero: "10",
       bairro: "Centro",

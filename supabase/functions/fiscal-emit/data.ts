@@ -80,6 +80,8 @@ type BranchRow = {
   name: string;
   inscricao_estadual: string | null;
   regime_tributario: string | null;
+  /** Aceita `undefined`: a linha pode vir de um banco onde a migration de B8 ainda não rodou. */
+  aliquota_credito_icms_simples: number | null | undefined;
   logradouro: string | null;
   numero: string | null;
   bairro: string | null;
@@ -162,6 +164,12 @@ function toInvoiceBranch(branch: BranchRow): SaleForInvoice["branch"] {
     name: branch.name,
     inscricaoEstadual: branch.inscricao_estadual,
     regimeTributario: branch.regime_tributario,
+    // `?? null` pelo mesmo motivo das colunas novas de B1/B5 em `toTaxGroup`:
+    // enquanto a migration de B8 não estiver aplicada o `select` volta sem a
+    // coluna, e `undefined !== null` faria toda filial parecer ter alíquota de
+    // crédito cadastrada — declarando `pCredSN: undefined` num campo
+    // obrigatório em vez de recusar com mensagem.
+    aliquotaCreditoIcmsSimples: branch.aliquota_credito_icms_simples ?? null,
     logradouro: branch.logradouro,
     numero: branch.numero,
     bairro: branch.bairro,
@@ -223,7 +231,7 @@ export async function readSaleForInvoice(admin: SupabaseClient, saleId: string):
     .from("sales")
     .select(
       `branch_id, status, code, issue_date, subtotal_amount, total_amount, discount_amount, freight_amount, operation_type,
-       branch:branches(cnpj, name, inscricao_estadual, regime_tributario, logradouro, numero, bairro, municipio, uf, cep),
+       branch:branches(cnpj, name, inscricao_estadual, regime_tributario, aliquota_credito_icms_simples, logradouro, numero, bairro, municipio, uf, cep),
        contact:contacts(name, document, inscricao_estadual, indicador_ie, logradouro, numero, bairro, municipio, uf, cep, phone),
        items:sale_items(quantity, unit_price, discount_amount, total_amount, ${PRODUCT_COLUMNS}),
        payments:sale_payments(method, amount)`,
@@ -275,7 +283,7 @@ export async function readSaleReturnForInvoice(
     .select(
       `branch_id, status, code, issue_date, total_amount,
        sale:sales(code,
-         branch:branches(cnpj, name, inscricao_estadual, regime_tributario, logradouro, numero, bairro, municipio, uf, cep),
+         branch:branches(cnpj, name, inscricao_estadual, regime_tributario, aliquota_credito_icms_simples, logradouro, numero, bairro, municipio, uf, cep),
          contact:contacts(name, document, inscricao_estadual, indicador_ie, logradouro, numero, bairro, municipio, uf, cep, phone),
          invoices:fiscal_documents(status, chave, updated_at)),
        items:sale_return_items(quantity, unit_price, discount_amount, total_amount, ${PRODUCT_COLUMNS})`,

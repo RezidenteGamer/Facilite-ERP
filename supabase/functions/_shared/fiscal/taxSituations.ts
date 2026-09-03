@@ -53,8 +53,9 @@ function normalizeCode(code: string | null | undefined): string {
  *
  * CSOSN: **só o `900` ("Outros") tem `vBC`/`pICMS`/`vICMS`**. Todos os demais
  * são grupos enxutos — `102`/`103`/`300`/`400` (grupo `ICMSSN102`) trazem só
- * origem e CSOSN; `101` e `201` trazem crédito de Simples (`pCredSN`,
- * `vCredICMSSN`, que é assunto de B8); `202`/`203`/`500` trazem apenas ST.
+ * origem e CSOSN; `101` e `201` trazem o crédito de Simples (`pCredSN`,
+ * `vCredICMSSN`) em vez do próprio — ver `icmsCalculaCreditoSimples`, B8;
+ * `202`/`203`/`500` trazem apenas ST.
  */
 const ICMS_SEM_VALOR_PROPRIO = new Set([
   // CST — Regime Normal (CRT 3)
@@ -100,8 +101,8 @@ export function icmsCalculaValorProprio(situacaoTributaria: string | null | unde
  * - CST `30` (isenta/não tributada **com** cobrança de ST) — grupo `ICMS30`,
  *   que só tem os campos de ST, nenhum do próprio;
  * - CSOSN `201` (com crédito de Simples e com ST), `202` e `203` (com ST, sem
- *   crédito) — grupos `ICMSSN201`/`ICMSSN202`. O `pCredSN` do `201` é B8; a
- *   parte de ST deles é aqui.
+ *   crédito) — grupos `ICMSSN201`/`ICMSSN202`. O `pCredSN` do `201` é de
+ *   `icmsCalculaCreditoSimples` (B8); a parte de ST deles é aqui.
  *
  * **Ficam de fora, e cada um por um motivo próprio:**
  *
@@ -137,6 +138,99 @@ const ICMS_COM_SUBSTITUICAO_TRIBUTARIA = new Set([
  */
 export function icmsCalculaSubstituicaoTributaria(situacaoTributaria: string | null | undefined): boolean {
   return ICMS_COM_SUBSTITUICAO_TRIBUTARIA.has(normalizeCode(situacaoTributaria));
+}
+
+/**
+ * CSOSN cujo grupo XML declara o **crédito de ICMS do Simples Nacional** —
+ * `pCredSN` (alíquota aplicável de cálculo do crédito) e `vCredICMSSN` (o valor
+ * que o destinatário pode aproveitar nos termos do art. 23 da LC 123/2006).
+ * B8, 03/09/2026.
+ *
+ * É a terceira dimensão do ICMS deste arquivo, e de novo **não** é o
+ * complemento das outras duas: o `101` não tem próprio nem ST e tem crédito; o
+ * `201` tem ST e crédito; o `202` tem ST e não tem crédito. As três perguntas
+ * se fazem separadamente para o mesmo item.
+ *
+ * Só existe no Simples Nacional: é o mecanismo pelo qual o optante, que paga o
+ * ICMS embutido no DAS e por isso **não destaca `vICMS`**, informa ao
+ * comprador de Regime Normal quanto daquele DAS foi ICMS, para o comprador
+ * creditar-se. Não há equivalente nos CST de Regime Normal, onde o `vICMS`
+ * destacado já é o crédito.
+ *
+ * - `101` "Tributada pelo Simples Nacional **com permissão de crédito**" —
+ *   grupo `ICMSSN101`, que tem exatamente quatro campos: `orig`, `CSOSN`,
+ *   `pCredSN` e `vCredICMSSN`. Não tem `vBC` (por isso a base do crédito não
+ *   viaja no XML: o fisco a refaz do valor do produto).
+ * - `201` "Tributada com permissão de crédito **e com cobrança de ST**" —
+ *   grupo `ICMSSN201`, que soma os campos de ST aos dois do crédito. É a
+ *   metade que B2 deixou de fora de propósito.
+ *
+ * **Nos dois, os dois campos são obrigatórios** (`S` na tabela de campos do
+ * leiaute 4.00, conferida antes de implementar): omiti-los é a rejeição de
+ * schema "o conteúdo do elemento ICMSSN101 está incompleto. Esperado
+ * pCredSN". É o que justifica a recusa por cadastro incompleto em
+ * `resolveCreditoSimples` — ver a nota lá.
+ *
+ * **O `900` ficou de fora, e é decisão.** O grupo `ICMSSN900` também aceita
+ * `pCredSN`/`vCredICMSSN`, mas como opcional (`?` na tabela — "a exigência
+ * depende da situação fática"), porque é o catch-all: é o código que se usa
+ * quando nenhum outro serve. Como a alíquota de crédito é cadastro **da
+ * filial** e vale para toda nota que ela emite, incluir o `900` faria o
+ * crédito ser declarado automaticamente em operações que o contador marcou
+ * justamente como "nenhuma das anteriores" — e o crédito tem vedações legais
+ * (art. 23, §4º, da LC 123/2006) que o cadastro não sabe verificar. Quem quer
+ * transferir crédito tem o `101` e o `201` para dizê-lo explicitamente. Mesmo
+ * critério com que B2 deixou o `900` fora do ST.
+ */
+const ICMS_COM_CREDITO_SIMPLES = new Set(["101", "201"]);
+
+/**
+ * O item com este CSOSN declara `pCredSN`/`vCredICMSSN`?
+ *
+ * Lista de **inclusão**, como as de ST e de IPI: código desconhecido devolve
+ * `false`. Aqui isso importa porque a resposta `true` **exige o cadastro** da
+ * alíquota de crédito na filial e recusa a emissão sem ela.
+ */
+export function icmsCalculaCreditoSimples(situacaoTributaria: string | null | undefined): boolean {
+  return ICMS_COM_CREDITO_SIMPLES.has(normalizeCode(situacaoTributaria));
+}
+
+/**
+ * CSOSN em que o ICMS da operação própria **existe mas não é destacado**, e
+ * por isso entra no cálculo do ICMS-ST como dedução ainda que nenhum `vICMS`
+ * apareça no XML (B8, 03/09/2026).
+ *
+ * É a lacuna que B2 registrou como limitação conhecida ("Simples Nacional: não
+ * há dedução nenhuma") e que esta função fecha. O ICMS-ST é o imposto de toda
+ * a cadeia **menos** o que a operação própria já cobrou; num CSOSN de Simples
+ * o próprio foi cobrado (dentro do DAS), só não foi destacado — então deduzir
+ * zero faz o ST sair sobre a base majorada inteira, várias vezes maior que o
+ * devido. A base legal do cálculo é o art. 13, §1º, XIII, "a", da LC 123/2006,
+ * que tira o ICMS-ST do recolhimento unificado e manda observar "a legislação
+ * aplicável às demais pessoas jurídicas" — isto é, a fórmula geral, com a
+ * dedução; a única especialidade do optante é não usar MVA ajustada (Convênio
+ * ICMS 35/2011, já tratado em B2).
+ *
+ * - `201` (tributada, com crédito, com ST) e `202` (tributada, sem crédito,
+ *   com ST) — nos dois a operação própria **é tributada**, e é ela que se
+ *   deduz.
+ *
+ * **O `203` ficou de fora de propósito**: ele é "**isenção** do ICMS no
+ * Simples Nacional para faixa de receita bruta, com cobrança de ICMS por
+ * substituição tributária". Operação própria isenta não tem imposto para
+ * deduzir — exatamente o mesmo motivo pelo qual o CST `30` (isenta/não
+ * tributada com ST) já saía sem dedução desde B2, com teste fixando isso.
+ */
+const ICMS_ST_COM_DEDUCAO_PROPRIA_NAO_DESTACADA = new Set(["201", "202"]);
+
+/**
+ * A operação própria deste CSOSN se deduz do ICMS-ST mesmo sem `vICMS` no XML?
+ *
+ * Lista de inclusão: código desconhecido devolve `false` — na dúvida, não há
+ * dedução, que é o comportamento anterior a B8.
+ */
+export function icmsStDeduzProprioNaoDestacado(situacaoTributaria: string | null | undefined): boolean {
+  return ICMS_ST_COM_DEDUCAO_PROPRIA_NAO_DESTACADA.has(normalizeCode(situacaoTributaria));
 }
 
 /**

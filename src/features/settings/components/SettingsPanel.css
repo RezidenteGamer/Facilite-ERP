@@ -123,6 +123,47 @@
   font-size: 13px;
 }
 
+/* Campo de texto + botão curto, para os parâmetros por filial que não são
+   interruptor (a alíquota de crédito do Simples, B8). O `__btn` da pilha de
+   ações tem 60px e fonte 22 — grande demais para dentro de uma linha —, então
+   o botão de salvar tem tamanho próprio aqui. */
+.settings-panel__field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.settings-panel__input {
+  width: 110px;
+  padding: 8px 12px;
+  border: 1px solid var(--blue-panel-edge);
+  border-radius: var(--radius-pill);
+  outline: 0;
+  background: var(--white);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  text-align: right;
+}
+
+.settings-panel__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-panel__field .settings-panel__btn {
+  height: 40px;
+  padding: 0 20px;
+  font-size: 15px;
+}
+
+.settings-panel__field .settings-panel__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* Mesmo desenho do interruptor de RegistryDetails (trilho verde/vermelho,
    botão branco deslizante) — replicado aqui em vez de importado porque as
    duas telas não compartilham CSS module nenhum hoje. */

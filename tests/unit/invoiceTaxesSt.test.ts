@@ -129,6 +129,10 @@ function sale(items: SaleForInvoiceItem[], ufDestino = "SP", regime = "3"): Sale
       name: "Facilite Testes LTDA",
       inscricaoEstadual: "123456789",
       regimeTributario: regime,
+      // Idem `invoiceTaxes.test.ts`: o CSOSN `201` desta bateria declara ST
+      // **e** crédito de Simples desde B8, e sem a alíquota cadastrada a
+      // emissão seria recusada por cadastro incompleto.
+      aliquotaCreditoIcmsSimples: 1.36,
       logradouro: "Rua Um",
       numero: "10",
       bairro: "Centro",

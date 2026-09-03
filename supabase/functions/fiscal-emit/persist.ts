@@ -227,10 +227,11 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
  * XML com imposto —, as duas metades de A3 contariam histórias diferentes sobre
  * a mesma nota.
  *
- * A lista do que fica nulo encolheu duas vezes: B1 (01/09/2026) passou a
- * preencher IPI e `icms_reducao_base`, e B2 (mesmo dia) o ICMS-ST e o FCP.
- * Restam `ibs_*`/`cbs_*` (B10), `ipi_codigo_enquadramento` (dado de cadastro
- * que ninguém tem) e `icms_st_reducao_base`.
+ * A lista do que fica nulo encolheu três vezes: B1 (01/09/2026) passou a
+ * preencher IPI e `icms_reducao_base`, B2 (mesmo dia) o ICMS-ST e o FCP, e B8
+ * (03/09/2026) o crédito de ICMS do Simples. Restam `ibs_*`/`cbs_*` (B10),
+ * `ipi_codigo_enquadramento` (dado de cadastro que ninguém tem) e
+ * `icms_st_reducao_base`.
  */
 function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record<string, unknown>[] {
   return payload.items.map((item) => ({
@@ -281,6 +282,12 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     fcp_base: toNumberOrNull(item.fcp_base_calculo_st),
     fcp_aliquota: toNumberOrNull(item.fcp_percentual_st),
     fcp_valor: toNumberOrNull(item.fcp_valor_st),
+
+    // Crédito de ICMS do Simples Nacional (B8): colunas novas, ao contrário das
+    // de ST — não havia onde guardar `pCredSN`/`vCredICMSSN`. Nulas em todo item
+    // que não é CSOSN 101/201, e nulo continua sendo "não calculado" (A3).
+    icms_aliquota_credito_simples: toNumberOrNull(item.icms_aliquota_credito_simples),
+    icms_valor_credito_simples: toNumberOrNull(item.icms_valor_credito_simples),
 
     // `*_quantidade_vendida` e `*_aliquota_valor` (B5) são o caminho **por
     // unidade de medida** (CST 03, grupo `PISQtde`); `*_base` e `*_aliquota`

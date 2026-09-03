@@ -3328,3 +3328,321 @@ entre unidade comercial e tributável, que é a limitação que esta tarefa exp�
 nunca preenchidos desde a etapa 8; e o XML do provedor simulado, que declara
 apenas o CST de PIS/COFINS e nenhum valor — como já fazia antes de B1, e como
 também ficou para o ICMS-ST de B2.
+
+### Decisão arquitetural: Simples Nacional — o crédito de ICMS do CSOSN 101/201, a dedução do próprio no ST, e o que a pesquisa disse das duas frases ambíguas do enunciado (B8) (03/09/2026)
+
+Quarta tarefa da Etapa 2. B1 ensinou o motor a calcular o ICMS próprio, o IPI e
+a redução de base, e a **parar de declarar** valor nos CST cujo grupo XML não
+tem onde escrevê-lo. B2 acrescentou o ICMS-ST. B5 fechou o PIS/COFINS ad rem.
+B8 fecha a parte do Simples Nacional que as três deixaram anotada como
+pendente — e as duas metades dela vinham com uma dúvida de pesquisa cada.
+
+#### Decisão 1: a alíquota de crédito mora em `branches`, e essa é a decisão da tarefa
+
+O par `pCredSN`/`vCredICMSSN` é o mecanismo pelo qual o optante — que paga o
+ICMS embutido no DAS e por isso **não destaca `vICMS`** — informa ao comprador
+de Regime Normal quanto daquele DAS foi ICMS, para o comprador creditar-se
+(art. 23 da LC 123/2006). A conta é `vCredICMSSN = valor da operação ×
+pCredSN`, e a base é o **valor da operação**, não uma base de cálculo de ICMS:
+o grupo `ICMSSN101` tem exatamente quatro campos (`orig`, `CSOSN`, `pCredSN`,
+`vCredICMSSN`) e **não tem `vBC`**. Conferido contra a tabela de campos do
+leiaute 4.00 e a da Focus NFe antes de desenhar qualquer coluna.
+
+A coluna nova é `branches.aliquota_credito_icms_simples numeric(7,4)`, e
+**contraria o padrão das três tarefas anteriores de propósito**: B1, B2 e B5
+puseram tudo em `tax_groups` (ou, no caso da MVA, numa tabela por NCM × UF).
+Aqui não serve nenhum dos dois, porque `pCredSN` não é atributo do produto. É o
+percentual efetivo de ICMS calculado sobre a faixa de RBT12 em que o
+**estabelecimento** estava no mês anterior ao da operação, pela fórmula do
+art. 60 da Resolução CGSN 140/2018:
+
+    {[(RBT12 × alíquota nominal) − parcela a deduzir] / RBT12}
+      × percentual de distribuição do ICMS do Anexo
+
+Nada nessa fórmula fala de mercadoria. Quem tem CNPJ, Anexo e faixa de receita
+é a filial, e o mesmo percentual vale para toda nota que ela emite naquele mês.
+Pô-lo em `tax_groups` obrigaria a repetir o número em todos os grupos e a
+atualizar todos eles a cada virada de faixa — e a primeira divergência entre
+duas linhas produziria duas notas com créditos diferentes para o mesmo vendedor
+no mesmo mês. `numeric(7,4)` cabe exatamente no que o leiaute admite
+(`Decimal[3.2-4]`, no máximo 999,9999), e os 4 decimais importam de verdade: a
+fórmula do art. 60 quase nunca dá número redondo.
+
+**O cálculo automático de RBT12 e enquadramento ficou fora de escopo**, como o
+enunciado mandou: seria um módulo de apuração com série histórica de receita por
+filial. O número é cadastrado à mão.
+
+#### Decisão 2: sem a alíquota cadastrada, **recusa** — e aqui a pesquisa contrariou o enunciado
+
+O enunciado supunha que a ausência devia sair como campo ausente ("não
+calculado", como o CST de IPI sem alíquota em B1), e pedia explicitamente para
+confirmar isso na pesquisa. A tabela de campos diz o contrário: nos grupos
+`ICMSSN101` e `ICMSSN201` os dois campos são **obrigatórios** (`S`), e omiti-los
+é a rejeição de schema "o conteúdo do elemento ICMSSN101 está incompleto.
+Esperado pCredSN" — erro que aparece em base de conhecimento de emissor atrás
+de emissor, o que é a melhor evidência de que ele acontece de verdade.
+
+Com isso, o argumento do enunciado contra a recusa ("forçar cadastro
+obrigatório quebraria emissões que hoje funcionam") **não se aplica**: como o
+motor nunca declarou estes campos, toda nota com CSOSN `101` ou `201` já era XML
+inválido. Não há emissão correta que a recusa quebre. Recusar antes de emitir,
+com mensagem dizendo onde cadastrar e oferecendo a saída sem cadastro, é
+estritamente melhor que uma rejeição de schema — e é a mesma família de recusa
+de B2 ("CST com ST sem MVA") e B5 ("CST 03 sem alíquota ad rem").
+
+A filial que **não** quer transferir crédito não cadastra nada: usa CSOSN `102`
+ou `202`, que não passam por lá. Isso é coerente com o art. 23, §4º, II, da
+LC 123/2006, que trata "não informar a alíquota" como decisão legítima do
+remetente, não como erro. E o limite legal do §1º *in fine* (o crédito não passa
+do imposto efetivamente devido) é satisfeito por construção: `pCredSN` **é** o
+percentual efetivo da faixa, então o produto dele pelo valor da operação é
+exatamente aquele imposto.
+
+**Só `101` e `201`.** O grupo `ICMSSN900` também aceita o par, mas como
+**opcional** (`?` na tabela — "a exigência depende da situação fática"), e ficou
+de fora: como a alíquota é cadastro da filial e vale para toda nota, incluir o
+catch-all faria o crédito ser declarado automaticamente em operações que o
+contador marcou justamente como "nenhuma das anteriores", onde as vedações do
+art. 23, §4º, podem estar em jogo e o cadastro não sabe verificá-las. Mesmo
+critério com que B2 deixou o `900` fora do ST.
+
+#### Decisão 3: a dedução do próprio no ST do Simples **foi** implementada
+
+Esta era a segunda pesquisa, e a instrução era explícita: não inventar fórmula,
+e só corrigir se a pesquisa trouxesse confiança real. Trouxe.
+
+B2 tinha registrado que "**Simples Nacional: não há dedução nenhuma**" — os
+CSOSN `201`/`202`/`203` não declaram `vICMS`, então `icmsProprio` chegava zero e
+o ST saía cheio sobre a base majorada. A ordem de grandeza do erro é o que
+decide: no exemplo canônico (1.000 de operação, MVA 40%, interna 18%) o ST
+correto é 72,00 e o sem dedução é 252,00. **Três vezes e meia o devido**, numa
+nota autorizada.
+
+O que a pesquisa encontrou, convergente em fontes independentes:
+
+- **A base legal geral** é o art. 13, §1º, XIII, "a", da LC 123/2006: o ICMS-ST
+  sai do recolhimento unificado e se observa "a legislação aplicável às demais
+  pessoas jurídicas" — isto é, a fórmula geral do ST, **com** a dedução. A única
+  especialidade do optante é não usar MVA ajustada (Convênio ICMS 35/2011), que
+  B2 já implementou.
+- **A regra da dedução**, na formulação mais direta que apareceu: para o
+  optante substituto o destaque do ICMS na nota é vedado, e por isso "apenas
+  para cálculo da retenção, o ICMS da operação própria deve ser calculado
+  aplicando-se a alíquota utilizada na operação pelos contribuintes do regime
+  normal de tributação sobre o valor total da operação".
+- **Dois exemplos numéricos** com a mesma conta: o RICMS/PR (que em agosto de
+  2009 trocou uma dedução fixa de 7% justamente por "valor da operação ×
+  alíquota da operação própria do substituto" — 12% no exemplo dele) e uma
+  fonte contábil corrente com 18%.
+- **Nenhuma fonte encontrada nega a dedução ao optante.** O que varia por
+  estado é o número da alíquota interna e a MVA, não a existência da subtração.
+
+Por isso `resolveSubstituicaoTributaria` ganhou `deduzProprioNaoDestacado`, e a
+dedução dos CSOSN `201`/`202` é `basePropria × alíquota interna` — calculada
+**dentro** da função, para reusar a `aliquotaInterna` que ela já valida.
+
+**O `203` ficou de fora, e é decisão.** Ele é "**isenção** do ICMS no Simples
+Nacional para faixa de receita bruta, com cobrança de ICMS por ST": operação
+própria isenta não tem imposto para deduzir. É exatamente o motivo pelo qual o
+CST `30` já saía sem dedução desde B2, com teste fixando isso — e os dois testes
+agora vivem lado a lado.
+
+**A dedução do Simples herda de propósito a limitação que B2 registrou.** Ela
+usa `group.aliquotaIcms` (a interna aproximada), e não a interestadual, mesmo
+quando a operação é interestadual — que é exatamente o que o caminho de Regime
+Normal faz. É deliberado: assim as duas metades erram junto e serão corrigidas
+de uma vez, quando existir tabela de alíquota interna por UF × NCM, em vez de o
+Simples ficar mais correto que o Regime Normal por acidente de escopo. Há teste
+dedicado a esse caso, com o motivo escrito no comentário.
+
+#### A terceira pesquisa: "CSOSN por operação" — **não há lacuna no CSOSN**
+
+O enunciado do relatório original pedia "CSOSN por operação", e a instrução era
+investigar se sobrava algo genuíno ou se a frase já estava satisfeita. Está
+satisfeita, e por dois motivos que se somam:
+
+1. **O CSOSN já é por item** desde a correção de 19/08/2026: vem de
+   `tax_groups.csosn` pelo grupo do produto, e dois itens da mesma venda podem
+   ter CSOSN diferentes. Há teste na bateria nova provando isso (um item com
+   `101` transferindo crédito e outro com `102` não, na mesma nota).
+2. **A tabela de CSOSN não tem dimensão de operação.** Ela vem do Anexo Único do
+   Ajuste SINIEF 3/2010 e **substitui a Tabela B** (Tributação pelo ICMS) do
+   Convênio s/nº de 1970 — que é a tabela de *situação tributária*, sem
+   entrada/saída. É a diferença em relação ao CST de IPI (`00` entrada, `50`
+   saída) e ao de PIS/COFINS, que **têm** essa dimensão e por isso já foram
+   tratados em B1. Não existe "CSOSN de devolução" a escolher.
+
+**A lacuna real que a investigação encontrou é adjacente, e não é do CSOSN em
+si:** ver a seção seguinte.
+
+#### A quarta pesquisa: "anexo do cliente" — a frase está errada, mas há uma lacuna atrás dela
+
+O enunciado suspeitava, corretamente, que "anexo do cliente" não fazia sentido —
+o Anexo do Simples Nacional é do **vendedor**, e é ele que determina a alíquota
+composta e o `pCredSN`. Confirmado: não há nenhum campo, cálculo ou regra de
+emissão em que o Anexo *do destinatário* entre. Nada a implementar sob essa
+leitura.
+
+Mas a pesquisa do art. 23 achou algo concreto perto dali, e vale registrar como
+achado em vez de deixar a frase morrer: **o crédito só existe para destinatário
+NÃO optante.** O §1º do art. 23 diz "as pessoas jurídicas (…) **não optantes**
+pelo Simples Nacional terão direito a crédito", e ainda exige que a mercadoria
+seja destinada a comercialização ou industrialização. Ou seja, a escolha entre
+CSOSN `101` (com crédito) e `102` (sem) **depende do cliente**, não do produto:
+o mesmo item vendido a um cliente de Regime Normal é `101` e vendido a um
+optante, a um não contribuinte ou a consumidor final é `102`.
+
+E é isso que o cadastro de hoje não consegue expressar. O CSOSN vem só do grupo
+tributário do produto, e `contacts` **não tem coluna de regime tributário** —
+conferido; tem `indicador_ie` (1/2/9), que distingue contribuinte de isento e de
+não contribuinte, mas não diz se o contribuinte é optante. Representar isso
+exigiria (a) uma coluna de regime em `contacts` e (b) uma dimensão de tipo de
+cliente na resolução do CSOSN, com regra de precedência contra o grupo. **É
+lacuna real, de tamanho de tarefa própria**, e é a mesma forma da lacuna do CFOP
+que B2 registrou ("`resolveTaxRule` não sabe se há ST"): as duas são "a
+tributação do item depende de uma dimensão da operação que o cadastro do produto
+não tem". Vale resolver as duas juntas.
+
+Enquanto isso, o motor faz a única coisa coerente: **honra o CSOSN cadastrado**.
+Quem escolheu `101` afirmou que aquela operação permite crédito, e é isso que a
+nota declara.
+
+#### Duas consequências documentadas em vez de corrigidas
+
+As duas saíram do `/code-review alto` e ficaram anotadas no cabeçalho de
+`resolveCreditoSimples`, no ponto exato em que acontecem:
+
+1. **NFC-e também declara o crédito.** `buildNfcePayloadFromSale` passa pelo
+   mesmo `resolveItemsForSale`, então uma venda de PDV com CSOSN `101` sai com
+   `pCredSN`/`vCredICMSSN` — e consumidor final nunca aproveita crédito. Não há
+   caso especial porque a alternativa seria emitir `ICMSSN101` **sem** os campos
+   obrigatórios, que é rejeição de schema. O que está errado no cenário é o
+   CSOSN do cadastro (deveria ser `102`), e o motor honra o CSOSN como honra em
+   todo o resto.
+2. **A devolução recalcula o crédito com a alíquota de hoje.** A alíquota da
+   filial muda a cada virada de faixa — na prática, todo mês. Uma devolução em
+   novembro de uma venda de setembro reverte um crédito calculado com o
+   percentual de novembro. É **a mesma limitação** que B2 registrou para a MVA e
+   B1 para o IPI, com a mesma correção certa: fazer `buildReturnNfePayload` ler
+   `fiscal_document_items` (onde o percentual declarado passou a ser gravado
+   nesta tarefa) em vez de recalcular. Tarefa própria, e resolve os três de uma
+   vez.
+
+O terceiro achado da revisão **foi** corrigido: `SimplesCreditSection` exibia,
+depois de salvar, o texto digitado em vez do valor gravado. Como a coluna é
+`numeric(7,4)`, digitar `1,23456` grava `1,2346` e o campo continuaria afirmando
+`1,23456` com a mensagem "salva" ao lado — um número que vira imposto declarado
+na nota de alguém. Passou a reler a coluna depois do `update`.
+
+#### Front: uma seção em Configurações, e não `module_fields`
+
+B1 e B5 criaram linhas em `module_fields` porque `grupos-tributarios` roda na
+`GenericModulePage` — coluna sem campo é coluna que ninguém preenche pela
+aplicação. Aqui não dá: **não existe módulo de filiais**, e nunca existiu —
+conferido em `modules` antes de escrever a migration. `branches` é cadastro só
+por SQL, com `access_gate` `manage_branches` e RLS própria
+(`can_manage_branches()`), e a única tela que a toca é o seletor de filial
+(`BranchesModal`, que só lê). Criar um CRUD de filiais pela `GenericModulePage`
+seria expor a tabela que sustenta a multiempresa inteira — tarefa própria, e de
+outro risco.
+
+Mas deixar a coluna só por SQL era pior que em B1: é um número que muda **todo
+mês**, e a Decisão 2 fez a ausência dele recusar emissão. Então B8 tem front, no
+mesmo desenho que `allow_negative_stock` já usava desde 18/08/2026: uma seção em
+**Configurações** (`SimplesCreditSection`), escopada pela filial ativa, gated
+por `can_manage_branches` — desabilitada em vez de escondida quando falta
+permissão, para deixar claro que o parâmetro existe. O campo aceita vírgula
+decimal via `parseAmount` (o parser da correção de 17/08/2026, que não deixa
+"abc" virar zero em silêncio), valida 0–100 antes de gravar e aceita vazio como
+intenção legítima ("esta filial não transfere crédito").
+
+**Front e migration precisam ir juntos**, e isso foi verificado no navegador: a
+seção renderiza corretamente e degrada com "Erro ao carregar a configuração."
+enquanto a coluna não existe (400 do PostgREST), sem quebrar a tela. Mesmo
+acoplamento que B1 registrou para `src/types/supabase.ts`.
+
+#### A migration (escrita, NÃO aplicada)
+
+`supabase/migrations/00000000000008_b8_simples_nacional_credito_icms.sql`. Uma
+coluna em `branches` (`aliquota_credito_icms_simples numeric(7,4)`) com `check`
+de 0–100 — a constraint nasce com a coluna, ao contrário da `aliquota_icms` de
+19/08/2026, que nasceu sem e obrigou B2 a recusar em código; aqui a recusa em
+código existe **também**, porque um crédito absurdo é imposto transferido a
+mais. Duas colunas em `fiscal_document_items`
+(`icms_aliquota_credito_simples numeric(7,4)`,
+`icms_valor_credito_simples numeric(15,2)`, as duas com a mesma precisão da
+origem, pelo critério de B5), os `comment on column` das três e um
+`comment on table` novo em `branches` (conferido: ela não tinha nenhum).
+
+**Nada de RLS e nada de `grant`**: `branches` já tem as policies de
+`can_manage_branches()` desde o baseline e `fiscal_document_items` já é escrita
+só pela Edge Function (A1); os `grant` de `branches` são de tabela, não de
+coluna (conferido em `information_schema.table_privileges`), então coluna nova
+está coberta.
+
+**Ordem de aplicação**, mesma nota de B5 e pelos mesmos dois pontos: esta
+migration vem **antes** do deploy da `fiscal-emit`. `data.ts` passou a listar
+`aliquota_credito_icms_simples` no `select` da filial (nas **duas** consultas,
+venda e devolução) — sem a coluna o PostgREST responde 400 e nenhuma nota é
+montada; e `persist.ts` manda as duas colunas novas no insert mesmo nulas — sem
+elas, PGRST204 *depois* de a SEFAZ ter autorizado. Ordem correta: aplicar 5
+(B1), 6 (B2), 7 (B5) e 8 (B8) → implantar `fiscal-emit`.
+
+`src/types/supabase.ts` foi editado à mão (a coluna de `branches` e as duas de
+`fiscal_document_items`, em `Row`/`Insert`/`Update`), mesmo motivo de B1 e B5: o
+arquivo é gerado do banco real e o banco real ainda não tem as colunas. E
+`toInvoiceBranch`, em `data.ts`, leva `?? null` na coluna nova pelo mesmo motivo
+que `toTaxGroup` leva nas de B1/B5 — enquanto a migration não rodar o `select`
+volta sem ela, e `undefined !== null` faria toda filial parecer ter alíquota
+cadastrada, declarando `pCredSN: undefined` num campo obrigatório em vez de
+recusar com mensagem.
+
+#### Testado
+
+`npm run build` limpo. `npm run lint` com **zero erros e 62 avisos** — 61 são
+exatamente os de antes da tarefa, e o 62º é o `set-state-in-effect` de
+`SimplesCreditSection.tsx:39`, gêmeo linha a linha do que
+`StockPolicySection.tsx:25` já produzia (o `setRate("")` do ramo sem filial
+ativa). Manter o espelho do componente que serviu de modelo valeu mais que
+raspar um aviso. `deno check supabase/functions/fiscal-emit/index.ts` limpo.
+`npm test` com **215 testes passando** (41 a mais que B5) e as duas baterias que
+dependem de credencial em `.env.local` falhando alto, como é o desenho delas.
+
+`tests/unit/invoiceTaxesSimples.test.ts` é a bateria nova, separada das outras
+três pelo mesmo critério que já separou o próprio, o ST e o ad rem: são
+dimensões diferentes do mesmo item. Entra por `buildNfePayloadFromSale` e as
+contas continuam escritas por extenso. A alíquota dos testes (1,36%) é a da 1ª
+faixa do Anexo I (4% nominais × 34% de distribuição do ICMS) — número real.
+Cobre: o cálculo do crédito, o arredondamento a centavos com uma alíquota de 4
+decimais, a base já líquida do desconto da linha, a redução de base **não**
+alcançando o crédito, alíquota zero declarando zero, dois itens da mesma nota
+com CSOSN diferentes, o `201` declarando crédito **e** ST juntos, os sete CSOSN
+sem crédito, o `900` fora, os oito CST de Regime Normal sem crédito, as recusas
+(`101` e `201` sem alíquota, e fora da faixa) e a não-recusa do `102`; do lado
+do ST: a dedução no `201` e no `202`, a ausência dela no `203`, o próprio
+continuando invisível no XML, a dedução sem redução de base, o clamp em zero, o
+caso interestadual com a limitação herdada, e o ST deduzido somando no `vNF`.
+Fecha com as regressões de Regime Normal (CST `10`, `30` e `70`), que provam que
+nada de B1/B2 mudou.
+
+As três baterias antigas ganharam uma linha de fixture cada
+(`aliquotaCreditoIcmsSimples`), e nas duas primeiras isso era **necessário**,
+não cosmético: os CSOSN `101` e `201` que elas exercitam passariam a ser
+recusados por cadastro incompleto. É o mesmo movimento que B2 fez ao acrescentar
+uma `mva_rules` à bateria de B1. **Nenhuma expectativa antiga mudou.**
+
+**Nada foi testado no banco**: a migration não foi aplicada e a Edge Function
+não foi implantada — as duas coisas ficaram para a sessão de coordenação, junto
+com a revisão independente. O que foi ao navegador foi só a seção de
+Configurações, e o que ela provou é o acoplamento descrito acima.
+
+#### Fora de escopo
+
+B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, e cada um registrado acima com o
+motivo: o cálculo automático de RBT12 e enquadramento no Simples; o `pCredSN` no
+CSOSN `900`; a dedução do próprio no CSOSN `203`; a alíquota interestadual na
+dedução do próprio (limitação de B1, herdada de propósito); a dimensão de
+cliente na escolha do CSOSN `101`/`102` (a lacuna que a pesquisa do "anexo do
+cliente" achou); o crédito na NFC-e e na devolução; um módulo de cadastro de
+Filiais; e o XML do provedor simulado, que continua declarando apenas os CST e
+nenhum valor — como já ficava para o ICMS-ST de B2 e o ad rem de B5.

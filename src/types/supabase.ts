@@ -17,6 +17,7 @@ export type Database = {
       branches: {
         Row: {
           active: boolean
+          aliquota_credito_icms_simples: number | null
           allow_negative_stock: boolean
           bairro: string | null
           cep: string | null
@@ -37,6 +38,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          aliquota_credito_icms_simples?: number | null
           allow_negative_stock?: boolean
           bairro?: string | null
           cep?: string | null
@@ -57,6 +59,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          aliquota_credito_icms_simples?: number | null
           allow_negative_stock?: boolean
           bairro?: string | null
           cep?: string | null
@@ -760,6 +763,7 @@ export type Database = {
           ibs_cbs_situacao_tributaria: string | null
           ibs_valor: number | null
           icms_aliquota: number | null
+          icms_aliquota_credito_simples: number | null
           icms_base: number | null
           icms_modalidade_base_calculo: string | null
           icms_reducao_base: number | null
@@ -771,6 +775,7 @@ export type Database = {
           icms_st_reducao_base: number | null
           icms_st_valor: number | null
           icms_valor: number | null
+          icms_valor_credito_simples: number | null
           id: string
           inclui_no_total: boolean
           ipi_aliquota: number | null
@@ -825,6 +830,7 @@ export type Database = {
           ibs_cbs_situacao_tributaria?: string | null
           ibs_valor?: number | null
           icms_aliquota?: number | null
+          icms_aliquota_credito_simples?: number | null
           icms_base?: number | null
           icms_modalidade_base_calculo?: string | null
           icms_reducao_base?: number | null
@@ -836,6 +842,7 @@ export type Database = {
           icms_st_reducao_base?: number | null
           icms_st_valor?: number | null
           icms_valor?: number | null
+          icms_valor_credito_simples?: number | null
           id?: string
           inclui_no_total?: boolean
           ipi_aliquota?: number | null
@@ -890,6 +897,7 @@ export type Database = {
           ibs_cbs_situacao_tributaria?: string | null
           ibs_valor?: number | null
           icms_aliquota?: number | null
+          icms_aliquota_credito_simples?: number | null
           icms_base?: number | null
           icms_modalidade_base_calculo?: string | null
           icms_reducao_base?: number | null
@@ -901,6 +909,7 @@ export type Database = {
           icms_st_reducao_base?: number | null
           icms_st_valor?: number | null
           icms_valor?: number | null
+          icms_valor_credito_simples?: number | null
           id?: string
           inclui_no_total?: boolean
           ipi_aliquota?: number | null

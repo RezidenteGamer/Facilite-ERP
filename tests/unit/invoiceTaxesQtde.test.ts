@@ -105,6 +105,9 @@ function sale(items: SaleForInvoiceItem[]): SaleForInvoice {
       name: "Facilite Testes LTDA",
       inscricaoEstadual: "123456789",
       regimeTributario: "3",
+      // Esta bateria não usa CSOSN nenhum; o campo existe porque
+      // `SaleForInvoiceBranch` passou a exigi-lo em B8 (03/09/2026).
+      aliquotaCreditoIcmsSimples: 1.36,
       logradouro: "Rua Um",
       numero: "10",
       bairro: "Centro",
