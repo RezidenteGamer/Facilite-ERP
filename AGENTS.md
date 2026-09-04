@@ -4388,3 +4388,230 @@ idêntico ao estado deixado pela correção anterior, com as duas baterias que
 dependem de credencial em `.env.local` falhando alto, como é o desenho delas.
 `npm run build`, `npm run lint` e `deno check` não foram rodados — não há
 diferença de código para eles verificarem.
+
+### Correção: o `indFinal` sai do mesmo código do `indIEDest` — fechando a Rejeição 696 que a pesquisa do art. 23 achou de lado (04/09/2026)
+
+Quarta entrada do dia, e a que fecha o achado adjacente que a entrada anterior
+registrou por escrito e não corrigiu: **toda NF-e de venda para pessoa jurídica
+sem `indicador_ie` cadastrado saía com as condições da Rejeição 696 marcadas ao
+mesmo tempo**. É bug pré-existente, sem relação com o crédito do Simples que a
+pesquisa estava investigando quando esbarrou nele.
+
+#### A regra, conferida de novo e agora com identificador
+
+A pesquisa anterior tinha a regra certa, mas com a ressalva honesta de que as
+fontes eram duas páginas de fornecedor de emissor e nenhuma emissão real. Esta
+tarefa conferiu de novo, e a regra **se confirma** — com dois ganhos de
+precisão que a anterior não tinha:
+
+- **A regra tem nome: `E16a-40`.** O texto literal, conferido igual em fontes
+  independentes: *"Informado indicador de IE do Destinatário não-contribuinte
+  (tag: indIEDest=9) e não é operação com consumidor final (tag: indFinal<>1)
+  em operação de saída (tag: tpNF=1) que não é com exterior (tag: idDest<>3)"*
+  → rejeição **696 — "Operação com não contribuinte deve indicar operação com
+  consumidor final"**.
+- **A origem é a NT 2015.003 v1.71**, seção "E. Identificação do Destinatário"
+  (em produção desde 01/07/2016), e a regra seguiu para o **Anexo I do MOC**
+  (citado como MOC 7.0 / NT 2019.001 pelas fontes mais recentes). Ou seja: não
+  é regra de transição que caducou, é regra viva do leiaute.
+
+Fontes conferidas nesta sessão (as duas primeiras trazem o texto literal da
+regra; nenhuma é primária, ver a ressalva abaixo):
+
+- Oobj, *Rejeição 696: como resolver* — a regra literal com as quatro tags,
+  citando MOC 7.0 Anexo I / NT 2019.001:
+  <https://oobj.com.br/bc/rejeicao-696-como-resolver/>
+- Inforsystem, *Rejeição 696* — mesma condição, citando NT 2015/003 v1.71:
+  <https://www.inforsystem.com/artigos/31-documentos-fiscais/nf-e/101-rejeicao-696-operacao-com-nao-contribuinte-deve-indicar-operacao-com-consumidor-final>
+- Linx Share e TOTVS (linhas Datasul e Protheus), pelos mesmos termos, e é de
+  onde vem o identificador `E16a-40`.
+- Omie e Sienge, que descrevem a regra em prosa (sem as tags) e confirmam a
+  solução: marcar a operação como consumidor final.
+- Oobj, *Rejeição 791* — usada para o argumento em sentido contrário sobre o
+  indicador `2` (ver abaixo):
+  <https://oobj.com.br/bc/rejeicao-791-nfe-como-resolver/>
+
+**A ressalva da entrada anterior continua valendo, com um item a menos.** O PDF
+da NT no portal `nfe.fazenda.gov.br` **não foi lido**: o portal exige cookie e
+devolve laço de redirecionamento a qualquer busca automatizada — três tentativas
+por URLs diferentes, todas em `Too many redirects`. O que melhorou é a
+convergência: cinco fontes independentes, duas delas com o **texto literal
+idêntico** e uma com o identificador da regra, contra as duas anteriores. O que
+**não** melhorou: continua sem emissão real observada — esta sessão também não
+tem credencial de SEFAZ.
+
+A pesquisa **não contradisse** nada do que estava registrado. Refinou dois
+pontos: o identificador da regra, e o fato de a única exceção documentada para
+devolução (`finNFe = 4`) ser restrita a notas que referenciam chave anterior a
+2016 — ou seja, resíduo da transição, não exceção geral. Irrelevante para nós,
+porque a devolução já não é alcançada por `tpNF`.
+
+#### O descompasso, exatamente
+
+Os dois campos que a regra cruza nasciam de fontes diferentes dentro do mesmo
+`buildNfePayloadFromSale`:
+
+| campo do XML | vinha de | para CNPJ sem `indicador_ie` |
+|---|---|---|
+| `indIEDest` | `resolveIndicadorIeCodigo(contact.indicadorIe)` | **9** (nulo cai no `return 9` final) |
+| `indFinal` | `tipoCliente === "consumidor_final" ? 1 : 0` | **0** |
+
+E as duas fontes **não podiam concordar**, por construção:
+`resolveTipoCliente` só devolve `"consumidor_final"` para **CPF** — um CNPJ é
+sempre `"contribuinte"` (indicador `1`) ou `"nao_contribuinte"` (todo o resto).
+Não existe CNPJ que produza `indFinal = 1` pelo caminho antigo. Somando as
+outras duas condições, que a NF-e de venda satisfaz sempre (`tipo_documento: 1`
+e `local_destino` ∈ {1, 2}, nunca 3), **todo cliente pessoa jurídica com
+`indicador_ie` nulo ou `"9"` produzia as quatro condições da 696 numa só nota**.
+Como B8 já tinha registrado que o campo está nulo na imensa maioria dos
+contatos, o alcance é quase toda NF-e para pessoa jurídica.
+
+Antes/depois, cliente `Comércio XYZ LTDA` (CNPJ, IE não cadastrada), venda
+interna SP → SP:
+
+```
+antes:   indIEDest = 9   indFinal = 0   → E16a-40 satisfeita → rejeição 696
+depois:  indIEDest = 9   indFinal = 1   → autoriza
+```
+
+#### A correção
+
+`indFinal` passa a sair do **mesmo código** que já resolve o `indIEDest`, numa
+função só (`resolveConsumidorFinal`), em vez de uma segunda fonte que podia
+divergir. A leitura é a implicação que a própria SEFAZ impõe ao criar a regra:
+quem não é contribuinte do ICMS não compra dentro da cadeia de circulação, logo
+`indIEDest = 9` **implica** consumidor final.
+
+Não é regressão para o caso que já funcionava: um comprador CPF sem IE também
+resolve `indIEDest = 9`, então continua saindo `indFinal = 1` — pelo caminho
+certo desta vez, em vez de por `resolveTipoCliente`.
+
+O que **não** mudou, deliberadamente:
+
+- **`resolveTipoCliente` e a escolha de CFOP.** `tipoCliente` continua sendo a
+  dimensão de `resolveTaxRule`. São eixos independentes, e a entrada anterior
+  já registrou por que redesenhar isso é outra tarefa: o `indFinal` correto de
+  verdade é **por operação**, não por cadastro — é o item 2 da lista de "o que
+  precisaria existir para fechar", e continua aberto. Esta correção não o
+  fecha; ela só faz o campo parar de contradizer o vizinho na mesma nota.
+- **`indicador_ie = "2"`** (contribuinte isento de inscrição): segue com
+  `indFinal = 0`. A `E16a-40` checa `indIEDest = 9` e só. O código `2` tem
+  regra própria e de outro eixo — a rejeição **791**, que proíbe informar a IE
+  do destinatário junto do indicador de isento —, nada a ver com `indFinal`. E
+  faz sentido substantivo: um isento **é** contribuinte, e pode comprar para
+  revenda. Estender a correção a ele seria inventar regra.
+- **Nenhuma recusa nova.** Isto não é pergunta de cadastro incompleto como as
+  recusas de B1/B2/B5/B8 e da correção do regime: é conta determinística
+  errada. Consertar a conta é a correção; travar a venda seria trocar um
+  problema por outro.
+
+#### O caso de borda que muda de valor, e por que está certo
+
+Um **CPF com `indicador_ie = "1"`** — o produtor rural pessoa física, que tem
+inscrição estadual e é contribuinte do ICMS — passa a sair com `indFinal = 0`,
+onde antes saía `1` (porque `resolveTipoCliente` devolve `"consumidor_final"`
+para qualquer não-CNPJ). É o valor correto: ele resolve `indIEDest = 1`, a
+`E16a-40` não o alcança com nenhum dos dois valores, e um contribuinte que
+compra insumo para industrializar não é consumidor final. O CPF **sem** IE — a
+esmagadora maioria — continua `indFinal = 1`. O cadastro permite as duas
+combinações (o seletor de indicador de IE aparece para CPF e CNPJ igualmente),
+então o caso é alcançável, e está fixado em teste para não virar surpresa.
+
+#### A decisão sobre a devolução: aplicada lá também
+
+`buildReturnNfePayload` tinha a mesma derivação e o mesmo descompasso. A
+Rejeição 696 **não alcança** a devolução: a regra exige `tpNF = 1` e a
+devolução é nota de **entrada** (`tipo_documento: 0`) — a exceção documentada
+por `finNFe = 4` sequer precisa ser invocada. Não há risco de rejeição ali.
+
+**Corrigido mesmo assim**, e a razão não é a rejeição:
+
+1. `indFinal` significa a mesma coisa nos dois documentos. A devolução desfaz
+   exatamente a operação que a nota original declarou, para o mesmo cliente —
+   duas notas do mesmo par declarando `indFinal` diferente é incoerência
+   interna, mesmo quando ninguém valida.
+2. O defeito que esta correção acabou de fechar é **de classe**: um campo com
+   duas fontes que podem discordar. Deixar a segunda cópia viva na metade do
+   motor que ninguém olha é reinstalar o mesmo defeito — e é a metade em que
+   ele duraria mais tempo sem ser visto, precisamente porque não há rejeição
+   para denunciá-lo.
+3. O custo é zero: nenhuma recusa nova, nenhuma migration, e a devolução já
+   compartilha `resolveItemsForSale` com a venda. Escopo a mais seria criar um
+   campo ou uma checagem; aqui é a mesma linha nos dois lugares.
+
+A posição contrária — "não mexe onde não há risco" — é legítima e foi
+considerada; perde para o argumento 2, que é o mesmo critério que a casa já
+usou na correção anterior ao herdar a checagem de regime do destinatário para a
+devolução em vez de deixá-la só na venda.
+
+#### O que a correção **não** faz: a venda interestadual a não contribuinte continua parada
+
+Vale dizer com todas as letras, porque a leitura fácil desta entrada seria "agora
+emite". Emite **a venda interna**. Na **interestadual** a nota troca de rejeição
+em vez de autorizar, e o motivo é outra lacuna já conhecida.
+
+A regra `NA01-20` do mesmo Anexo I exige o grupo **`ICMSUFDest`** (o DIFAL da
+EC 87/2015) quando `idDest = 2`, `indFinal = 1` e `indIEDest = 9` valem ao mesmo
+tempo — exatamente o que uma venda para outro estado a cliente sem IE passa a
+declarar depois desta correção. O `NfePayload` **não tem** esses campos
+(`vBCUFDest`, `pICMSUFDest`, `vICMSUFRemet` e os outros): DIFAL é a tarefa `B4`,
+promovida para a Etapa 2 e ainda aberta. Sem o grupo, a rejeição passa a ser a
+**694 — "Não informado o grupo de ICMS para a UF de destino"**. Conferido em
+<https://oobj.com.br/bc/rejeicao-694-como-resolver/>.
+
+Isso **não é regressão**: aquela mesma nota já não autorizava antes (era a 696),
+e nenhuma nota que autorizava passou a falhar. Duas observações reduzem o
+alcance:
+
+- **Emitente optante pelo Simples (CRT 1) é exceção da `NA01-20`** — para filial
+  no Simples, a interestadual a não contribuinte passa a autorizar também.
+- A venda **interna**, que é a esmagadora maioria e o caso do erro, autoriza em
+  qualquer regime.
+
+Fica registrado aqui para que a próxima sessão que vir uma 694 saiba que ela é
+`B4`, e não um efeito colateral desta correção a desfazer.
+
+#### Achado adjacente, registrado e não corrigido: a Rejeição 791
+
+Apareceu ao conferir o argumento em sentido contrário sobre o indicador `2`. A
+NF-e declara `inscricao_estadual_destinatario` sempre que o contato tem IE
+cadastrada, **sem olhar o indicador**. Um contato com `indicador_ie = "2"`
+(isento) e IE preenchida sai com os dois campos, e é exatamente o que a
+rejeição **791** proíbe ("NFe com indicação de destinatário isento de IE, com a
+informação da IE do destinatário").
+
+Não corrigido aqui, por dois motivos: é outra regra, de outro eixo (o par
+`indIEDest`/`IE`, não `indIEDest`/`indFinal`), e o alcance é muito menor — exige
+um cadastro **contraditório em si mesmo**, contra o caso desta correção, que era
+o cadastro *incompleto* e por isso quase universal. Fica como candidato a tarefa
+própria, com a ressalva de sempre: conferido em fonte de fornecedor, não em
+emissão real.
+
+#### Arquivos, testes e deploy
+
+- `supabase/functions/_shared/fiscal/invoiceMapping.ts` — `resolveConsumidorFinal`
+  nova (com a regra e as fontes no cabeçalho), usada em
+  `buildNfePayloadFromSale` e `buildReturnNfePayload`; o `indIEDest` de cada uma
+  passou a sair da mesma variável local, para o par ficar visivelmente acoplado.
+  O item 2 de "três coisas que este cálculo não trata", em
+  `resolveCreditoSimples`, ganhou a nota de que esta correção **não** fecha
+  aquela lacuna — são perguntas diferentes e é bom não confundi-las depois.
+- `tests/unit/invoiceConsumidorFinal.test.ts` — bateria nova, 10 testes.
+  Arquivo separado pelo critério de sempre: as outras baterias medem o **item**,
+  esta mede o **cabeçalho**. Cada teste afirma `indIEDest` e `indFinal`
+  **juntos** — o que a regra proíbe é a combinação, e um teste que olhasse só um
+  dos dois deixaria passar o defeito que a bateria existe para impedir. Cobre
+  CNPJ com IE nula, `"9"`, `"1"` e `"2"`, CPF com e sem IE, e os mesmos casos na
+  devolução. Conferido que **6 dos 10 falham** contra o código antigo.
+
+**Sem migration** — correção de lógica pura, nenhuma coluna nova.
+
+`npm test`: **261 testes passando** (251 + 10), com as duas baterias que
+dependem de credencial em `.env.local` falhando alto, como é o desenho delas.
+`npm run build`, `npm run lint` (só os avisos pré-existentes de
+`set-state-in-effect`, nenhum erro) e `deno check
+supabase/functions/fiscal-emit/index.ts` limpos.
+
+**A Edge Function `fiscal-emit` NÃO foi reimplantada** — o núcleo mudou, então
+ela precisa de deploy para a correção valer em produção. É da sessão de
+coordenação, mesmo processo das anteriores.

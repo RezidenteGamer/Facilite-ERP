@@ -208,6 +208,74 @@ function resolveIndicadorIeCodigo(indicadorIe: string | null): number {
   return 9;
 }
 
+/**
+ * `indFinal` ("operação com consumidor final") derivado **do mesmo código que
+ * vai no `indIEDest`** — correção de 04/09/2026, da Rejeição 696.
+ *
+ * ## A regra que obriga a consistência
+ *
+ * A regra de validação **E16a-40** do leiaute da NF-e devolve a rejeição
+ * **696 — "Operação com não contribuinte deve indicar operação com consumidor
+ * final"** quando as quatro condições valem ao mesmo tempo: indicador de IE do
+ * destinatário não contribuinte (`indIEDest = 9`), operação que **não** é com
+ * consumidor final (`indFinal ≠ 1`), em **saída** (`tpNF = 1`) que não é com o
+ * exterior (`idDest ≠ 3`). Ela nasceu na NT 2015.003 (seção "E. Identificação
+ * do Destinatário", em produção desde 01/07/2016) e segue no Anexo I do MOC.
+ *
+ * O que a SEFAZ está dizendo é uma implicação: quem não é contribuinte do ICMS
+ * não compra dentro da cadeia de circulação, logo **`indIEDest = 9` implica
+ * consumidor final**. Derivar `indFinal` do próprio código do `indIEDest` é
+ * escrever essa implicação uma vez só.
+ *
+ * ## O que estava errado
+ *
+ * Os dois campos vinham de fontes diferentes que podiam discordar:
+ * `indIEDest` de `resolveIndicadorIeCodigo`, e `indFinal` de
+ * `tipoCliente === "consumidor_final"`. Mas `resolveTipoCliente` só devolve
+ * `"consumidor_final"` para **CPF** — um CNPJ é sempre `"contribuinte"` ou
+ * `"nao_contribuinte"`. Resultado: todo cliente **CNPJ com `indicador_ie` nulo
+ * ou `"9"`** saía com `indIEDest = 9` e `indFinal = 0` na mesma nota — as duas
+ * condições da rejeição de uma vez. Como `indicador_ie` é opcional e está nulo
+ * na imensa maioria dos contatos já cadastrados, isso alcançava quase toda
+ * NF-e de venda para pessoa jurídica.
+ *
+ * ## O que **não** muda
+ *
+ * - **`indicadorIe = "2"`** (contribuinte isento de inscrição) continua
+ *   `indFinal = 0`. A E16a-40 checa `indIEDest = 9` e só; o código `2` tem
+ *   regra própria e de outro eixo (rejeição **791**, que proíbe informar a IE
+ *   junto do indicador de isento) e nada a ver com `indFinal`. Um isento é
+ *   contribuinte e pode comprar para revenda.
+ * - **`resolveTipoCliente` e o CFOP.** `tipoCliente` continua decidindo qual
+ *   regra de `tax_rules` se aplica; é outra dimensão, e não foi tocada.
+ *
+ * ## O caso de borda que muda de valor, de propósito
+ *
+ * Um **CPF com `indicador_ie = "1"`** — o produtor rural pessoa física, que
+ * tem inscrição estadual e é contribuinte — passa a sair com `indFinal = 0`
+ * (antes era `1`, porque `resolveTipoCliente` devolve `"consumidor_final"` para
+ * qualquer não-CNPJ). É o valor correto: ele resolve `indIEDest = 1`, a
+ * E16a-40 não o alcança em nenhum dos dois valores, e um contribuinte que
+ * compra insumo para industrializar não é consumidor final. O CPF **sem** IE
+ * cadastrada — a esmagadora maioria — continua `indFinal = 1`, como sempre.
+ *
+ * ## O que esta correção não faz
+ *
+ * Ela conserta a venda **interna**. Na **interestadual** a nota troca de
+ * rejeição: `idDest = 2` + `indFinal = 1` + `indIEDest = 9` é justamente o que
+ * dispara a regra `NA01-20`, que exige o grupo `ICMSUFDest` (o DIFAL da
+ * EC 87/2015) — e este payload não o emite, porque DIFAL é `B4` e está aberta.
+ * Sem o grupo, a rejeição vira a **694** ("Não informado o grupo de ICMS para a
+ * UF de destino"). Não é regressão: aquela nota já não autorizava (era a 696), e
+ * emitente optante pelo Simples (CRT 1) é exceção da `NA01-20`.
+ *
+ * Aplicada também na nota de devolução, onde a rejeição não chega
+ * (`tpNF = 0`) — ver `buildReturnNfePayload`.
+ */
+function resolveConsumidorFinal(indicadorIeCodigo: number): number {
+  return indicadorIeCodigo === 9 ? 1 : 0;
+}
+
 /** Valor de um imposto a partir da base e da alíquota (%), arredondado a centavos. */
 function taxAmount(base: number, aliquota: number): number {
   return Math.round(base * (aliquota / 100) * 100) / 100;
@@ -1001,6 +1069,14 @@ type CreditoSimples =
  *    clientes que são contribuintes e só têm o campo em branco. Seria
  *    exatamente o oposto do "só recusa quando sabe" que rege esta checagem.
  *    Fica registrado como limitação conhecida, não como pendência silenciosa.
+ *
+ *    A correção da Rejeição 696 (04/09/2026) **não** fecha esta lacuna, e é
+ *    bom não confundir as duas: ela faz o `indFinal` do XML sair coerente com
+ *    o `indIEDest` da mesma nota, que é uma implicação que a própria SEFAZ
+ *    impõe — não uma resposta sobre a destinação da mercadoria. Um cliente
+ *    contribuinte (`indicador_ie = "1"`) comprando para uso e consumo continua
+ *    saindo com `indFinal = 0` e com o crédito declarado. Ver
+ *    `resolveConsumidorFinal`.
  * 3. **A nota de devolução recalcula o crédito com a alíquota de hoje.**
  *    `buildReturnNfePayload` também reaproveita `resolveItemsForSale`, e a
  *    alíquota da filial muda a cada virada de faixa de RBT12 — na prática, todo
@@ -1274,6 +1350,9 @@ export function buildNfePayloadFromSale(
   const regime = branch.regimeTributario!;
   const document = onlyDigits(contact.document);
   const tipoCliente = resolveTipoCliente(contact.document, contact.indicadorIe);
+  // Um código só para os dois campos que a Rejeição 696 cruza — ver
+  // `resolveConsumidorFinal`.
+  const indicadorIeCodigo = resolveIndicadorIeCodigo(contact.indicadorIe);
 
   const query: TaxRuleQuery = {
     regime,
@@ -1310,7 +1389,7 @@ export function buildNfePayloadFromSale(
     data_emissao: new Date(`${sale.issueDate}T12:00:00-03:00`).toISOString(),
     tipo_documento: 1,
     finalidade_emissao: 1,
-    consumidor_final: tipoCliente === "consumidor_final" ? 1 : 0,
+    consumidor_final: resolveConsumidorFinal(indicadorIeCodigo),
     presenca_comprador: 1,
     local_destino: localDestino,
 
@@ -1329,7 +1408,7 @@ export function buildNfePayloadFromSale(
     cnpj_destinatario: isCnpj(contact.document) ? document : undefined,
     cpf_destinatario: !isCnpj(contact.document) ? document : undefined,
     inscricao_estadual_destinatario: contact.inscricaoEstadual ?? undefined,
-    indicador_inscricao_estadual_destinatario: resolveIndicadorIeCodigo(contact.indicadorIe),
+    indicador_inscricao_estadual_destinatario: indicadorIeCodigo,
     logradouro_destinatario: contact.logradouro ?? undefined,
     numero_destinatario: contact.numero ?? undefined,
     bairro_destinatario: contact.bairro ?? undefined,
@@ -1554,6 +1633,16 @@ export type SaleReturnForInvoice = {
  * - **`presenca_comprador: 0`** ("não se aplica"): quem emite é a loja, o
  *   comprador não está comprando nada nesta operação.
  *
+ * O que **não** diverge, por decisão de 04/09/2026: o `indFinal`. Ele sai da
+ * mesma `resolveConsumidorFinal` da venda, embora a Rejeição 696 (E16a-40) não
+ * alcance este documento — a regra vale só para `tpNF = 1`, e a devolução é
+ * nota de **entrada** (`tpNF = 0`). Não é risco de rejeição que decide aqui: é
+ * que `indFinal` significa a mesma coisa nos dois documentos, e a devolução
+ * desfaz exatamente a operação declarada na nota original, para o mesmo
+ * cliente. Deixar as duas derivações diferentes reinstalaria, na metade do
+ * motor que ninguém está olhando, a mesma classe de defeito que a correção
+ * acabou de fechar: um campo com duas fontes que podem discordar.
+ *
  * Pesquisado contra a documentação da Focus NFe antes de desenhar (mesmo
  * procedimento das etapas F1/8/8.5) — ver `NfePayloadNotaReferenciada`.
  */
@@ -1584,6 +1673,7 @@ export function buildReturnNfePayload(
   const regime = branch.regimeTributario!;
   const document = onlyDigits(contact.document);
   const tipoCliente = resolveTipoCliente(contact.document, contact.indicadorIe);
+  const indicadorIeCodigo = resolveIndicadorIeCodigo(contact.indicadorIe);
 
   const query: TaxRuleQuery = {
     regime,
@@ -1634,7 +1724,7 @@ export function buildReturnNfePayload(
     data_emissao: new Date(`${saleReturn.issueDate}T12:00:00-03:00`).toISOString(),
     tipo_documento: 0,
     finalidade_emissao: 4,
-    consumidor_final: tipoCliente === "consumidor_final" ? 1 : 0,
+    consumidor_final: resolveConsumidorFinal(indicadorIeCodigo),
     presenca_comprador: 0,
     local_destino: branch.uf === contact.uf ? 1 : 2,
 
@@ -1653,7 +1743,7 @@ export function buildReturnNfePayload(
     cnpj_destinatario: isCnpj(contact.document) ? document : undefined,
     cpf_destinatario: !isCnpj(contact.document) ? document : undefined,
     inscricao_estadual_destinatario: contact.inscricaoEstadual ?? undefined,
-    indicador_inscricao_estadual_destinatario: resolveIndicadorIeCodigo(contact.indicadorIe),
+    indicador_inscricao_estadual_destinatario: indicadorIeCodigo,
     logradouro_destinatario: contact.logradouro ?? undefined,
     numero_destinatario: contact.numero ?? undefined,
     bairro_destinatario: contact.bairro ?? undefined,
