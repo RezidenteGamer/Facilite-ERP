@@ -294,8 +294,16 @@ describe("ICMS-ST no item", () => {
     // mesmo arredondamento de `taxAmount`, usado pelo motor inteiro desde a
     // etapa 8, e trocá-lo por causa de um teste mudaria o valor de toda nota.
     expect(linha.icms_base_calculo_st).toBe(1587.8);
-    // ST = 1587,80 × 18% − 180 = 285,804 → 285,80 − 180,00 = 105,80
-    expect(linha.icms_valor_st).toBe(105.8);
+    // O ICMS próprio de uma venda interestadual do Regime Normal sai pela
+    // alíquota da Resolução 22/89 (7% para SP → BA), não pela interna do grupo
+    // — correção de 04/09/2026. Até 03/09/2026 este item destacava 180,00 e o
+    // ST descontava os mesmos 180,00, saindo em 105,80: próprio a maior e ST a
+    // menos, na mesma nota.
+    //   próprio = 1000 × 7% = 70,00
+    expect(linha.icms_aliquota).toBe(7);
+    expect(linha.icms_valor).toBe(70);
+    // ST = 1587,80 × 18% − 70 = 285,804 → 285,80 − 70,00 = 215,80
+    expect(linha.icms_valor_st).toBe(215.8);
   });
 
   it("usa a alíquota de 4% no ajuste quando a mercadoria é importada", () => {

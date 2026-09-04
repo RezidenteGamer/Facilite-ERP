@@ -444,17 +444,20 @@ describe("ICMS-ST do Simples — a dedução do próprio que B2 deixou pendente"
     expect(linha.icms_valor_st).toBe(0);
   });
 
-  it("deduz com a alíquota interna também em operação interestadual — a limitação herdada de B1", () => {
-    // O Simples não usa MVA ajustada nem interestadual (Convênio ICMS
-    // 35/2011), então a base do ST é a mesma: 1000 × 1,40 = 1400,00.
+  it("deduz com a alíquota interestadual quando a operação cruza a fronteira", () => {
+    // Este teste existia ao contrário até 03/09/2026: ele afirmava que a
+    // dedução usava a interna (18%) mesmo interestadual, documentando a
+    // limitação que B8 herdou de B1 de propósito para "as duas metades errarem
+    // junto". A correção de 04/09/2026 arruma as duas metades, e o
+    // espelhamento continua de pé — só que agora reflete a conta certa.
     //
-    // A dedução usa `group.aliquotaIcms` (18%) e **não** a interestadual (7%
-    // para SP → BA). É deliberado: é exatamente o número que o caminho de
-    // Regime Normal deduziria na mesma operação, e é a limitação que B2 já
-    // registrou (o próprio calculado com a alíquota interna). As duas metades
-    // erram junto e serão corrigidas de uma vez, quando existir tabela de
-    // alíquota interna por UF × NCM.
-    //   ST = 1400 × 18% − 1000 × 18% = 72,00
+    // A dedução implícita existe para reproduzir "a alíquota utilizada na
+    // operação pelos contribuintes do regime normal": numa venda SP → BA esse
+    // contribuinte destacaria 7% (Resolução 22/89), não a interna do estado
+    // dele. O Simples continua sem MVA ajustada (Convênio ICMS 35/2011), então
+    // a base do ST não muda: 1000 × 1,40 = 1400,00.
+    //   dedução = 1000 × 7%  =  70,00
+    //   ST      = 1400 × 18% − 70,00 = 252,00 − 70,00 = 182,00
     const { item: linha } = primeiroItem(taxGroup({ csosn: "201" }), {
       regra: REGRA_SIMPLES_INTERESTADUAL,
       ufDestino: "BA",
@@ -462,7 +465,59 @@ describe("ICMS-ST do Simples — a dedução do próprio que B2 deixou pendente"
 
     expect(linha.icms_margem_valor_adicionado_st).toBe(40);
     expect(linha.icms_base_calculo_st).toBe(1400);
+    expect(linha.icms_valor_st).toBe(182);
+  });
+
+  it("deduz com a alíquota interestadual também no CSOSN 202", () => {
+    // A dedução implícita vale para os dois CSOSN que a têm, e a correção de
+    // 04/09/2026 alcança os dois — não só o `201` do teste acima.
+    //   ST = 1400 × 18% − 1000 × 7% = 252,00 − 70,00 = 182,00
+    const { item: linha } = primeiroItem(taxGroup({ csosn: "202" }), {
+      regra: REGRA_SIMPLES_INTERESTADUAL,
+      ufDestino: "BA",
+    });
+
+    expect(linha.icms_valor_st).toBe(182);
+  });
+
+  it("usa a alíquota de 4% na dedução quando a mercadoria é importada", () => {
+    // A dedução passa pela mesma tabela do ICMS próprio, inclusive a Resolução
+    // 13/2012: origem `1` (importação direta) é 4%, não 7%.
+    //   ST = 1400 × 18% − 1000 × 4% = 252,00 − 40,00 = 212,00
+    const grupo = taxGroup({ csosn: "201" });
+    const { item: linha } = primeiroItem(grupo, {
+      regra: REGRA_SIMPLES_INTERESTADUAL,
+      ufDestino: "BA",
+      itemOverrides: { product: { ...item(grupo).product, origemMercadoria: "1" } },
+    });
+
+    expect(linha.icms_valor_st).toBe(212);
+  });
+
+  it("continua deduzindo pela alíquota interna quando a operação é interna", () => {
+    // Regressão da correção de 04/09/2026: intraestadual não mudou nada.
+    //   ST = 1400 × 18% − 1000 × 18% = 252,00 − 180,00 = 72,00
+    const { item: linha } = primeiroItem(taxGroup({ csosn: "201" }));
+
     expect(linha.icms_valor_st).toBe(72);
+  });
+
+  it("o CSOSN 900 fica fora da correção — o Simples não apura ICMS por operação", () => {
+    // Exclusão deliberada, documentada em `icmsProprioIgnoraAliquotaInterestadual`:
+    // o `900` é o único CSOSN que declara `vBC`/`pICMS`/`vICMS`, e se ele
+    // deveria distinguir operação interna de interestadual é pergunta legal
+    // própria — o optante recolhe o ICMS pelo DAS, sobre a receita bruta do
+    // mês, não por alíquota-por-operação. Mesmo critério com que B2 o deixou
+    // fora do ST e B8 fora do crédito de Simples.
+    //   próprio = 1000 × 18% (a interna do grupo), e não 7%
+    const { item: linha } = primeiroItem(taxGroup({ csosn: "900" }), {
+      regra: REGRA_SIMPLES_INTERESTADUAL,
+      ufDestino: "BA",
+    });
+
+    expect(linha.icms_situacao_tributaria).toBe("900");
+    expect(linha.icms_aliquota).toBe(18);
+    expect(linha.icms_valor).toBe(180);
   });
 
   it("o ST deduzido é o que entra no total da nota", () => {

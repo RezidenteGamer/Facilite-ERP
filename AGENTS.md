@@ -3646,3 +3646,243 @@ cliente na escolha do CSOSN `101`/`102` (a lacuna que a pesquisa do "anexo do
 cliente" achou); o crédito na NFC-e e na devolução; um módulo de cadastro de
 Filiais; e o XML do provedor simulado, que continua declarando apenas os CST e
 nenhum valor — como já ficava para o ICMS-ST de B2 e o ad rem de B5.
+
+### Correção: a alíquota interestadual chega ao ICMS próprio — fechando a lacuna que B1, B2 e B8 registraram (04/09/2026)
+
+Não é uma tarefa nova do "Mínimo pra vender": é a correção de um erro de conta
+que as três tarefas anteriores de ICMS encontraram, documentaram e deixaram
+para trás, cada uma por um motivo de escopo. B2 a registrou como limitação
+conhecida ("o próprio que se deduz está calculado com a alíquota interna", com
+a nota de que "corrigir isso é corrigir B1"); B8 a herdou **de propósito** na
+dedução do Simples, para "as duas metades errarem junto e serem corrigidas de
+uma vez". Esta entrada é essa vez.
+
+Ao contrário de B1, B2, B5 e B8, **não há migration**: nenhuma coluna nova,
+nenhuma tabela nova. As três alíquotas interestaduais são fixas por lei e já
+estavam no código desde B2. O que mudou foram dois arquivos do núcleo,
+`_shared/fiscal/invoiceMapping.ts` e `_shared/fiscal/taxSituations.ts`.
+
+#### O bug: em B1 o CST era decorativo; aqui, a UF
+
+`resolveItemsForSale` calculava o `vICMS` de **todo** item com
+`group.aliquotaIcms` — a alíquota interna cadastrada no grupo tributário —, e o
+grupo tributário não tem dimensão de UF. Numa venda interestadual do Regime
+Normal isso é conta errada, não aproximação: a Resolução do Senado 22/1989
+(art. 1º, parágrafo único) fixa 7% para as saídas do Sul/Sudeste com destino ao
+Norte/Nordeste/Centro-Oeste e ao ES, e 12% no resto; a Resolução 13/2012 fixa
+4% para mercadoria importada. É por essas alíquotas que o Regime Normal destaca
+`pICMS`/`vICMS` na nota interestadual, não pela interna do estado do vendedor.
+
+O detalhe que torna isso desconfortável de ler é que **o motor já sabia
+calcular a alíquota certa**: `aliquotaInterestadual(ufOrigem, ufDestino,
+origemMercadoria)` existe em `mvaRules.ts` desde B2, com a tabela conferida em
+duas fontes independentes (inclusive o caso do ES, que quase todo resumo em
+prosa erra). Ela só nunca era aplicada ao imposto próprio — B2 a usava
+exclusivamente para ajustar a MVA do ICMS-ST.
+
+A diferença em relação às recusas de cadastro que B1, B2, B5 e B8 criaram é o
+que deu a esta correção a prioridade que teve: aquelas param a emissão quando o
+cadastro está incompleto, e o operador vê uma mensagem acionável. Esta era
+**uma conta que saía errada em silêncio**, numa nota autorizada, em toda venda
+interestadual — e sempre para o lado de declarar imposto a maior, já que a
+interna é tipicamente maior que a interestadual.
+
+#### O antes e o depois, numa venda SP → BA
+
+Item de R$ 1.000,00, grupo com alíquota interna de 18%, CST `10` (tributada com
+cobrança de ST), MVA original de 40%, mercadoria nacional. A alíquota
+interestadual do trajeto é 7%.
+
+|                     | antes    | depois     |
+| ------------------- | -------- | ---------- |
+| `pICMS`             | 18%      | **7%**     |
+| `vICMS`             | 180,00   | **70,00**  |
+| `pMVAST` (ajustada) | 58,7805% | 58,7805%   |
+| `vBCST`             | 1.587,80 | 1.587,80   |
+| `pICMSST`           | 18%      | 18%        |
+| `vICMSST`           | 105,80   | **215,80** |
+
+O ajuste da MVA e a base do ST não mudam — os dois já usavam a alíquota certa
+(o ajuste, a interestadual; o ST, a interna do destino). E a **soma das duas
+linhas é a mesma nos dois cenários**: 180,00 + 105,80 = 285,80 = 70,00 +
+215,80. O que estava errado era a repartição entre elas, cada uma numa linha
+diferente do XML: **próprio a maior e ST a menos**, exatamente como B2
+descreveu ao registrar a limitação. Numa venda sem ST (CST `00`) não há a
+segunda linha para compensar, e o erro aparece inteiro: 180,00 destacados onde
+o devido eram 70,00.
+
+#### As duas metades, e por que passam pela mesma função
+
+A correção tem dois pontos de aplicação, e eles não são independentes:
+
+1. **`resolveItemsForSale`**, no `vICMS` do item de Regime Normal;
+2. **`resolveSubstituicaoTributaria`**, no ramo `deduzProprioNaoDestacado` — a
+   dedução implícita do Simples Nacional (CSOSN `201`/`202`) que B8 criou.
+
+A segunda existe **para espelhar a primeira**. A formulação que a pesquisa de
+B8 encontrou é literal: para o optante substituto, "apenas para cálculo da
+retenção, o ICMS da operação própria deve ser calculado aplicando-se **a
+alíquota utilizada na operação pelos contribuintes do regime normal**". Se a
+operação é interestadual, a alíquota que "os contribuintes do regime normal"
+usariam ali é a interestadual — então corrigir só a metade de Regime Normal
+teria quebrado o espelhamento que B8 construiu de propósito, e feito o Simples
+ficar errado sozinho.
+
+Por isso as duas chamam o mesmo helper, `icmsProprioAliquota` — e é a razão de
+ele existir em vez de a lógica ser repetida nos dois pontos: era a divergência
+entre as duas metades que B8 documentou como limitação herdada, e um único
+lugar é o que impede a divergência de voltar. `operacaoInterestadual` também
+saiu como função própria, porque agora **três** contas fazem a mesma comparação
+de UFs (o ajuste da MVA, o próprio e a dedução).
+
+Uma assimetria deliberada entre os dois pontos: o de `resolveItemsForSale`
+exige regime Normal (`CRT 3`); o da dedução do Simples olha **só as UFs**. Não
+é descuido — quem está no Simples ali é o *emitente*, e o que aquela linha
+reproduz é justamente o que o *outro* regime faria no mesmo trajeto.
+
+#### `icms_aliquota` passou a ser a alíquota usada, não a cadastrada
+
+O campo vira `pICMS` no XML, e o fisco refaz `vBC × pICMS = vICMS`. Declarar a
+interna do grupo ao lado de um valor calculado pela interestadual seria uma
+nota que não fecha consigo mesma — rejeição, e das difíceis de diagnosticar. Há
+teste dedicado a essa consistência.
+
+#### O CSOSN `900` ficou de fora, e é decisão
+
+O `900` ("Outros") é o único CSOSN que declara `vBC`/`pICMS`/`vICMS`, e ele
+**não** entra nesta correção. O motivo é o mesmo com que B2 o deixou fora do
+ICMS-ST e B8 fora do crédito de Simples: é o catch-all, o código que se usa
+"quando nenhum outro serve", e o optante pelo Simples recolhe o ICMS pelo DAS,
+sobre a receita bruta do mês, e não por alíquota-por-operação. Se o `pICMS` de
+um `900` deveria ou não distinguir operação interna de interestadual é pergunta
+legal própria, que depende da situação fática que o cadastro não conhece — e
+esta tarefa não a decide. Fica como limitação conhecida, no mesmo padrão que B2
+e B8 já usaram para excluir casos ambíguos.
+
+**A exclusão é explícita no código, e não só consequência do gate de regime.**
+Este é o ponto de escopo que o enunciado não especificava, e vale registrar por
+que a implementação foi além dele. O gate natural da correção é o regime de
+quem emite (`query.regime === "3"`), e num cadastro coerente ele já bastaria —
+um CSOSN só aparece em filial do Simples. Mas `resolveIcmsSituacaoTributaria`
+cai no CSOSN também quando a filial é **CRT 3** e o grupo não tem CST de ICMS
+(`regime === "3" ? cstIcms ?? csosn : csosn ?? cstIcms`), e nesse caminho o
+`900` mudaria de comportamento sem passar por decisão nenhuma. Daí o predicado
+`icmsProprioIgnoraAliquotaInterestadual`, em `taxSituations.ts`, com a exclusão
+escrita em vez de emergente. Ele é lista de **inclusão**, como as de ST, crédito
+e IPI: código desconhecido segue a regra geral (a alíquota da operação), que é o
+comportamento correto pela Resolução 22/89 — a exceção é que precisa ser
+afirmada.
+
+#### O que **não** mudou, e por quê
+
+- **A alíquota do ICMS-ST continua sendo a interna do destino** (`base ST ×
+  alíquota interna`, fora do ramo da dedução). Isso está correto pela lei: o ST
+  simula o imposto devido no estado de destino, então usa a interna de lá,
+  independentemente de a operação ser interestadual. Só a **dedução** — o que
+  já foi, ou seria, destacado na operação própria — depende do trajeto.
+- **A aproximação de B2 segue de pé**: essa "interna do destino" continua sendo
+  `group.aliquotaIcms`, porque não existe tabela de alíquota interna por
+  UF × NCM neste sistema. É outra dimensão do problema, e continua sendo o
+  candidato número um da próxima tarefa que tocar em ICMS. O que esta correção
+  fecha é a alíquota **da operação própria**, que não dependia de tabela
+  nenhuma.
+- **NFC-e não muda por construção**: `buildNfcePayloadFromSale` força
+  `ufDestino = branch.uf`, então a venda de balcão nunca é interestadual. Há
+  teste provando isso com um cliente cadastrado em outro estado — checagem de
+  sanidade, não correção.
+- **A devolução recalcula com a alíquota de hoje**, como já recalculava a MVA
+  (B2), o IPI (B1) e o `pCredSN` (B8). Aqui é menos grave que nos três: a
+  alíquota interestadual é fixa por lei e não muda entre a venda e a devolução,
+  a menos que mude o cadastro de origem da mercadoria. A correção certa continua
+  sendo a mesma para os quatro — `buildReturnNfePayload` ler
+  `fiscal_document_items` em vez de recalcular.
+
+#### Testado
+
+`npm run build` limpo. `npm run lint` com **zero erros e 62 avisos**, exatamente
+os mesmos de antes da tarefa (os 61 históricos mais o de
+`SimplesCreditSection.tsx:39` que B8 registrou). `deno check
+supabase/functions/fiscal-emit/index.ts` limpo. `npm test` com **237 testes
+passando** (22 a mais que B8) e as duas baterias que dependem de credencial em
+`.env.local` falhando alto, como é o desenho delas.
+
+`tests/unit/invoiceTaxesInterestadual.test.ts` é a bateria nova (18 testes),
+separada das outras quatro pelo mesmo critério de sempre — é uma dimensão
+própria do mesmo item. Cobre as três alíquotas chegando ao `pICMS`/`vICMS` (7%,
+12% e 4%), a operação interna como regressão, a composição com a redução de
+base, a consistência entre `pICMS` e `vICMS`, os quatro CST sem ST que declaram
+próprio, os totais da nota, a cascata no ST (CST `10` e `70`, com o `vICMSST`
+subindo na mesma medida em que o `vICMS` desce), a alíquota do ST seguindo
+interna, o CSOSN `900` fora nos **dois** caminhos (filial do Simples e filial de
+Regime Normal com grupo sem CST) e a NFC-e nunca interestadual.
+
+**Dois testes existentes foram corrigidos, e um deles afirmava o bug.**
+`invoiceTaxesSt.test.ts` tinha um caso interestadual cujo `vICMSST` esperado
+(105,80) fora calculado com a alíquota interna no próprio; a conta foi refeita à
+mão e o teste passou a fixar também o `pICMS` e o `vICMS`, que ele não checava.
+`invoiceTaxesSimples.test.ts` tinha um teste chamado "deduz com a alíquota
+interna também em operação interestadual — a limitação herdada de B1", escrito
+por B8 justamente para **documentar** este bug; ele foi reescrito para afirmar o
+comportamento novo, com o comentário explicando que existia ao contrário até
+03/09/2026 — apagá-lo em silêncio teria perdido o registro. A mesma bateria
+ganhou quatro casos novos (o `202`, a origem importada, a regressão interna e o
+`900`).
+
+**Nada foi implantado**: a Edge Function `fiscal-emit` **não** foi reimplantada,
+e não há migration para aplicar. A reimplantação fica para a sessão de
+coordenação, depois da revisão independente — e continua valendo a nota
+recorrente de B1/B2/B5/B8: cada `deploy_edge_function` precisa do conjunto
+**completo** de `_shared/fiscal/*.ts`, não de um diff.
+
+#### Fora de escopo
+
+B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, cada um registrado acima: o CSOSN
+`900`; a alíquota interna do destino por UF × NCM (a aproximação de B2, que
+segue sendo a lacuna de raiz do ICMS neste motor); e a devolução lendo
+`fiscal_document_items` em vez de recalcular, que continua sendo uma correção
+para os quatro casos de uma vez.
+
+E o **DIFAL da EC 87/2015**, que esta correção não cria nem descobre — apenas
+deixa sozinho. A partir do momento em que a venda interestadual destaca a
+alíquota interestadual, existe a diferença entre ela e a interna do destino — e
+numa venda a **não contribuinte** essa diferença é devida ao estado de destino,
+nos campos `vBCUFDest`/`vICMSUFDest`/`vICMSUFRemet` do grupo `ICMSUFDest`. Este
+motor nunca os calculou e eles não existem no `NfePayload`; enquanto o cálculo
+ignorava o trajeto, a omissão era coerente com o resto do motor, e agora a nota
+declara a metade da conta que sobra para o destino sem declarar a outra.
+
+**Isso é a tarefa `B4` do relatório, e ela mudou de status em 04/09/2026.** Não
+é tarefa nova: o "Plano de Obra do Facilite" já a listava, estacionada em "fora
+do escopo — condicionais", junto de `B3` (FCP) e `B7` (cBenef). O que a correção
+de hoje mudou foi o argumento que a mantinha ali, e por isso ela foi
+**promovida para a Etapa 2** no arquivo de plano, que passou a descrever o
+recorte "Mínimo pra vender" como 34 tarefas em vez de 33. Três coisas ficaram
+registradas lá junto dela, e valem repetição aqui porque são consequência
+direta do que este motor é hoje:
+
+1. **`B4` depende da tabela de alíquota interna por UF (× NCM)** — a mesma
+   aproximação que B2 registrou e que esta correção deliberadamente não tocou.
+   No ICMS-ST a proxy `group.aliquotaIcms` é uma aproximação com ressalva
+   anotada; no DIFAL ela é o **núcleo da definição**, porque o imposto *é* a
+   diferença entre duas alíquotas — com a proxy, metade dos casos calcularia a
+   diferença entre a interna do destino e ela mesma, isto é, zero. Ou as duas
+   andam juntas, ou a tabela vem primeiro.
+2. **A dimensão de cliente já existe pela metade**: `resolveTipoCliente` separa
+   `contribuinte` / `nao_contribuinte` / `consumidor_final` desde sempre, e o
+   DIFAL incide justamente na venda a consumidor final não contribuinte — a
+   informação está no motor, só nunca decidiu imposto (hoje decide só CFOP). É
+   a mesma dimensão de que precisa a lacuna do CSOSN `101`/`102` que a pesquisa
+   de B8 encontrou; as duas deveriam ser resolvidas na mesma tarefa.
+3. **Duas perguntas legais a pesquisar antes de codificar, não durante**: o
+   tratamento do optante pelo Simples Nacional como remetente (não é pacífico —
+   merece o mesmo procedimento que B8 usou nas duas frases ambíguas dela), e a
+   partilha origem/destino do art. 99 do ADCT, que terminou em 2019 com 100%
+   para o destino — `vICMSUFRemet` continua no leiaute, e sair zerado é
+   diferente de não sair.
+
+Ao promover `B4` apareceu um segundo desalinhamento no plano, corrigido lá:
+**`B3` (FCP) já está meio feita.** B2 calcula o FCP **retido por ST** desde
+01/09/2026 (`fcp_base_calculo_st`/`fcp_percentual_st`/`fcp_valor_st`), mas não
+o FCP da operação própria — que é exatamente o `pFCPUFDest`/`vFCPUFDest` de que
+`B4` precisa. O que sobrou de `B3`, portanto, não é uma tarefa paralela: é
+carga de `B4`.

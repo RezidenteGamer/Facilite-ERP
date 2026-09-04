@@ -58,6 +58,7 @@ import {
   icmsCalculaCreditoSimples,
   icmsCalculaSubstituicaoTributaria,
   icmsCalculaValorProprio,
+  icmsProprioIgnoraAliquotaInterestadual,
   icmsStDeduzProprioNaoDestacado,
   ipiCalculaValor,
   pisCofinsCalculaValor,
@@ -214,6 +215,61 @@ function reducedBase(base: number, reducaoPercentual: number | null | undefined)
   return toCents(base * (1 - Math.min(reducaoPercentual, 100) / 100));
 }
 
+/**
+ * A operação cruza a fronteira de um estado? É o único critério de que a
+ * alíquota interestadual depende, e está isolado aqui porque **três** contas o
+ * usam: o ajuste da MVA (B2), o ICMS próprio e a dedução do próprio não
+ * destacado (as duas da correção de 04/09/2026).
+ */
+function operacaoInterestadual(query: TaxRuleQuery): boolean {
+  return query.ufOrigem.trim().toUpperCase() !== query.ufDestino.trim().toUpperCase();
+}
+
+/**
+ * A alíquota com que o ICMS **da operação própria** é calculado (correção de
+ * 04/09/2026).
+ *
+ * ## O que estava errado antes
+ *
+ * B1 calculava o `vICMS` de todo item com `tax_groups.aliquota_icms` — a
+ * alíquota **interna** cadastrada no grupo —, inclusive nas vendas
+ * interestaduais. Isso não é aproximação, é conta errada: a Resolução do
+ * Senado 22/1989 (e a 13/2012, para importado) fixa alíquotas próprias de
+ * 4%, 7% e 12% para a operação que cruza a fronteira do estado, e é por elas
+ * que o Regime Normal destaca `pICMS`/`vICMS` na nota. Como a interna é
+ * tipicamente maior que a interestadual, toda venda interestadual saía com
+ * imposto destacado **a maior** numa nota autorizada.
+ *
+ * O motor já sabia calcular a alíquota certa desde B2 — `aliquotaInterestadual`
+ * era usada para ajustar a MVA do ICMS-ST —, só nunca a aplicava ao próprio.
+ *
+ * ## Os dois pontos que chamam esta função
+ *
+ * 1. `resolveItemsForSale`, para o `vICMS` (e o `pICMS`) do item de Regime
+ *    Normal;
+ * 2. `resolveSubstituicaoTributaria`, no ramo `deduzProprioNaoDestacado`, para
+ *    a dedução implícita do Simples Nacional (CSOSN `201`/`202`) — que existe
+ *    justamente para reproduzir "a alíquota utilizada na operação pelos
+ *    contribuintes do regime normal". Se a operação é interestadual, a
+ *    alíquota que esses contribuintes usariam ali é a interestadual.
+ *
+ * As duas metades passam pela mesma função de propósito: era a divergência
+ * entre elas que B8 documentou como limitação herdada, e mantê-las num único
+ * lugar é o que impede a divergência de voltar.
+ *
+ * **Intraestadual não muda nada**: devolve a alíquota interna do grupo, que é
+ * o que o sistema sempre fez.
+ */
+function icmsProprioAliquota(
+  aliquotaInterna: number,
+  interestadual: boolean,
+  ufOrigem: string,
+  ufDestino: string,
+  origemMercadoria: string | null | undefined,
+): number {
+  return interestadual ? aliquotaInterestadual(ufOrigem, ufDestino, origemMercadoria) : aliquotaInterna;
+}
+
 type ResolvedItems = {
   cfop: string;
   items: NfePayloadItem[];
@@ -288,6 +344,20 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  *    `202`, que tributam a operação própria sem destacá-la — ver
  *    `resolveSubstituicaoTributaria`. Antes de B8 o ST desses itens saía cheio
  *    sobre a base majorada.
+ *
+ * ## A alíquota interestadual no ICMS próprio (correção de 04/09/2026)
+ *
+ * B1, B2 e B8 registraram a mesma lacuna: o `vICMS` do item usava sempre a
+ * alíquota **interna** do grupo, mesmo quando a venda cruzava a fronteira do
+ * estado. Numa venda interestadual de Regime Normal a alíquota é a da
+ * Resolução do Senado 22/1989 (7% ou 12%) ou a da 13/2012 (4%, para
+ * importado) — as mesmas que `aliquotaInterestadual` já calculava desde B2
+ * para ajustar a MVA. Quem decide agora é `icmsProprioAliquota`, e o
+ * `icms_aliquota` do item carrega a alíquota **efetivamente usada**, para o
+ * `pICMS` do XML bater com o `vICMS` que ele gerou.
+ *
+ * A NFC-e não muda: `buildNfcePayloadFromSale` força `ufDestino = branch.uf`,
+ * então nunca é interestadual por construção.
  */
 function resolveItemsForSale(
   sale: SaleForInvoice,
@@ -335,7 +405,33 @@ function resolveItemsForSale(
 
     // ICMS — a alíquota só vira base/valor se o CST/CSOSN tiver onde escrevê-los.
     const icmsDeclara = group.aliquotaIcms !== null && icmsCalculaValorProprio(icmsSituacaoTributaria);
-    const icmsAliquota = icmsDeclara ? group.aliquotaIcms! : undefined;
+    /**
+     * Interestadual **e** de Regime Normal: são as duas condições da alíquota
+     * da Resolução 22/89 no ICMS próprio (correção de 04/09/2026).
+     *
+     * O regime importa porque só o Regime Normal apura o ICMS por operação —
+     * o optante pelo Simples recolhe pelo DAS, sobre a receita bruta do mês, e
+     * a alíquota da operação não descreve o que ele paga. Na prática o gate de
+     * regime já basta: os CSOSN não declaram `pICMS`, com a única exceção do
+     * `900`. A exceção está tratada explicitamente porque
+     * `resolveIcmsSituacaoTributaria` cai no CSOSN também quando a filial é
+     * CRT 3 e o grupo não tem CST de ICMS — ver
+     * `icmsProprioIgnoraAliquotaInterestadual`, que documenta por que o `900`
+     * fica de fora desta correção.
+     */
+    const icmsProprioInterestadual =
+      operacaoInterestadual(query) &&
+      query.regime.trim() === "3" &&
+      !icmsProprioIgnoraAliquotaInterestadual(icmsSituacaoTributaria);
+    const icmsAliquota = icmsDeclara
+      ? icmsProprioAliquota(
+          group.aliquotaIcms!,
+          icmsProprioInterestadual,
+          query.ufOrigem,
+          query.ufDestino,
+          item.product.origemMercadoria,
+        )
+      : undefined;
     const icmsReducao = icmsDeclara && group.reducaoBaseIcms ? group.reducaoBaseIcms : undefined;
     const icmsBase = icmsDeclara ? reducedBase(base, icmsReducao) : undefined;
     const icmsValor = icmsBase !== undefined ? taxAmount(icmsBase, icmsAliquota!) : undefined;
@@ -556,8 +652,10 @@ type SubstituicaoTributaria =
  *
  * Quando `deduzProprioNaoDestacado` é verdadeiro (CSOSN `201`/`202`, decidido
  * por `icmsStDeduzProprioNaoDestacado`), a dedução é calculada aqui em vez de
- * vir de fora: `basePropria × alíquota interna` — o mesmo número que um item de
- * Regime Normal na mesma operação teria destacado e deduzido. É o que a
+ * vir de fora: `basePropria × alíquota da operação própria` — o mesmo número
+ * que um item de Regime Normal na mesma operação teria destacado e deduzido
+ * (interna quando o trajeto é interno, interestadual quando cruza a fronteira
+ * — ver `icmsProprioAliquota`). É o que a
  * pesquisa de B8 encontrou convergente nas fontes: para o optante substituto,
  * "apenas para cálculo da retenção, o ICMS da operação própria deve ser
  * calculado aplicando-se a alíquota utilizada na operação pelos contribuintes
@@ -568,27 +666,31 @@ type SubstituicaoTributaria =
  * (Convênio ICMS 35/2011), que já está tratada acima.
  *
  * Calcular a dedução **aqui**, e não em `resolveItemsForSale`, é de propósito:
- * ela usa a mesma `aliquotaInterna` que já foi validada logo abaixo (não nula,
- * dentro de 0–100). Fazê-la fora duplicaria a validação ou usaria um número
- * não validado.
+ * no trajeto interno ela usa a mesma `aliquotaInterna` que já foi validada
+ * logo abaixo (não nula, dentro de 0–100). Fazê-la fora duplicaria a validação
+ * ou usaria um número não validado.
  *
- * ## A limitação conhecida que sobrou, por falta de dado
+ * ## A limitação que B2 e B8 registraram aqui, e que a correção de 04/09/2026
+ * fechou
  *
- * **Interestadual: o próprio que se deduz está calculado com a alíquota
- * interna.** `resolveItemsForSale` usa `group.aliquotaIcms` para o `vICMS` de
- * qualquer operação — B1 nunca aplicou alíquota interestadual ao próprio. Numa
- * venda SP→BA de 1.000 com alíquota de grupo 18%, o item destaca 180 de
- * próprio (o correto seriam 70, a 7%) e a dedução leva o mesmo 180, então o
- * **ST sai a menos**. O ajuste da MVA usa a alíquota interestadual correta; o
- * próprio, não. Corrigir isso é corrigir B1, e está registrado na entrada de
- * B2 do AGENTS.md.
+ * Até 03/09/2026 as duas deduções usavam a alíquota **interna** mesmo em
+ * operação interestadual, porque `resolveItemsForSale` calculava o `vICMS` de
+ * qualquer operação com `group.aliquotaIcms` — B1 nunca aplicou alíquota
+ * interestadual ao próprio, e B8 fez a dedução implícita do Simples espelhar
+ * esse número **de propósito**, para as duas metades errarem junto. Numa venda
+ * SP→BA de 1.000 com grupo de 18%, o item destacava 180 (o correto são 70, a
+ * 7%) e deduzia os mesmos 180: **ICMS próprio a maior e ST a menos**.
  *
- * A dedução do Simples que B8 acrescentou **herda exatamente essa limitação**,
- * e isso também é decisão: ela usa a mesma `aliquotaInterna`, e não a
- * interestadual, para produzir o mesmo número que o caminho de Regime Normal
- * produz. Assim as duas metades erram junto e serão corrigidas de uma vez,
- * quando existir tabela de alíquota interna por UF × NCM — em vez de o Simples
- * ficar mais correto que o Regime Normal por acidente de escopo.
+ * As duas passaram a usar `icmsProprioAliquota` — ver o cabeçalho dela. O
+ * espelhamento continua de pé, e agora reflete a conta certa: o Regime Normal
+ * destaca pela alíquota do trajeto, e a dedução do Simples reproduz esse mesmo
+ * número.
+ *
+ * **A alíquota interna do destino continua aproximada por `group.aliquotaIcms`**
+ * — essa limitação é de B2, é outra dimensão (falta uma tabela por UF × NCM) e
+ * não foi tocada. Ela vale para a base do ST e para a alíquota aplicada sobre
+ * ela, que por lei são mesmo as do estado de destino, independentemente de a
+ * operação ser interestadual.
  */
 function resolveSubstituicaoTributaria(input: {
   group: TaxGroup;
@@ -603,7 +705,8 @@ function resolveSubstituicaoTributaria(input: {
   /**
    * O CSOSN tributa a operação própria **sem destacá-la** no XML (Simples
    * Nacional, CSOSN `201`/`202`)? Então a dedução é calculada aqui a partir da
-   * alíquota interna, em vez de vir em `icmsProprio` — ver o cabeçalho.
+   * alíquota da operação própria, em vez de vir em `icmsProprio` — ver o
+   * cabeçalho.
    */
   deduzProprioNaoDestacado: boolean;
 }): SubstituicaoTributaria {
@@ -645,7 +748,7 @@ function resolveSubstituicaoTributaria(input: {
   }
   const rule = resolucao.rule;
 
-  const interestadual = query.ufOrigem.trim().toUpperCase() !== query.ufDestino.trim().toUpperCase();
+  const interestadual = operacaoInterestadual(query);
   // Regime 3 é o Normal; 1 e 2 são Simples Nacional (mesmo código de `branches.regime_tributario`).
   const ajusta = interestadual && query.regime.trim() === "3";
   const mva = ajusta
@@ -676,7 +779,19 @@ function resolveSubstituicaoTributaria(input: {
   // tributa a operação própria sem destacá-la (Simples `201`/`202`), o valor
   // que um item de Regime Normal na mesma operação teria destacado — ver o
   // cabeçalho desta função.
-  const deducao = input.deduzProprioNaoDestacado ? taxAmount(basePropria, aliquotaInterna) : icmsProprio;
+  //
+  // "Na mesma operação" inclui o trajeto: numa venda interestadual o
+  // contribuinte de Regime Normal destacaria pela alíquota da Resolução 22/89,
+  // não pela interna do estado dele, então é ela que a dedução implícita usa
+  // (correção de 04/09/2026). O `interestadual` daqui é só das UFs, sem gate de
+  // regime, e isso é o certo: quem está no Simples é **o emitente**, e o que
+  // esta linha reproduz é o que o *outro* regime faria no mesmo trajeto.
+  const deducao = input.deduzProprioNaoDestacado
+    ? taxAmount(
+        basePropria,
+        icmsProprioAliquota(aliquotaInterna, interestadual, query.ufOrigem, query.ufDestino, origemMercadoria),
+      )
+    : icmsProprio;
   // `Math.max(0, …)`: um ST negativo não existe no leiaute. Só acontece com
   // cadastro incoerente (MVA zero e alíquota interna menor que a do próprio),
   // e zerar é o resultado correto — nada a recolher — em vez de um campo que a

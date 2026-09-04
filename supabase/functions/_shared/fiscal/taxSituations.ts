@@ -87,6 +87,45 @@ export function icmsCalculaValorProprio(situacaoTributaria: string | null | unde
 }
 
 /**
+ * CSOSN que declaram `vBC`/`pICMS`/`vICMS` mesmo sendo Simples Nacional — hoje
+ * só o `900` ("Outros"), o único CSOSN cujo grupo XML (`ICMSSN900`) tem os três
+ * campos (correção de 04/09/2026).
+ *
+ * Existe para uma coisa só: manter o `900` **fora** da correção da alíquota
+ * interestadual do ICMS próprio. O gate normal daquela correção é o regime de
+ * quem emite (`CRT 3`), e num cadastro coerente ele já basta — um CSOSN só
+ * aparece em filial do Simples. Mas `resolveIcmsSituacaoTributaria` cai no
+ * CSOSN quando a filial é de Regime Normal e o grupo não tem CST de ICMS, e
+ * nesse caminho o `900` chegaria à correção sem passar por decisão nenhuma.
+ *
+ * **Por que o `900` fica de fora**: o optante pelo Simples recolhe o ICMS pelo
+ * DAS, sobre a receita bruta do mês, e não por alíquota-por-operação. Se o
+ * `pICMS` que ele declara num `900` deveria ou não distinguir operação interna
+ * de interestadual é pergunta legal própria — o `900` é o catch-all, usado
+ * "quando nenhum outro serve", e a resposta depende da situação fática que o
+ * cadastro não conhece. Mesmo critério com que B2 o deixou fora do ST e B8 o
+ * deixou fora do crédito de Simples: catch-all não entra em automatismo.
+ *
+ * Lista de **inclusão**, como as de ST, crédito e IPI: código desconhecido
+ * devolve `false`. Aqui isso é o lado seguro na direção certa — um CSOSN novo
+ * que declare próprio seguiria a regra geral (a alíquota da operação), que é o
+ * comportamento correto pela Resolução 22/89; a exceção é que precisa ser
+ * afirmada, e é o que este conjunto faz.
+ */
+const ICMS_PROPRIO_SEM_ALIQUOTA_POR_OPERACAO = new Set(["900"]);
+
+/**
+ * O `pICMS`/`vICMS` deste código é declarado por um regime que **não** apura o
+ * ICMS por operação (Simples Nacional)? Então a alíquota interestadual não se
+ * aplica a ele — ver o comentário do conjunto acima.
+ */
+export function icmsProprioIgnoraAliquotaInterestadual(
+  situacaoTributaria: string | null | undefined,
+): boolean {
+  return ICMS_PROPRIO_SEM_ALIQUOTA_POR_OPERACAO.has(normalizeCode(situacaoTributaria));
+}
+
+/**
  * CST de ICMS e CSOSN cujo grupo XML tem os campos de **ICMS-ST a recolher
  * agora** (`modBCST`, `pMVAST`, `vBCST`, `pICMSST`, `vICMSST`) — B2,
  * 01/09/2026.
