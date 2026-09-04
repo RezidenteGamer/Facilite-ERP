@@ -3886,3 +3886,291 @@ Ao promover `B4` apareceu um segundo desalinhamento no plano, corrigido lá:
 o FCP da operação própria — que é exatamente o `pFCPUFDest`/`vFCPUFDest` de que
 `B4` precisa. O que sobrou de `B3`, portanto, não é uma tarefa paralela: é
 carga de `B4`.
+
+### Correção: o crédito de ICMS do Simples só existe para destinatário não optante — fechando o achado adjacente de B8 (04/09/2026)
+
+Segunda correção do dia, e do mesmo tipo da primeira: não é uma tarefa nova do
+"Mínimo pra vender", é uma lacuna que uma tarefa anterior encontrou, documentou
+e deixou para trás por estar fora do escopo dela. A fonte é exata — a entrada de
+**B8 de 03/09/2026**, seção "A quarta pesquisa: 'anexo do cliente' — a frase
+está errada, mas há uma lacuna atrás dela", que registrou:
+
+> **o crédito só existe para destinatário NÃO optante.** (…) Ou seja, a escolha
+> entre CSOSN `101` (com crédito) e `102` (sem) **depende do cliente**, não do
+> produto (…). É lacuna real, de tamanho de tarefa própria.
+
+Enquanto isso não existia, o motor fazia o que B8 descreveu como "a única coisa
+coerente": honrava o CSOSN cadastrado. O problema é que o CSOSN é atributo do
+**produto** (`products.tax_group_id` → `tax_groups`), e o direito ao crédito é
+do **comprador** — então a mesma nota podia sair para um cliente sem direito
+nenhum, declarando um benefício que não existe naquela operação.
+
+#### A pesquisa: o texto legal, e duas confirmações independentes
+
+A condição que desqualifica o crédito é **o comprador ser optante pelo Simples
+Nacional**, e ela vem do próprio art. 23 da LC 123/2006, em duas metades.
+
+O **caput** é categórico, e é o que veda:
+
+> "As microempresas e as empresas de pequeno porte optantes pelo Simples
+> Nacional não farão jus à apropriação nem transferirão créditos relativos a
+> impostos ou contribuições abrangidos pelo Simples Nacional."
+
+E o **§1º** abre a exceção nomeando exatamente quem tem direito:
+
+> "As pessoas jurídicas e aquelas a elas equiparadas pela legislação tributária
+> **não optantes** pelo Simples Nacional terão direito a crédito correspondente
+> ao ICMS incidente sobre as suas aquisições de mercadorias de microempresa ou
+> empresa de pequeno porte optante pelo Simples Nacional, desde que destinadas à
+> comercialização ou industrialização e observado, como limite, o ICMS
+> efetivamente devido pelas optantes pelo Simples Nacional em relação a essas
+> aquisições."
+
+Texto conferido no Planalto (redação vigente, com os §§ que a LC 128/2008
+acrescentou). Duas fontes fiscais independentes confirmam a leitura, e as duas
+são de administração tributária, não de blog:
+
+- **SEFAZ/SP, Resposta à Consulta Tributária 30793/2024**, item 7.2: o CSOSN
+  `102` "não permite a indicação da alíquota do ICMS devido no Simples Nacional
+  e o valor do crédito correspondente na NF-e (como no caso de operações que
+  destinam mercadorias a não contribuintes; **a optantes pelo simples nacional**;
+  etc.)". O item 7.1, do `101`, cita "artigo 23, caput, §1º" nominalmente.
+- **Receita Estadual do RS**: o optante transfere crédito "desde que a operação
+  seja destinada a não optante e em operação destinada à comercialização e
+  industrialização".
+
+Nenhuma fonte encontrada sustenta a leitura contrária. E o §4º, que lista as
+hipóteses em que os §§1º a 3º não se aplicam, é inteiro sobre **o remetente**
+(valores fixos mensais, não informar a alíquota, isenção estadual da faixa,
+opção pelo regime de caixa) — não acrescenta nenhuma condição do comprador.
+
+**A segunda condição do §1º ficou de fora, e é decisão registrada.** O
+dispositivo exige, além do "não optante", que as mercadorias sejam "destinadas à
+comercialização ou industrialização" — e a RC 30793/2024 lista os **não
+contribuintes** ao lado dos optantes justamente por isso. Este cadastro não
+consegue responder essa pergunta: o campo mais próximo é `contacts.indicador_ie`,
+que é opcional e está nulo na imensa maioria dos contatos já cadastrados, e
+`resolveTipoCliente` lê qualquer coisa que não seja `"1"` como não contribuinte.
+Usá-lo como gate recusaria emissões de clientes que **são** contribuintes e só
+têm o campo em branco — exatamente o oposto do princípio que rege esta checagem.
+Fica como limitação conhecida, anotada no cabeçalho de `resolveCreditoSimples`,
+e é a mesma dimensão de que precisa o DIFAL de `B4` (ver a entrada anterior de
+hoje, item 2 da promoção): as duas continuam candidatas à mesma tarefa.
+
+#### A decisão que a segunda pesquisa fixou: **nulo não recusa**
+
+A hipótese de trabalho do enunciado se confirmou, e vale escrever por que — é a
+diferença entre esta recusa e a que B8 criou, nas mesmas dez linhas de função.
+
+B8 recusa quando `branches.aliquota_credito_icms_simples` é nula porque
+`pCredSN` é campo **obrigatório** (`S`) nos grupos `ICMSSN101`/`ICMSSN201`: sem
+ele a nota é XML inválido, e B8 pôde argumentar que "não existe a emissão que
+hoje funciona e que a recusa quebraria". Aqui o argumento **se inverte**: uma
+NF-e com CSOSN `101` para um cliente de Regime Normal é perfeitamente válida, e
+`contacts.regime_tributario` nasce nula em todos os contatos. Recusar no nulo
+quebraria, no dia da aplicação da migration, toda emissão `101`/`201` que hoje
+funciona — que é exatamente o argumento que B8 examinou e descartou no caso
+dela, e que aqui se aplica inteiro.
+
+Então a recusa é **estritamente afirmativa**: só acontece quando o sistema
+**sabe** que o cliente é optante. Nulo é "não sei", não "cadastro incompleto".
+Em código isso é a mesma lista de inclusão que `taxSituations.ts` já usa em todo
+predicado cuja resposta `true` recusa emissão (ST, crédito, ad rem, IPI) —
+código desconhecido devolve `false`.
+
+#### O domínio: os CRT da filial, **mais o `4` do MEI**
+
+`contacts.regime_tributario` nasce com os mesmos códigos de
+`branches.regime_tributario`, e uma divergência deliberada.
+
+A primeira descoberta ao "replicar exatamente a migration da filial" é que **não
+há o que replicar**: no baseline `branches.regime_tributario` é `"text"` puro,
+sem `check`, sem `comment`. A coluna nova **nasce com a constraint**, pelo
+critério que a própria B8 fixou ("a constraint nasce com a coluna, ao contrário
+da `aliquota_icms` de 19/08/2026, que nasceu sem e obrigou B2 a recusar em
+código"): a coluna é nova, não há dado em produção, e um regime digitado errado
+decide se uma nota declara ou não um benefício fiscal.
+
+A divergência é o **`4` (Simples Nacional — MEI)**, que entrou no leiaute pela
+NT 2024.001 e passou a ser exigido do MEI emitente em abril de 2025. A filial
+não o admite porque o valor dela vai para o `regime_tributario_emitente` do XML
+e emitir como MEI está fora do escopo do sistema; aqui o valor **nunca sai do
+banco** — é só a resposta a "este cliente é optante?", e um MEI é
+categoricamente optante. Deixá-lo de fora forçaria a cadastrar um MEI como `1`
+(certo por acaso: MEI é microempresa optante) ou, pior, a deixar o campo vazio e
+perder a recusa em silêncio. Se um dia a filial admitir o `4`, os dois domínios
+voltam a coincidir.
+
+#### Onde a checagem entra, e por que a NFC-e fica de fora
+
+Dentro de `resolveCreditoSimples`, **antes** da checagem da alíquota da filial —
+porque é a pergunta anterior: não adianta ter o número certo se aquela operação
+não transfere crédito nenhum. Há teste fixando a ordem, e a razão dele é
+prática: com os dois cadastros errados ao mesmo tempo, a mensagem útil é a da
+elegibilidade, já que cadastrar a alíquota não faria a nota sair.
+
+`resolveItemsForSale` é compartilhada pelos três documentos, então ganhou um
+quinto parâmetro — `ResolveItemsOptions`, com um campo só
+(`verificaDireitoAoCreditoDoDestinatario`) e **obrigatório de propósito**: as
+três funções que montam payload têm de *dizer* o que fazem com a elegibilidade
+do destinatário, em vez de herdar um padrão silencioso. Um documento novo que
+esqueça de decidir não compila.
+
+- **NF-e de venda: liga.** Destinatário identificado e obrigatório.
+- **NF-e de devolução: liga**, e sem código extra — só o threading do
+  parâmetro. Ela herda o mesmo cliente identificado da venda original: se aquela
+  venda não podia transferir crédito, a nota que a desfaz não pode reverter o
+  que não existiu.
+- **NFC-e: não liga**, e é decisão de escopo, não esquecimento. O modelo 65
+  declara `consumidor_final: 1` sempre, é presencial, força `ufDestino` para a
+  da própria filial e não exige cliente identificado — mesmo um comprador de
+  balcão com CNPJ cadastrado compra ali como consumidor final. Ligar a checagem
+  nele contradiria a decisão de design já tomada para o modelo e faria uma venda
+  de PDV recusar por um atributo do cadastro que a operação nem considera. Segue
+  valendo, intacta, a consequência que B8 registrou: uma NFC-e com CSOSN `101`
+  declara crédito que o consumidor final nunca aproveita, e o que está errado
+  nesse cenário é o CSOSN do cadastro, que deveria ser `102`.
+
+**Sem checagem no sentido contrário**, como o enunciado já tinha decidido:
+produto cadastrado como `102`/`202` vendido a um cliente elegível não é lacuna.
+Não transferir crédito é decisão legítima do remetente pelo art. 23, §4º, II —
+o mesmo dispositivo que B8 já citava. E **nada de "CSOSN por venda"**: o desenho
+desta correção é recusar quando o cadastro se contradiz, não escolher o CSOSN
+certo sozinho.
+
+A recusa, por extenso, é assim — cliente "Comercial Aurora ME" cadastrado com
+CRT `1`, produto no grupo tributário "Bebidas SN 101":
+
+> Item 1 (Refrigerante 2L): o CSOSN 101 do grupo tributário "Bebidas SN 101"
+> transfere crédito de ICMS do Simples Nacional, mas o cliente "Comercial Aurora
+> ME" está cadastrado como optante pelo Simples Nacional — e o optante não faz
+> jus a esse crédito (art. 23, caput e §1º, da LC 123/2006, que só dá o direito
+> às pessoas jurídicas NÃO optantes). Cadastre o produto num grupo tributário
+> com CSOSN 102 ou 202 (sem permissão de crédito) para vender a este tipo de
+> cliente, ou corrija o regime tributário do cliente em Clientes e Fornecedores,
+> se ele estiver errado.
+
+#### A limitação herdada, pela quinta vez
+
+A devolução lê `contacts.regime_tributario` **como está hoje**, não como estava
+na nota original: um cliente que saiu do Simples entre a venda e a devolução
+passa a ser elegível retroativamente, e nenhuma das duas notas sabe disso.
+**Não é bug novo desta correção** — é a mesma limitação já registrada quatro
+vezes (MVA em B2, IPI em B1, `pCredSN` em B8, alíquota interestadual na correção
+anterior de hoje), com a mesma correção certa e única: fazer
+`buildReturnNfePayload` ler `fiscal_document_items` em vez de recalcular. Esta é
+a quinta ocorrência, e continua sendo uma tarefa só.
+
+#### Front: a tela de Clientes existe, ao contrário da de Filiais
+
+B8 teve de inventar uma seção em Configurações porque **não existe módulo de
+filiais**. Aqui não: `clientes-fornecedores` é um módulo de verdade, com
+`CustomersPage` própria, e o campo entrou exatamente onde `indicador_ie` já
+mora — como um `selectFields` do `RegistryFormModal`, com estado local na
+página, presente nos dois modais (novo e editar).
+
+**Não é linha em `module_fields`**, e o motivo é o mesmo que já vale para o
+indicador de IE: `module_fields` não tem `dataType: 'select'` (a engine só
+distingue `text`/`date` no `<input>`), e um campo de texto livre para um domínio
+de quatro códigos seria pior que um `<select>`. É a disciplina que
+`RegistryFormModal` documenta para `mediaField`/`lookupField`/`selectFields`.
+
+O `QuickContactFormModal` (cadastro rápido de cliente no meio da venda)
+**continua sem os dois campos fiscais**, como já estava: quem está fechando uma
+venda não para para preencher indicador de IE nem regime tributário, e o efeito
+é o cadastro nascer com regime nulo — que não recusa nada. Precedente mantido de
+propósito.
+
+**O `/code-review alto` achou um bug real no campo, e ele foi corrigido.**
+`handleEditSubmit` copiava o padrão do vizinho e mandava
+`regimeTributario: formRegimeTributario || undefined`; como `toUpdateRow` só
+manda a coluna quando a chave existe no patch, escolher "Não informado" num
+cliente que já tinha regime gravado **não limpava nada** — o `undefined` fazia
+a chave sumir do patch. Isso importa mais aqui do que em qualquer outro campo
+do formulário, porque é exatamente a saída que a recusa de emissão manda o
+operador usar ("corrija o regime tributário do cliente"): um cliente marcado
+por engano como optante ficaria travado, sem poder desmarcar, com a nota
+recusando. Passou a mandar a string vazia, que `toUpdateRow` converte em `null`.
+
+**O gêmeo em `indicadorIe` continua lá, e é anterior a esta correção**: a mesma
+linha, o mesmo `|| undefined`, o mesmo efeito de não conseguir voltar para "Não
+informado". Não foi tocado porque é bug pré-existente de outro campo e o
+consertar sem teste que o cubra alarga o escopo desta tarefa — fica registrado
+aqui como candidato a correção própria, e a assimetria entre os dois selects é
+deliberada, não descuido.
+
+O que **não** foi possível verificar no navegador: a tela exige login, e esta
+sessão não tem credencial. O que sustenta o campo é estrutural —
+`selectFields` é uma lista mapeada por `key`, e a segunda entrada renderiza pelo
+mesmo `FormField` da primeira — mais `npm run build` e `npm run lint` limpos.
+Diferente de B8, aqui não há acoplamento novo entre front e migration: sem a
+coluna aplicada, o `select` do PostgREST em `contacts` é `*`, o campo volta
+vazio e a gravação do valor é que falharia — nenhuma tela quebra.
+
+#### A migration (escrita, NÃO aplicada)
+
+`supabase/migrations/00000000000009_regime_tributario_do_cliente.sql`. Uma
+coluna só (`contacts.regime_tributario text`), o `check` de domínio
+(`'1'`/`'2'`/`'3'`/`'4'`, ou nulo) e o `comment on column`. **Nada de RLS**:
+`contacts` já tem as quatro policies por
+`has_permission('clientes-fornecedores', …)` desde o baseline, e policy é por
+linha, não por coluna — mesma constatação de B1, B5 e B8. **Nada em
+`fiscal_document_items`**: o regime do cliente não vai para o XML nem para o
+snapshot do documento; o que ele decide é se `pCredSN`/`vCredICMSSN` podem
+existir, e esses dois já são gravados desde B8.
+
+**Ordem de aplicação**: esta migration vem **antes** do deploy da `fiscal-emit`,
+pelo mesmo motivo de B5 e B8, mas por um ponto só — `data.ts` passou a listar
+`regime_tributario` no `select` do cliente (nas **duas** consultas, venda e
+devolução), e sem a coluna o PostgREST responde 400 e nenhuma nota é montada.
+Ordem correta: aplicar 5 (B1), 6 (B2), 7 (B5), 8 (B8) e 9 (esta) → implantar
+`fiscal-emit`.
+
+`src/types/supabase.ts` foi editado à mão de novo (a coluna em `Row`/`Insert`/
+`Update` de `contacts` e no `Returns` de `search_contacts_by_kind`, que é
+`setof contacts`), mesmo motivo de B1/B5/B8: o arquivo é gerado do banco real e
+o banco real ainda não tem a coluna. E `toInvoiceContact`, em `data.ts`, leva
+`?? null` pelo mesmo motivo que `toInvoiceBranch` leva na coluna de B8 —
+enquanto a migration não rodar o `select` volta sem ela, e o valor tem de
+significar "não sei" (que não recusa nada), não `undefined`.
+
+#### Testado
+
+`npm run build` limpo. `npm run lint` com **zero erros e 62 avisos** — os mesmos
+62 de antes desta correção, nenhum novo. `deno check
+supabase/functions/fiscal-emit/index.ts` limpo. `npm test` com **251 testes
+passando** (14 a mais) e as duas baterias que dependem de credencial em
+`.env.local` falhando alto, como é o desenho delas.
+
+Os 14 testes novos entraram em `tests/unit/invoiceTaxesSimples.test.ts` — a
+bateria de B8, porque é a mesma dimensão do mesmo item, e não um arquivo novo.
+Cobrem: a recusa do `101` com a mensagem inteira (cliente, grupo, CSOSN, `art.
+23`, `LC 123/2006`, e as duas saídas acionáveis), a recusa do `201`, a dos CRT
+`2` e `4`, o cliente **sem regime cadastrado** emitindo normalmente (a
+regressão central — é o estado de todo contato no dia da migration), o cliente
+de Regime Normal emitindo, o regime desconhecido não recusando, o `102` e o
+`202` vendidos a optante sem recusa (com o ST do `202` intacto), a ordem da
+recusa contra a da alíquota nula, o item nomeado quando só um dos dois produtos
+da nota tem CSOSN com crédito, a **NFC-e** com cliente optante e CSOSN `101`
+continuando a emitir, e a **devolução** recusando junto com a venda (e emitindo
+junto, quando o cliente é elegível).
+
+As quatro baterias antigas ganharam uma linha de fixture cada
+(`regimeTributario: null`), e o valor é decisão: elas são anteriores à coluna e
+continuam descrevendo o cadastro de quem nunca a preencheu — é a regressão que
+prova que a checagem nova não quebra o que já emitia, inclusive nos CSOSN
+`101`/`201` que duas delas exercitam. **Nenhuma expectativa antiga mudou.**
+
+**Nada foi testado no banco**: a migration não foi aplicada e a Edge Function
+não foi implantada — as duas coisas ficaram para a sessão de coordenação, junto
+com a revisão independente.
+
+#### Fora de escopo
+
+B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, e cada um registrado acima com o
+motivo: a condição "destinadas à comercialização ou industrialização" do §1º (o
+cadastro não consegue respondê-la sem transformar `indicador_ie` em gate, o que
+recusaria clientes com o campo em branco); a checagem na NFC-e; a escolha
+automática do CSOSN por venda; a checagem no sentido contrário (`102` a cliente
+elegível); a devolução recalcular com o cadastro de hoje (quinta ocorrência da
+mesma limitação); e o campo no `QuickContactFormModal`.

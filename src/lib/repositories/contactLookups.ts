@@ -41,6 +41,7 @@ export async function fetchContactsByKind(kind: ContactKind, query: string): Pro
     photoUrl: row.photo_url ?? undefined,
     inscricaoEstadual: row.inscricao_estadual ?? undefined,
     indicadorIe: row.indicador_ie ?? undefined,
+    regimeTributario: row.regime_tributario ?? undefined,
     codigoIbgeMunicipio: row.codigo_ibge_municipio ?? undefined,
   }));
 }

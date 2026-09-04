@@ -63,6 +63,7 @@ import {
   ipiCalculaValor,
   pisCofinsCalculaValor,
   pisCofinsCalculaValorPorUnidade,
+  regimeOptantePeloSimples,
 } from "./taxSituations.ts";
 import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "./types.ts";
 import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "./taxRules.ts";
@@ -99,6 +100,22 @@ export type SaleForInvoiceContact = {
   document: string;
   inscricaoEstadual: string | null;
   indicadorIe: string | null;
+  /**
+   * CRT do **destinatário** (`contacts.regime_tributario`) — correção de
+   * 04/09/2026. Não vai para o XML: o CRT declarado na nota é o do emitente.
+   *
+   * Serve a uma pergunta só, e de elegibilidade legal: este cliente é optante
+   * pelo Simples Nacional? Se for, ele não faz jus ao crédito de ICMS do
+   * art. 23 da LC 123/2006, e uma NF-e com CSOSN `101`/`201` para ele
+   * declararia um benefício que não existe naquela operação — ver
+   * `resolveCreditoSimples`.
+   *
+   * **Nulo é caso legítimo**, e não recusa nada: é "não sei", não "cadastro
+   * incompleto". Dimensão diferente de `indicadorIe`, que diz se o cliente tem
+   * inscrição estadual — um optante pelo Simples pode ter IE e ser
+   * contribuinte.
+   */
+  regimeTributario: string | null;
   logradouro: string | null;
   numero: string | null;
   bairro: string | null;
@@ -286,6 +303,40 @@ type ResolvedItems = {
 type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: string[] };
 
 /**
+ * O que muda entre os três documentos que compartilham `resolveItemsForSale`
+ * (correção de 04/09/2026).
+ *
+ * Hoje é um campo só, e ele é obrigatório de propósito: as três funções que
+ * montam payload têm de **dizer** o que fazem com a elegibilidade do
+ * destinatário, em vez de herdar um padrão silencioso. Um documento novo que
+ * esqueça de decidir não compila.
+ */
+type ResolveItemsOptions = {
+  /**
+   * A nota tem destinatário identificado cujo direito ao crédito do art. 23 da
+   * LC 123/2006 pode ser verificado? `true` na NF-e de venda e na de devolução;
+   * `false` na NFC-e.
+   *
+   * **A NFC-e fica de fora por decisão de escopo, não por esquecimento.** Ela
+   * declara `consumidor_final: 1` sempre, presencial, sem exigir cliente
+   * identificado — mesmo quando o comprador de balcão tem CNPJ cadastrado, é
+   * como consumidor final que ele compra ali, e a UF de destino é forçada para
+   * a da própria filial. Ligar a checagem nela contradiria a decisão de design
+   * já tomada para o modelo 65 e faria uma venda de PDV recusar por um atributo
+   * do cadastro do cliente que a operação nem considera. B8 já registrou a
+   * consequência que sobra (uma NFC-e com CSOSN `101` declara crédito que o
+   * consumidor final nunca aproveita) como limitação conhecida, com o mesmo
+   * diagnóstico de sempre: o que está errado nesse cenário é o CSOSN do
+   * cadastro, que deveria ser `102`.
+   *
+   * **A devolução ativa a checagem** porque herda o cliente identificado da
+   * venda original: se aquela venda não podia transferir crédito, a nota que a
+   * desfaz não pode reverter um crédito que não existiu.
+   */
+  verificaDireitoAoCreditoDoDestinatario: boolean;
+};
+
+/**
  * A parte genuinamente comum a NF-e e NFC-e: resolve o CFOP da operação
  * (`resolveTaxRule`) e, por item, o CST/CSOSN e as alíquotas a partir do
  * grupo tributário do produto. Não sabe nada sobre cliente/destinatário —
@@ -358,12 +409,22 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  *
  * A NFC-e não muda: `buildNfcePayloadFromSale` força `ufDestino = branch.uf`,
  * então nunca é interestadual por construção.
+ *
+ * ## O regime do destinatário no crédito do Simples (correção de 04/09/2026)
+ *
+ * O crédito do CSOSN `101`/`201` só existe para comprador **não optante** pelo
+ * Simples Nacional (art. 23, *caput* e §1º, da LC 123/2006). B8 declarava o
+ * crédito sem olhar o cliente; agora `resolveCreditoSimples` recebe também o
+ * destinatário e recusa a emissão quando ele está cadastrado como optante.
+ * Quem decide se o destinatário chega até lá é `options`, e a NFC-e é a única
+ * das três que diz não — ver `ResolveItemsOptions`.
  */
 function resolveItemsForSale(
   sale: SaleForInvoice,
   rules: TaxRuleRow[],
   query: TaxRuleQuery,
   mvaRules: MvaRuleRow[],
+  options: ResolveItemsOptions,
 ): ItemsResolution {
   const errors: string[] = [];
   if (sale.items.length === 0) errors.push("Venda sem itens.");
@@ -459,6 +520,10 @@ function resolveItemsForSale(
       ? resolveCreditoSimples({
           group,
           branch: sale.branch,
+          // Só chega destinatário quando a checagem de elegibilidade está
+          // ligada — ver `ResolveItemsOptions`. Na NFC-e é sempre `null`, e o
+          // crédito segue como B8 o deixou.
+          contact: options.verificaDireitoAoCreditoDoDestinatario ? sale.contact : null,
           situacaoTributaria: icmsSituacaoTributaria,
           base,
         })
@@ -883,17 +948,60 @@ type CreditoSimples =
  * o art. 23, §4º, II, da LC 123/2006, que trata "não informar a alíquota" como
  * uma decisão legítima do remetente, não como um erro.
  *
- * ## Duas consequências que este cálculo não trata, e por quê
+ * ## O direito do DESTINATÁRIO ao crédito (correção de 04/09/2026)
  *
- * 1. **NFC-e também declara o crédito.** `buildNfcePayloadFromSale` passa pelo
- *    mesmo `resolveItemsForSale`, então uma venda de PDV com CSOSN `101` sai
- *    com `pCredSN`/`vCredICMSSN` — e o consumidor final nunca pode aproveitar
- *    crédito (o art. 23, §1º, exige destino a comercialização ou
- *    industrialização). Não há caso especial aqui porque a alternativa seria
- *    emitir `ICMSSN101` **sem** os campos, que é rejeição de schema: o que está
- *    errado nesse cenário é o CSOSN do cadastro (deveria ser `102`), e o motor
- *    honra o CSOSN como honra em todo o resto.
- * 2. **A nota de devolução recalcula o crédito com a alíquota de hoje.**
+ * B8 declarava `pCredSN`/`vCredICMSSN` sempre que o produto estava num grupo
+ * com CSOSN `101`/`201`, **sem olhar quem compra** — e registrou isso como
+ * achado adjacente, para tarefa própria. Esta é a tarefa.
+ *
+ * O direito ao crédito não é do produto nem do vendedor: é do **comprador**.
+ * O art. 23, *caput*, da LC 123/2006 é categórico ("As microempresas e as
+ * empresas de pequeno porte optantes pelo Simples Nacional não farão jus à
+ * apropriação nem transferirão créditos (…)"), e o §1º nomeia quem tem a
+ * exceção: "As pessoas jurídicas (…) **não optantes** pelo Simples Nacional
+ * terão direito a crédito (…), desde que destinadas à comercialização ou
+ * industrialização (…)". A mesma mercadoria com o mesmo CSOSN transfere
+ * crédito a um cliente de Regime Normal e nenhum a um optante — e é por isso
+ * que uma nota `101` para optante declara um benefício que não existe.
+ *
+ * Por isso, quando o cliente **está cadastrado** como optante
+ * (`contacts.regime_tributario` ∈ {1, 2, 4}), a emissão é **recusada** com
+ * mensagem acionável, em vez de sair com o crédito. Mesma família de recusa de
+ * B1/B2/B5/B8: o cadastro se contradiz, e emitir seria pior que parar.
+ *
+ * **Só recusa quando sabe.** Regime nulo é "não sei", não "cadastro
+ * incompleto", e segue emitindo — ao contrário da alíquota nula logo abaixo,
+ * que é campo obrigatório do XML. A assimetria é deliberada e está explicada
+ * em `regimeOptantePeloSimples`.
+ *
+ * **Sem checagem no sentido contrário**: produto com CSOSN `102`/`202` vendido
+ * a um cliente elegível não é lacuna. Não transferir crédito é decisão
+ * legítima do remetente pelo art. 23, §4º, II, como B8 já registrou.
+ *
+ * ## Três coisas que este cálculo não trata, e por quê
+ *
+ * 1. **NFC-e não faz a checagem do destinatário.** `buildNfcePayloadFromSale`
+ *    passa pelo mesmo `resolveItemsForSale`, mas com
+ *    `verificaDireitoAoCreditoDoDestinatario: false` — decisão de escopo, não
+ *    esquecimento: a NFC-e declara `consumidor_final: 1` sempre, é presencial e
+ *    não exige cliente identificado, e ligar a checagem nela contradiria a
+ *    decisão de design já tomada para o modelo 65. Segue valendo o que B8
+ *    registrou: uma venda de PDV com CSOSN `101` sai com
+ *    `pCredSN`/`vCredICMSSN` que o consumidor final nunca aproveita, e o que
+ *    está errado nesse cenário é o CSOSN do cadastro (deveria ser `102`).
+ * 2. **O "destinadas à comercialização ou industrialização" do §1º continua
+ *    sem checagem.** É a segunda condição do dispositivo, e a Resposta a
+ *    Consulta 30793/2024 da SEFAZ/SP a cita junto com a primeira ao listar os
+ *    casos de CSOSN `102`: "operações que destinam mercadorias a não
+ *    contribuintes; a optantes pelo simples nacional; etc.". Ela ficou de
+ *    fora porque **este cadastro não consegue respondê-la**: o campo mais
+ *    próximo é `indicadorIe`, e ele é opcional e nulo na imensa maioria dos
+ *    contatos já cadastrados — `resolveTipoCliente` lê qualquer coisa que não
+ *    seja `"1"` como não contribuinte, então usá-lo aqui recusaria emissões de
+ *    clientes que são contribuintes e só têm o campo em branco. Seria
+ *    exatamente o oposto do "só recusa quando sabe" que rege esta checagem.
+ *    Fica registrado como limitação conhecida, não como pendência silenciosa.
+ * 3. **A nota de devolução recalcula o crédito com a alíquota de hoje.**
  *    `buildReturnNfePayload` também reaproveita `resolveItemsForSale`, e a
  *    alíquota da filial muda a cada virada de faixa de RBT12 — na prática, todo
  *    mês. Uma devolução em novembro de uma venda de setembro reverte um crédito
@@ -902,16 +1010,52 @@ type CreditoSimples =
  *    IPI, com a mesma correção certa: fazer a devolução ler
  *    `fiscal_document_items` (onde o percentual declarado está gravado desde
  *    B8) em vez de recalcular. É tarefa própria, e vale para os três de uma vez.
+ *
+ *    A checagem de regime do destinatário **herda a mesma limitação**, de
+ *    propósito: a devolução lê `contacts.regime_tributario` como ele está hoje,
+ *    não como estava na nota original. Um cliente que saiu do Simples entre a
+ *    venda e a devolução passa a ser elegível retroativamente (ou deixa de
+ *    ser), e nenhuma das duas notas sabe disso. É a quinta ocorrência do mesmo
+ *    problema — MVA, IPI, `pCredSN`, alíquota interestadual e agora esta —, e
+ *    a correção continua sendo uma só.
  */
 function resolveCreditoSimples(input: {
   group: TaxGroup;
   branch: SaleForInvoiceBranch;
+  /**
+   * O destinatário, quando o documento permite verificar a elegibilidade dele
+   * — `null` na NFC-e, por decisão de escopo (ver `ResolveItemsOptions`).
+   */
+  contact: SaleForInvoiceContact | null;
   situacaoTributaria: string | null;
   /** Valor bruto do item — o "valor da operação" sobre o qual o crédito incide. */
   base: number;
 }): CreditoSimples {
-  const { group, branch, situacaoTributaria, base } = input;
+  const { group, branch, contact, situacaoTributaria, base } = input;
   const aliquota = branch.aliquotaCreditoIcmsSimples;
+
+  /**
+   * A elegibilidade do **destinatário**, antes da alíquota da filial — porque
+   * é a pergunta anterior: não adianta ter o número certo se aquela operação
+   * não transfere crédito nenhum (correção de 04/09/2026).
+   *
+   * A checagem é estritamente afirmativa: só recusa quando o cadastro **diz**
+   * que o cliente é optante (`regimeOptantePeloSimples`). Regime nulo, vazio ou
+   * desconhecido segue emitindo, que é o comportamento de B8 — ver a nota sobre
+   * lista de inclusão em `taxSituations.ts`.
+   */
+  if (contact && regimeOptantePeloSimples(contact.regimeTributario)) {
+    return {
+      ok: false,
+      reason:
+        `o CSOSN ${situacaoTributaria} do grupo tributário "${group.name}" transfere crédito de ICMS do ` +
+        `Simples Nacional, mas o cliente "${contact.name}" está cadastrado como optante pelo Simples ` +
+        `Nacional — e o optante não faz jus a esse crédito (art. 23, caput e §1º, da LC 123/2006, que só ` +
+        `dá o direito às pessoas jurídicas NÃO optantes). Cadastre o produto num grupo tributário com ` +
+        `CSOSN 102 ou 202 (sem permissão de crédito) para vender a este tipo de cliente, ou corrija o ` +
+        `regime tributário do cliente em Clientes e Fornecedores, se ele estiver errado.`,
+    };
+  }
 
   if (aliquota === null) {
     return {
@@ -1139,7 +1283,12 @@ export function buildNfePayloadFromSale(
     tipoCliente,
   };
 
-  const resolved = resolveItemsForSale(sale, rules, query, mvaRules);
+  // NF-e de venda: destinatário identificado e obrigatório (validado acima), e
+  // é dele que depende o direito ao crédito do Simples — ver
+  // `ResolveItemsOptions`.
+  const resolved = resolveItemsForSale(sale, rules, query, mvaRules, {
+    verificaDireitoAoCreditoDoDestinatario: true,
+  });
   if (!resolved.ok) return resolved;
   const {
     cfop,
@@ -1293,7 +1442,12 @@ export function buildNfcePayloadFromSale(
     tipoCliente: "consumidor_final",
   };
 
-  const resolved = resolveItemsForSale(sale, rules, query, mvaRules);
+  // NFC-e: sem checagem de elegibilidade do destinatário, por decisão de
+  // escopo — o modelo 65 é venda presencial a consumidor final e não exige
+  // cliente identificado. Ver `ResolveItemsOptions`.
+  const resolved = resolveItemsForSale(sale, rules, query, mvaRules, {
+    verificaDireitoAoCreditoDoDestinatario: false,
+  });
   if (!resolved.ok) return resolved;
   const {
     cfop,
@@ -1455,7 +1609,12 @@ export function buildReturnNfePayload(
     payments: [],
   };
 
-  const resolved = resolveItemsForSale(asSale, rules, query, mvaRules);
+  // Devolução: mesma checagem da venda original, porque é o mesmo cliente
+  // identificado — se aquela venda não podia transferir crédito, esta nota não
+  // pode revertê-lo.
+  const resolved = resolveItemsForSale(asSale, rules, query, mvaRules, {
+    verificaDireitoAoCreditoDoDestinatario: true,
+  });
   if (!resolved.ok) return resolved;
   const {
     cfop,

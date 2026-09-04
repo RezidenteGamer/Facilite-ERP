@@ -28,6 +28,7 @@ export function contactInputFromFormValues(values: Record<string, string>): NewC
     whatsapp: values.whatsapp || undefined,
     inscricaoEstadual: values.inscricaoEstadual || undefined,
     indicadorIe: values.indicadorIe || undefined,
+    regimeTributario: values.regimeTributario || undefined,
     codigoIbgeMunicipio: values.codigoIbgeMunicipio || undefined,
   };
 }

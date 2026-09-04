@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildNfcePayloadFromSale,
   buildNfePayloadFromSale,
+  buildReturnNfePayload,
   type SaleForInvoice,
   type SaleForInvoiceItem,
+  type SaleReturnForInvoice,
 } from "@fiscal-core/invoiceMapping.ts";
 import type { MvaRuleRow } from "@fiscal-core/mvaRules.ts";
 import type { TaxGroup } from "@fiscal-core/taxGroups.ts";
@@ -13,6 +16,11 @@ import type { TaxRuleRow } from "@fiscal-core/taxRules.ts";
  * Bateria do Simples Nacional (B8, 03/09/2026): o crédito de ICMS do CSOSN
  * `101`/`201` (`pCredSN`/`vCredICMSSN`) e a dedução do ICMS próprio no ST dos
  * CSOSN `201`/`202`, que B2 tinha deixado registrada como limitação.
+ *
+ * Em 04/09/2026 ganhou o último bloco: a **elegibilidade do destinatário** ao
+ * crédito. O art. 23 da LC 123/2006 só dá o direito a quem **não** é optante
+ * pelo Simples, e B8 declarava o crédito sem olhar o cliente — o achado
+ * adjacente que ela própria registrou para tarefa própria.
  *
  * Arquivo separado das outras três pelo mesmo critério que já separou
  * `invoiceTaxes` (o próprio), `invoiceTaxesSt` (o ST) e `invoiceTaxesQtde` (o ad
@@ -121,7 +129,17 @@ function item(group: TaxGroup, overrides: Partial<SaleForInvoiceItem> = {}): Sal
 
 function sale(
   items: SaleForInvoiceItem[],
-  options: { ufDestino?: string; regime?: string; credito?: number | null } = {},
+  options: {
+    ufDestino?: string;
+    regime?: string;
+    credito?: number | null;
+    /**
+     * CRT do **cliente**. `undefined` deixa o cadastro como estava antes de
+     * 04/09/2026 (nulo = "não sei"); os testes que tratam da elegibilidade do
+     * destinatário passam `"1"`, `"2"`, `"3"` ou `"4"` explicitamente.
+     */
+    regimeCliente?: string | null;
+  } = {},
 ): SaleForInvoice {
   const ufDestino = options.ufDestino ?? "SP";
   const total = items.reduce((sum, i) => sum + i.totalAmount, 0);
@@ -150,6 +168,7 @@ function sale(
       document: "11222333000181",
       inscricaoEstadual: "987654321",
       indicadorIe: "1",
+      regimeTributario: options.regimeCliente ?? null,
       logradouro: "Rua Dois",
       numero: "20",
       bairro: "Centro",
@@ -170,6 +189,7 @@ type Opcoes = {
   ufDestino?: string;
   regime?: string;
   credito?: number | null;
+  regimeCliente?: string | null;
 };
 
 /** Emite e devolve o primeiro item do payload, falhando alto se a montagem recusar. */
@@ -179,6 +199,7 @@ function primeiroItem(group: TaxGroup, options: Opcoes = {}) {
     ufDestino: options.ufDestino,
     regime: options.regime ?? regra.regime,
     credito: options.credito,
+    regimeCliente: options.regimeCliente,
   });
   const resultado = buildNfePayloadFromSale(vendaMontada, [regra], options.mvaRules ?? [MVA_CORINGA]);
   if (!resultado.ok) throw new Error(`Emissão recusada: ${resultado.errors.join(" | ")}`);
@@ -193,6 +214,7 @@ function errosDe(group: TaxGroup, options: Opcoes = {}): string[] {
       ufDestino: options.ufDestino,
       regime: options.regime ?? regra.regime,
       credito: options.credito,
+      regimeCliente: options.regimeCliente,
     }),
     [regra],
     options.mvaRules ?? [MVA_CORINGA],
@@ -565,5 +587,204 @@ describe("regressões do Regime Normal — nada de B1/B2 mudou", () => {
     expect(linha.icms_valor).toBe(104.99);
     expect(linha.icms_base_calculo_st).toBe(816.62);
     expect(linha.icms_valor_st).toBe(42);
+  });
+});
+
+/**
+ * A elegibilidade do destinatário (correção de 04/09/2026).
+ *
+ * LC 123/2006, art. 23: o *caput* veda ao optante "a apropriação" de créditos
+ * do Simples, e o §1º dá o direito só às pessoas jurídicas "não optantes". Uma
+ * NF-e com CSOSN `101`/`201` para um cliente optante declararia um benefício
+ * que não existe naquela operação — e é isso que passa a ser recusado.
+ */
+describe("crédito de ICMS do Simples Nacional — o direito do destinatário", () => {
+  it("recusa CSOSN 101 quando o cliente está cadastrado como optante (CRT 1)", () => {
+    const [erro] = errosDe(taxGroup(), { regimeCliente: "1" });
+
+    expect(erro).toContain("Cliente Contribuinte LTDA");
+    expect(erro).toContain("Simples com crédito");
+    expect(erro).toContain("CSOSN 101");
+    expect(erro).toContain("optante pelo Simples");
+    // A base legal na própria mensagem, como nas recusas de B1/B2/B5/B8.
+    expect(erro).toContain("art. 23");
+    expect(erro).toContain("LC 123/2006");
+    // E o que fazer: os dois caminhos de saída.
+    expect(erro).toContain("CSOSN 102 ou 202");
+    expect(erro).toContain("Clientes e Fornecedores");
+  });
+
+  it("recusa CSOSN 201 pelo mesmo motivo — o crédito é a dimensão, não o ST", () => {
+    const [erro] = errosDe(taxGroup({ csosn: "201" }), { regimeCliente: "1" });
+
+    expect(erro).toContain("CSOSN 201");
+    expect(erro).toContain("optante pelo Simples");
+  });
+
+  it("recusa também o CRT 2 (Simples com excesso de sublimite)", () => {
+    // Continua sendo optante: o excesso de sublimite muda o recolhimento do
+    // ICMS, não a condição de optante do art. 23.
+    expect(errosDe(taxGroup(), { regimeCliente: "2" })[0]).toContain("optante pelo Simples");
+  });
+
+  it("recusa também o CRT 4 (MEI)", () => {
+    // O `4` entrou no leiaute pela NT 2024.001. O MEI é microempresa optante
+    // por definição, então está tão fora do §1º quanto um CRT 1.
+    expect(errosDe(taxGroup(), { regimeCliente: "4" })[0]).toContain("optante pelo Simples");
+  });
+
+  it("cliente sem regime cadastrado continua emitindo — nulo é 'não sei', não recusa", () => {
+    // A regressão central da correção: é o estado de TODO contato no dia em que
+    // a migration roda. Recusar aqui quebraria toda emissão 101/201 que hoje
+    // funciona.
+    const { item: linha } = primeiroItem(taxGroup(), { regimeCliente: null });
+
+    expect(linha.icms_aliquota_credito_simples).toBe(1.36);
+    expect(linha.icms_valor_credito_simples).toBe(13.6);
+  });
+
+  it("cliente de Regime Normal (CRT 3) emite o crédito normalmente", () => {
+    // É exatamente o destinatário do §1º: "pessoas jurídicas (…) não optantes
+    // pelo Simples Nacional terão direito a crédito".
+    const { item: linha } = primeiroItem(taxGroup(), { regimeCliente: "3" });
+
+    expect(linha.icms_aliquota_credito_simples).toBe(1.36);
+    expect(linha.icms_valor_credito_simples).toBe(13.6);
+  });
+
+  it("regime desconhecido não recusa — lista de inclusão, como as demais", () => {
+    // Código que este motor não conhece (cadastro digitado errado, tabela nova)
+    // segue o comportamento anterior à correção, em vez de recusar por engano.
+    const { item: linha } = primeiroItem(taxGroup(), { regimeCliente: "7" });
+
+    expect(linha.icms_valor_credito_simples).toBe(13.6);
+  });
+
+  it("CSOSN 102 vendido a cliente optante nunca recusa por este motivo", () => {
+    // Não transferir crédito a quem não pode aproveitá-lo é o cadastro certo,
+    // não uma lacuna — art. 23, §4º, II.
+    const { item: linha } = primeiroItem(taxGroup({ csosn: "102", name: "Simples sem crédito" }), {
+      regimeCliente: "1",
+    });
+
+    expect(linha.icms_situacao_tributaria).toBe("102");
+    expect(linha.icms_aliquota_credito_simples).toBeUndefined();
+    expect(linha.icms_valor_credito_simples).toBeUndefined();
+  });
+
+  it("CSOSN 202 vendido a cliente optante emite, com o ST intacto", () => {
+    const { item: linha } = primeiroItem(taxGroup({ csosn: "202", name: "Simples ST sem crédito" }), {
+      regimeCliente: "1",
+    });
+
+    expect(linha.icms_valor_credito_simples).toBeUndefined();
+    // A dedução do próprio não destacado (B8) segue valendo: 1400 × 18% − 180.
+    expect(linha.icms_valor_st).toBe(72);
+  });
+
+  it("a recusa vem antes da alíquota da filial, e é a que o operador lê", () => {
+    // Com os dois cadastros errados ao mesmo tempo, a mensagem útil é a da
+    // elegibilidade: cadastrar a alíquota não faria a nota sair.
+    const erros = errosDe(taxGroup(), { regimeCliente: "1", credito: null });
+
+    expect(erros).toHaveLength(1);
+    expect(erros[0]).toContain("optante pelo Simples");
+    expect(erros[0]).not.toContain("Configurações");
+  });
+
+  it("nomeia o item quando só um dos dois produtos da nota tem CSOSN com crédito", () => {
+    const vendaMontada = sale(
+      [
+        item(taxGroup({ csosn: "102", name: "Sem crédito" })),
+        item(taxGroup({ id: "g2", name: "Com crédito" })),
+      ],
+      { regimeCliente: "1" },
+    );
+    const resultado = buildNfePayloadFromSale(vendaMontada, [REGRA_SIMPLES_INTERNA], [MVA_CORINGA]);
+
+    if (resultado.ok) throw new Error("Esperava recusa, mas a emissão passou.");
+    expect(resultado.errors).toHaveLength(1);
+    expect(resultado.errors[0]).toContain("Com crédito");
+    expect(resultado.errors[0]).not.toContain("Sem crédito");
+  });
+});
+
+describe("crédito de ICMS do Simples Nacional — quem faz a checagem e quem não faz", () => {
+  /** NFC-e: sempre interna, sempre consumidor final — ver `buildNfcePayloadFromSale`. */
+  const REGRA_NFCE: TaxRuleRow = {
+    id: "venda-nfce",
+    regime: "1",
+    naturezaOperacao: "venda",
+    ufOrigem: "SP",
+    ufDestino: "SP",
+    tipoCliente: "consumidor_final",
+    cfop: "5102",
+  };
+
+  /** A devolução da mesma venda: CFOP de entrada. */
+  const REGRA_DEVOLUCAO: TaxRuleRow = {
+    id: "devolucao-simples-interna",
+    regime: "1",
+    naturezaOperacao: "devolucao",
+    ufOrigem: "SP",
+    ufDestino: "SP",
+    tipoCliente: "contribuinte",
+    cfop: "1202",
+  };
+
+  /** A devolução da venda montada, com o mesmo cliente e os mesmos itens. */
+  function devolucaoDe(vendaMontada: SaleForInvoice): SaleReturnForInvoice {
+    return {
+      code: "D-0001",
+      saleCode: vendaMontada.code,
+      issueDate: vendaMontada.issueDate,
+      totalAmount: vendaMontada.totalAmount,
+      discountAmount: 0,
+      originalChave: null,
+      branch: vendaMontada.branch,
+      contact: vendaMontada.contact,
+      items: vendaMontada.items,
+    };
+  }
+
+  it("NFC-e com cliente optante e CSOSN 101 continua emitindo — decisão de escopo", () => {
+    // O modelo 65 declara `consumidor_final: 1` sempre, é presencial e não
+    // exige cliente identificado; ligar a checagem nele contradiria a decisão
+    // de design já tomada para ele. A consequência que B8 registrou (o crédito
+    // sai numa nota que ninguém aproveita) segue sendo do CSOSN do cadastro.
+    const resultado = buildNfcePayloadFromSale(
+      sale([item(taxGroup())], { regimeCliente: "1" }),
+      [REGRA_NFCE],
+      [MVA_CORINGA],
+    );
+
+    if (!resultado.ok) throw new Error(`Emissão recusada: ${resultado.errors.join(" | ")}`);
+    expect(resultado.payload.items[0].icms_valor_credito_simples).toBe(13.6);
+  });
+
+  it("devolução herda a checagem: cliente optante recusa também na nota de entrada", () => {
+    // Mesmo cliente identificado da venda original — se aquela venda não podia
+    // transferir crédito, esta nota não pode reverter o que não existiu.
+    const resultado = buildReturnNfePayload(
+      devolucaoDe(sale([item(taxGroup())], { regimeCliente: "1" })),
+      [REGRA_DEVOLUCAO],
+      [MVA_CORINGA],
+    );
+
+    if (resultado.ok) throw new Error("Esperava recusa, mas a emissão passou.");
+    expect(resultado.errors[0]).toContain("optante pelo Simples");
+    expect(resultado.errors[0]).toContain("art. 23");
+  });
+
+  it("devolução de cliente de Regime Normal continua revertendo o crédito", () => {
+    const resultado = buildReturnNfePayload(
+      devolucaoDe(sale([item(taxGroup())], { regimeCliente: "3" })),
+      [REGRA_DEVOLUCAO],
+      [MVA_CORINGA],
+    );
+
+    if (!resultado.ok) throw new Error(`Emissão recusada: ${resultado.errors.join(" | ")}`);
+    expect(resultado.payload.finalidade_emissao).toBe(4);
+    expect(resultado.payload.items[0].icms_valor_credito_simples).toBe(13.6);
   });
 });

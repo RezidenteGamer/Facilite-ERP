@@ -120,6 +120,12 @@ function sale(items: SaleForInvoiceItem[]): SaleForInvoice {
       document: "11222333000181",
       inscricaoEstadual: "987654321",
       indicadorIe: "1",
+      // Regime do cliente NÃO cadastrado, de propósito: estas baterias são
+      // anteriores à coluna (04/09/2026) e continuam descrevendo o cadastro
+      // de quem nunca a preencheu. Nulo é "não sei" e não recusa nada — é a
+      // regressão que prova que a checagem nova não quebra o que já emitia,
+      // inclusive nos CSOSN 101/201 que estas baterias exercitam.
+      regimeTributario: null,
       logradouro: "Rua Dois",
       numero: "20",
       bairro: "Centro",

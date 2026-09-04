@@ -32,6 +32,31 @@ const INDICADOR_IE_OPTIONS: { value: string; label: string }[] = [
   { value: "9", label: "9 — Não contribuinte" },
 ];
 
+/**
+ * CRT do contato — a dimensão que decide se ele pode aproveitar o crédito de
+ * ICMS do Simples Nacional (correção de 04/09/2026).
+ *
+ * Não confundir com o indicador de IE logo acima: aquele diz se o cliente tem
+ * inscrição estadual, este diz sob que regime ele é tributado. Um optante pelo
+ * Simples tem IE e é contribuinte como qualquer outro — o que ele não tem é o
+ * direito ao crédito do art. 23 da LC 123/2006, e é por isso que uma NF-e com
+ * CSOSN 101/201 para ele é recusada pelo motor fiscal com mensagem própria.
+ *
+ * Os códigos são os do CRT da NF-e. O `4` (MEI) só existe aqui, e não em
+ * filiais: o CRT da filial vai para o XML e emitir como MEI está fora do
+ * escopo do sistema, enquanto este valor nunca sai do banco. Ver a migration.
+ *
+ * Opção vazia porque o campo é opcional e **nulo não recusa nada**: é "não
+ * sei", não "cadastro incompleto".
+ */
+const REGIME_TRIBUTARIO_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Não informado" },
+  { value: "3", label: "3 — Regime Normal" },
+  { value: "1", label: "1 — Simples Nacional" },
+  { value: "2", label: "2 — Simples Nacional, excesso de sublimite" },
+  { value: "4", label: "4 — Simples Nacional (MEI)" },
+];
+
 type ModalState = "none" | "new" | "edit";
 
 /** Módulo "Clientes e Fornecedores" — piloto do motor genérico de metadados. */
@@ -53,6 +78,7 @@ export default function CustomersPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>("none");
   const [formIndicadorIe, setFormIndicadorIe] = useState("");
+  const [formRegimeTributario, setFormRegimeTributario] = useState("");
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
   const [pendingPhotoPreview, setPendingPhotoPreview] = useState<string | null>(null);
@@ -179,9 +205,21 @@ export default function CustomersPage() {
     onChange: setFormIndicadorIe,
   };
 
+  const regimeTributarioSelect = {
+    key: "regimeTributario",
+    label: "Regime tributário",
+    value: formRegimeTributario,
+    options: REGIME_TRIBUTARIO_OPTIONS,
+    onChange: setFormRegimeTributario,
+  };
+
   async function handleCreateSubmit(values: Record<string, string>) {
     const created = await createContact(
-      contactInputFromFormValues({ ...values, indicadorIe: formIndicadorIe }),
+      contactInputFromFormValues({
+        ...values,
+        indicadorIe: formIndicadorIe,
+        regimeTributario: formRegimeTributario,
+      }),
     );
 
     if (pendingPhotoFile) {
@@ -215,6 +253,14 @@ export default function CustomersPage() {
       whatsapp: values.whatsapp || undefined,
       inscricaoEstadual: values.inscricaoEstadual || undefined,
       indicadorIe: formIndicadorIe || undefined,
+      // Sem o `|| undefined` dos vizinhos, e de propósito: `toUpdateRow` só
+      // manda a coluna quando a chave existe no patch, então `undefined` faria
+      // "Não informado" **não limpar** um regime já gravado — a string vazia
+      // vira `null` lá e limpa. Importa aqui mais que nos outros campos porque
+      // é a saída que a própria recusa de emissão manda o operador usar
+      // ("corrija o regime tributário do cliente"): um cliente marcado por
+      // engano como optante ficaria travado sem poder desmarcar.
+      regimeTributario: formRegimeTributario,
       codigoIbgeMunicipio: values.codigoIbgeMunicipio || undefined,
     });
     setModal("none");
@@ -274,6 +320,7 @@ export default function CustomersPage() {
               tone: "positive" as const,
               onClick: () => {
                 setFormIndicadorIe("");
+                setFormRegimeTributario("");
                 setModal("new");
               },
             },
@@ -283,6 +330,7 @@ export default function CustomersPage() {
               disabled: !selected || !canEdit,
               onClick: () => {
                 setFormIndicadorIe(selected?.indicadorIe ?? "");
+                setFormRegimeTributario(selected?.regimeTributario ?? "");
                 setModal("edit");
               },
             },
@@ -351,7 +399,7 @@ export default function CustomersPage() {
             imageUrl: pendingPhotoPreview,
             onFileSelected: handleNewPhotoSelected,
           }}
-          selectFields={[indicadorIeSelect]}
+          selectFields={[indicadorIeSelect, regimeTributarioSelect]}
           fieldExtras={contactFieldExtras}
           onSubmit={handleCreateSubmit}
           onCancel={() => {
@@ -371,7 +419,7 @@ export default function CustomersPage() {
             uploading: photoUploading,
             onFileSelected: (file) => handleExistingPhotoSelected(selected.id, file),
           }}
-          selectFields={[indicadorIeSelect]}
+          selectFields={[indicadorIeSelect, regimeTributarioSelect]}
           fieldExtras={contactFieldExtras}
           initialValues={{
             name: selected.name,

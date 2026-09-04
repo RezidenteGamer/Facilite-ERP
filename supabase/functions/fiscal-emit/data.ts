@@ -95,6 +95,8 @@ type ContactRow = {
   document: string;
   inscricao_estadual: string | null;
   indicador_ie: string | null;
+  /** Aceita `undefined`: a linha pode vir de um banco onde a migration de 04/09/2026 ainda não rodou. */
+  regime_tributario: string | null | undefined;
   logradouro: string | null;
   numero: string | null;
   bairro: string | null;
@@ -186,6 +188,13 @@ function toInvoiceContact(contact: ContactRow | null): SaleForInvoice["contact"]
     document: contact.document,
     inscricaoEstadual: contact.inscricao_estadual,
     indicadorIe: contact.indicador_ie,
+    // `?? null` porque o valor tem de significar "não sei" — que é o que não
+    // recusa a emissão do CSOSN 101/201 — em vez de `undefined`. A coluna está
+    // nomeada no `select`, então enquanto a migration de 04/09/2026 não rodar
+    // o PostgREST responde 400 e nenhuma nota é montada (ver a ordem de
+    // aplicação na migration); o `?? null` cobre o resto: qualquer resposta que
+    // venha sem o campo cai no lado seguro em vez de vazar `undefined`.
+    regimeTributario: contact.regime_tributario ?? null,
     logradouro: contact.logradouro,
     numero: contact.numero,
     bairro: contact.bairro,
@@ -232,7 +241,7 @@ export async function readSaleForInvoice(admin: SupabaseClient, saleId: string):
     .select(
       `branch_id, status, code, issue_date, subtotal_amount, total_amount, discount_amount, freight_amount, operation_type,
        branch:branches(cnpj, name, inscricao_estadual, regime_tributario, aliquota_credito_icms_simples, logradouro, numero, bairro, municipio, uf, cep),
-       contact:contacts(name, document, inscricao_estadual, indicador_ie, logradouro, numero, bairro, municipio, uf, cep, phone),
+       contact:contacts(name, document, inscricao_estadual, indicador_ie, regime_tributario, logradouro, numero, bairro, municipio, uf, cep, phone),
        items:sale_items(quantity, unit_price, discount_amount, total_amount, ${PRODUCT_COLUMNS}),
        payments:sale_payments(method, amount)`,
     )
@@ -284,7 +293,7 @@ export async function readSaleReturnForInvoice(
       `branch_id, status, code, issue_date, total_amount,
        sale:sales(code,
          branch:branches(cnpj, name, inscricao_estadual, regime_tributario, aliquota_credito_icms_simples, logradouro, numero, bairro, municipio, uf, cep),
-         contact:contacts(name, document, inscricao_estadual, indicador_ie, logradouro, numero, bairro, municipio, uf, cep, phone),
+         contact:contacts(name, document, inscricao_estadual, indicador_ie, regime_tributario, logradouro, numero, bairro, municipio, uf, cep, phone),
          invoices:fiscal_documents(status, chave, updated_at)),
        items:sale_return_items(quantity, unit_price, discount_amount, total_amount, ${PRODUCT_COLUMNS})`,
     )

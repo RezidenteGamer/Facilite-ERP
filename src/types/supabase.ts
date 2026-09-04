@@ -487,6 +487,7 @@ export type Database = {
           numero: string | null
           phone: string | null
           photo_url: string | null
+          regime_tributario: string | null
           rg: string | null
           uf: string | null
           updated_at: string
@@ -513,6 +514,7 @@ export type Database = {
           numero?: string | null
           phone?: string | null
           photo_url?: string | null
+          regime_tributario?: string | null
           rg?: string | null
           uf?: string | null
           updated_at?: string
@@ -539,6 +541,7 @@ export type Database = {
           numero?: string | null
           phone?: string | null
           photo_url?: string | null
+          regime_tributario?: string | null
           rg?: string | null
           uf?: string | null
           updated_at?: string
@@ -3463,6 +3466,7 @@ export type Database = {
           numero: string | null
           phone: string | null
           photo_url: string | null
+          regime_tributario: string | null
           rg: string | null
           uf: string | null
           updated_at: string

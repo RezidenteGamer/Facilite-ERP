@@ -235,6 +235,63 @@ export function icmsCalculaCreditoSimples(situacaoTributaria: string | null | un
 }
 
 /**
+ * CRT (Código de Regime Tributário) de quem é **optante pelo Simples
+ * Nacional** — e por isso **não faz jus** ao crédito de ICMS que um outro
+ * optante lhe transferiria (correção de 04/09/2026).
+ *
+ * É o único conjunto deste arquivo que não fala de CST/CSOSN: fala de um
+ * cadastro de pessoa (`branches.regime_tributario` para quem emite,
+ * `contacts.regime_tributario` para quem compra). Mora aqui mesmo assim porque
+ * é uma pergunta da mesma família das outras — "este código permite declarar
+ * isto?" — e a resposta dela decide, junto com `icmsCalculaCreditoSimples`, se
+ * `pCredSN`/`vCredICMSSN` podem existir naquela nota.
+ *
+ * A base legal é o art. 23 da LC 123/2006. O **caput** é categórico: "As
+ * microempresas e as empresas de pequeno porte optantes pelo Simples Nacional
+ * não farão jus à apropriação nem transferirão créditos relativos a impostos
+ * ou contribuições abrangidos pelo Simples Nacional." E o **§1º** abre a
+ * exceção nomeando quem: "As pessoas jurídicas e aquelas a elas equiparadas
+ * pela legislação tributária **não optantes** pelo Simples Nacional terão
+ * direito a crédito correspondente ao ICMS incidente sobre as suas aquisições
+ * de mercadorias de microempresa ou empresa de pequeno porte optante pelo
+ * Simples Nacional, desde que destinadas à comercialização ou industrialização
+ * (…)". Conferido no texto do Planalto e, de forma independente, na Resposta a
+ * Consulta Tributária 30793/2024 da SEFAZ/SP (item 7.2: o CSOSN `102` é o
+ * código "como no caso de operações que destinam mercadorias a não
+ * contribuintes; **a optantes pelo simples nacional**; etc.").
+ *
+ * - `1` Simples Nacional e `2` Simples Nacional com excesso de sublimite —
+ *   os dois CRT que `branches.regime_tributario` já usava;
+ * - `4` Simples Nacional — **MEI**, que entrou no leiaute pela NT 2024.001 e
+ *   passou a ser exigido do MEI emitente em abril de 2025. O MEI é
+ *   microempresa optante por definição, então um cliente cadastrado com `4`
+ *   está tão fora do §1º quanto um `1`.
+ *
+ * Fica de fora o `3` (Regime Normal), que é justamente o "não optante" do §1º.
+ *
+ * Lista de **inclusão**, como as de ST, crédito e IPI, e pelo mesmo motivo
+ * delas: código desconhecido — ou **ausente**, que é o caso de todo contato
+ * cadastrado antes desta correção — devolve `false`. Aqui isso é a decisão
+ * central da tarefa: nulo não é cadastro incompleto, é "não sei", e a recusa
+ * só acontece quando o sistema **sabe** que o cliente é optante. Recusar no
+ * nulo quebraria toda emissão de CSOSN `101`/`201` que hoje funciona — e, ao
+ * contrário da alíquota nula da filial (campo **obrigatório** no XML daquele
+ * grupo, sem o qual a nota já era inválida), uma nota `101` para um cliente de
+ * Regime Normal é perfeitamente válida.
+ */
+const REGIMES_OPTANTES_SIMPLES = new Set(["1", "2", "4"]);
+
+/**
+ * Este CRT é de optante pelo Simples Nacional?
+ *
+ * Nulo/vazio/desconhecido devolve `false` — ver a nota sobre lista de inclusão
+ * no conjunto acima.
+ */
+export function regimeOptantePeloSimples(regimeTributario: string | null | undefined): boolean {
+  return REGIMES_OPTANTES_SIMPLES.has(normalizeCode(regimeTributario));
+}
+
+/**
  * CSOSN em que o ICMS da operação própria **existe mas não é destacado**, e
  * por isso entra no cálculo do ICMS-ST como dedução ainda que nenhum `vICMS`
  * apareça no XML (B8, 03/09/2026).

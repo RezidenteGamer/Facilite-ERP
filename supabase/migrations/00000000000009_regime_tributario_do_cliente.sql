@@ -1,0 +1,145 @@
+-- Correcao — o regime tributario do CLIENTE, e o credito de ICMS do Simples
+-- que so existe para destinatario nao optante (04/09/2026)
+--
+-- Nao e uma tarefa nova do "Minimo pra vender": e a lacuna que a propria
+-- pesquisa de B8 encontrou como achado adjacente ("anexo do cliente"),
+-- registrou no AGENTS.md em 03/09/2026 e deixou para uma tarefa propria, por
+-- estar fora do escopo dela.
+--
+-- ## A LACUNA
+--
+-- B8 ensinou o motor a declarar `pCredSN`/`vCredICMSSN` (campos obrigatorios
+-- dos grupos XML `ICMSSN101`/`ICMSSN201`) sempre que o produto esta num grupo
+-- tributario com CSOSN 101 ou 201, usando a aliquota cadastrada na filial. O
+-- que ele nao olha e **quem compra** — e o direito ao credito depende
+-- exatamente disso.
+--
+-- LC 123/2006, art. 23, caput:
+--
+--   "As microempresas e as empresas de pequeno porte optantes pelo Simples
+--    Nacional nao farao jus a apropriacao nem transferirao creditos relativos
+--    a impostos ou contribuicoes abrangidos pelo Simples Nacional."
+--
+-- e o § 1o, que abre a excecao e diz para quem:
+--
+--   "As pessoas juridicas e aquelas a elas equiparadas pela legislacao
+--    tributaria NAO OPTANTES pelo Simples Nacional terao direito a credito
+--    correspondente ao ICMS incidente sobre as suas aquisicoes de mercadorias
+--    de microempresa ou empresa de pequeno porte optante pelo Simples
+--    Nacional, desde que destinadas a comercializacao ou industrializacao e
+--    observado, como limite, o ICMS efetivamente devido pelas optantes pelo
+--    Simples Nacional em relacao a essas aquisicoes."
+--
+-- Ou seja: a mesma mercadoria, com o mesmo CSOSN cadastrado, transfere credito
+-- para um comprador de Regime Normal e **nao transfere nenhum** para um
+-- comprador optante pelo Simples. Sem saber o regime do cliente, o motor
+-- declarava o beneficio nos dois casos.
+--
+-- Conferido em duas fontes fiscais independentes alem do texto legal:
+--
+--   - SEFAZ/SP, Resposta a Consulta Tributaria 30793/2024, item 7.2: o CSOSN
+--     102 e o codigo "como no caso de operacoes que destinam mercadorias a nao
+--     contribuintes; A OPTANTES PELO SIMPLES NACIONAL; etc.";
+--   - Receita Estadual/RS: o optante transfere credito "desde que a operacao
+--     seja destinada a nao optante e em operacao destinada a comercializacao e
+--     industrializacao".
+--
+-- ## POR QUE UMA COLUNA NOVA, E NAO `indicador_ie`
+--
+-- `contacts` ja tem `indicador_ie` (1 contribuinte / 2 contribuinte isento de
+-- inscricao / 9 nao contribuinte), e ele responde outra pergunta: se o cliente
+-- **tem inscricao estadual**. Sao dimensoes independentes — um optante pelo
+-- Simples Nacional tem IE e e contribuinte de ICMS como qualquer outro; o que
+-- ele nao tem e o direito ao credito do art. 23. Nenhum valor de `indicador_ie`
+-- distingue optante de nao optante, e por isso a coluna e nova.
+--
+-- ## O DOMINIO: os mesmos codigos do CRT, com o 4 do MEI
+--
+-- Os codigos sao os do CRT (Codigo de Regime Tributario) da NF-e, que
+-- `branches.regime_tributario` ja usa desde o baseline:
+--
+--   1 - Simples Nacional
+--   2 - Simples Nacional, excesso de sublimite de receita bruta
+--   3 - Regime Normal
+--   4 - Simples Nacional - Microempreendedor Individual (MEI)
+--
+-- **O 4 e uma decisao desta migration, e diverge da filial de proposito.** Ele
+-- entrou no leiaute pela NT 2024.001 e passou a ser exigido do MEI emitente em
+-- abril de 2025; `branches.regime_tributario` nao o admite hoje porque o valor
+-- da filial vai para o `regime_tributario_emitente` do XML e emitir como MEI
+-- esta fora do escopo do sistema. Aqui o valor **nao vai para o XML**: e so a
+-- resposta a "este cliente e optante?", e um MEI e categoricamente optante.
+-- Deixa-lo de fora obrigaria a cadastrar um MEI como "1" (correto por acaso —
+-- MEI e microempresa optante) ou, pior, a deixar o campo vazio e perder a
+-- recusa em silencio. Se um dia a filial admitir o 4, os dois dominios voltam a
+-- coincidir.
+--
+-- **A constraint nasce com a coluna**, ao contrario do que acontece em
+-- `branches.regime_tributario` — conferido no baseline: la a coluna e `text`
+-- puro, sem `check` nenhum. E o mesmo criterio que B8 aplicou a
+-- `aliquota_credito_icms_simples` ("a constraint nasce com a coluna, ao
+-- contrario da `aliquota_icms` de 19/08/2026, que nasceu sem e obrigou B2 a
+-- recusar em codigo"): a coluna e nova, nao ha dado em producao, e um regime
+-- digitado errado decide se uma nota declara ou nao um beneficio fiscal.
+--
+-- **Nula e caso legitimo, e nao recusa nada.** Nulo aqui nao e cadastro
+-- incompleto: e "nao sei", e a postura e a mesma lista de inclusao que
+-- `taxSituations.ts` usa em toda predicado cuja resposta `true` recusa emissao.
+-- A diferenca em relacao a `aliquota_credito_icms_simples` (nula = recusa) e
+-- que la o campo e **obrigatorio no XML** daquele grupo, e toda nota com CSOSN
+-- 101/201 ja era invalida sem ele; aqui a pergunta e de **elegibilidade
+-- legal**, e uma nota com CSOSN 101 para um cliente de Regime Normal e
+-- perfeitamente valida. Recusar no nulo quebraria, no dia da aplicacao desta
+-- migration, toda emissao 101/201 que hoje funciona — que e exatamente o
+-- argumento que B8 examinou e descartou no caso dela.
+--
+-- ## O QUE ESTA MIGRATION NAO FAZ
+--
+--   - **Nao cria linha em `module_fields`.** O modulo `clientes-fornecedores`
+--     tem tela propria (`CustomersPage`), e nela o campo entra como
+--     `selectFields` — exatamente onde `indicador_ie` ja mora, e pelo mesmo
+--     motivo: `module_fields` nao tem `dataType: 'select'`, e um `<input>` de
+--     texto livre para um dominio de quatro codigos seria pior que um `<select>`
+--     local. Ver o comentario de `RegistryFormModal`.
+--   - **Nao semeia valor nenhum.** A coluna nasce nula em todos os contatos, e
+--     enquanto ninguem cadastrar nada muda: nenhuma emissao que funciona hoje
+--     passa a recusar.
+--   - **Nao mexe em RLS.** `contacts` ja tem as quatro policies por
+--     `has_permission('clientes-fornecedores', ...)` desde o baseline, e policy
+--     e por linha, nao por coluna — mesma constatacao de B1, B5 e B8.
+--   - **Nao muda o CSOSN de nada.** O desenho desta correcao e **recusar**
+--     quando o cadastro se contradiz, nao escolher o CSOSN certo sozinho: nao
+--     ha mecanismo novo de "CSOSN por venda" alem do que ja existe via
+--     `products.tax_group_id`.
+--   - **Nao alcanca a NFC-e.** Ver a decisao de escopo no AGENTS.md e no
+--     cabecalho de `resolveCreditoSimples`.
+--
+-- ## ORDEM DE APLICACAO: esta migration vem ANTES do deploy da `fiscal-emit`
+--
+-- Mesmo motivo de B5 e B8, mas por um ponto so: `data.ts` passou a listar
+-- `regime_tributario` no `select` do cliente (nas duas consultas, venda e
+-- devolucao). Sem a coluna, o PostgREST responde 400 e **nenhuma** nota e
+-- montada. Nao ha coluna nova em `fiscal_document_items` nesta correcao — o
+-- regime do cliente nao vai para o XML nem para o snapshot do documento; o que
+-- ele decide e se `pCredSN`/`vCredICMSSN` podem existir, e esses dois ja sao
+-- gravados desde B8.
+--
+-- Ordem correta: aplicar 5 (B1), 6 (B2), 7 (B5), 8 (B8) e 9 (esta) ->
+-- implantar `fiscal-emit`. As cinco sao aditivas e nao quebram a funcao
+-- implantada hoje.
+
+-- ---------------------------------------------------------------------
+-- Cadastro: o regime tributario, no contato
+-- ---------------------------------------------------------------------
+
+alter table public.contacts
+  add column if not exists regime_tributario text;
+
+alter table public.contacts
+  drop constraint if exists contacts_regime_tributario_check;
+alter table public.contacts
+  add constraint contacts_regime_tributario_check
+  check (regime_tributario is null or regime_tributario in ('1', '2', '3', '4'));
+
+comment on column public.contacts.regime_tributario is
+  'CRT do CLIENTE/FORNECEDOR: 1 = Simples Nacional, 2 = Simples Nacional com excesso de sublimite, 3 = Regime Normal, 4 = Simples Nacional MEI (NT 2024.001). Mesmos codigos de branches.regime_tributario, mais o 4 - ver a migration. NAO vai para o XML: o CRT declarado na nota e o do EMITENTE (a filial). Serve a uma pergunta so, e de elegibilidade legal: o destinatario e optante pelo Simples Nacional? Se for, ele NAO faz jus ao credito de ICMS do art. 23 da LC 123/2006 (caput e par. 1o), e uma NF-e com CSOSN 101 ou 201 para ele declararia um beneficio inexistente - por isso o motor RECUSA a emissao com mensagem propria. Nao confundir com indicador_ie, que diz se o cliente TEM inscricao estadual: um optante pelo Simples pode ter IE e ser contribuinte. Cadastro MANUAL, e NULO e caso legitimo ("nao sei"): nulo nao recusa nada, porque a pergunta e de elegibilidade e nao de campo obrigatorio no XML.';
