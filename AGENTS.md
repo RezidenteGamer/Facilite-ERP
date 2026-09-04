@@ -4174,3 +4174,217 @@ recusaria clientes com o campo em branco); a checagem na NFC-e; a escolha
 automática do CSOSN por venda; a checagem no sentido contrário (`102` a cliente
 elegível); a devolução recalcular com o cadastro de hoje (quinta ocorrência da
 mesma limitação); e o campo no `QuickContactFormModal`.
+
+### Pesquisa: a segunda condição do art. 23, §1º ("destinadas à comercialização ou industrialização") — decisão de **não implementar** (04/09/2026)
+
+Terceira entrada do dia, e a primeira **sem código atrás**. É a outra metade da
+lacuna que a correção anterior fechou pela metade e deixou anotada por escrito:
+o art. 23, §1º, da LC 123/2006 tem **duas** condições cumulativas para o
+crédito de ICMS do Simples existir numa venda; aquela correção fechou a
+primeira (comprador não optante) e registrou a segunda no cabeçalho de
+`resolveCreditoSimples`, item 2 de "três coisas que este cálculo não trata".
+
+Esta tarefa foi abrir aquele item e decidir. A resposta é **não implementar**, e
+não por falta de dado: a pesquisa encontrou a resposta, e ela é que **o cadastro
+do cliente é o lugar errado para esta pergunta**. Uma decisão de não implementar
+vale exatamente o que vale a razão registrada, então segue a razão inteira.
+
+#### A pergunta, e por que ela não é a mesma da correção anterior
+
+O dispositivo exige, além do "não optante", que as mercadorias sejam
+"destinadas à comercialização ou industrialização". Uma venda com CSOSN
+`101`/`201` para uma empresa de Regime Normal que está comprando **para consumo
+próprio** — material de escritório, limpeza, mobiliário — hoje declara
+`pCredSN`/`vCredICMSSN` do mesmo jeito que declararia para um revendedor, e
+nesse caso o crédito também não existe.
+
+A hipótese que o enunciado mandou testar era: `contacts.regime_tributario` já
+tratou uma pergunta "por aquisição" como atributo estável do cliente, por
+aproximação deliberada — a mesma aproximação serve aqui? **Não serve**, e a
+diferença entre as duas perguntas é categórica, não de grau:
+
+- **Regime tributário é atributo da empresa.** Está em registro público
+  (CNPJ/Portal do Simples), muda por opção formal anual, e nenhuma operação o
+  altera. A aproximação de lá — "uma empresa não alterna entre Simples e Regime
+  Normal venda a venda" — é simplesmente verdadeira.
+- **Destinação da mercadoria é atributo da aquisição.** O enunciado equivalente
+  seria "uma empresa não alterna entre comprar para revenda e comprar para uso
+  próprio venda a venda", e isso é **falso para praticamente toda a população de
+  compradores**: todo revendedor também compra papel, material de limpeza e
+  equipamento. Aquisição mista não é a exceção, é a regra — e é mista **dentro
+  do cadastro de um único cliente** sempre que o catálogo do vendedor cruzar os
+  dois usos.
+
+#### A pesquisa (1): quem diz que a pergunta é por operação é o próprio fisco
+
+Não é inferência nossa. O leiaute da NF-e já tem o campo desta dimensão —
+`indFinal` ("indicador de operação com consumidor final") — e ele mora no grupo
+`ide`, o da **identificação da nota**, não no grupo `dest`, o do destinatário. A
+SEFAZ modelou a dimensão como per-nota.
+
+E a orientação de preenchimento é explícita ao proibir exatamente a aproximação
+que esta tarefa cogitava. A Receita Estadual do RS, respondendo "como deve ser
+preenchido o campo `indFinal`", diz que **o conceito de consumidor final deve
+ser analisado independentemente de o destinatário ser contribuinte do ICMS ou
+não** — um contribuinte que adquire equipamento para uso próprio é consumidor
+final *naquela operação*. O preenchimento depende da operação, não do cadastro
+do cliente.
+
+Isso fecha a primeira pergunta do enunciado com fonte de administração
+tributária, e não por analogia: "consumidor final" no sentido do ICMS **é** a
+negação de "destinada à comercialização ou industrialização". São o mesmo eixo.
+
+#### A pesquisa (2): de quem é a obrigação, e o que a norma manda fazer quando dá errado
+
+A regulamentação do art. 23 está na **Resolução CGSN nº 140/2018**, e ela separa
+as duas coisas de propósito:
+
+- **Art. 62** lista as hipóteses em que o crédito **não se aplica** ao
+  adquirente, e o inciso II é literalmente "a mercadoria adquirida não se
+  destinar à comercialização ou à industrialização" (as outras: alíquota não
+  informada no documento, e as hipóteses dos incisos I a VI do art. 61).
+- **O parágrafo único do art. 62** diz o que acontece então: na hipótese de
+  utilização de crédito de forma indevida ou a maior, **o destinatário da
+  operação estorna** o crédito conforme a legislação de cada ente, sem prejuízo
+  de eventuais sanções ao emitente.
+
+Conferido na **Consulta 059/24 da SEFAZ/SC**, que cita o inciso II e o parágrafo
+único nominalmente, e corroborado de forma independente na leitura da própria
+norma. As obrigações que a resolução impõe ao **remetente** (arts. 59 e 60) são
+outras: informar a alíquota efetiva e a expressão do crédito no documento.
+
+Isso não torna a checagem ilegítima — mas explica por que ela não é do remetente
+**nesta condição específica**, e é a assimetria que separa as duas metades do
+§1º:
+
+| | condição 1 (não optante) | condição 2 (revenda/industrialização) |
+|---|---|---|
+| natureza | atributo da empresa | atributo da aquisição |
+| o vendedor pode saber? | **sim** — registro público, estável | **não** — é conduta futura do comprador |
+| já tem campo no cadastro? | sim (`contacts.regime_tributario`) | não, e não deveria ter |
+
+#### A pesquisa (3): nenhum sinal já cadastrado serve de proxy, e cada um falha por um motivo próprio
+
+O enunciado listou três candidatos. São quatro, e o quarto é o que reenquadra a
+tarefa.
+
+1. **`contacts.indicador_ie`.** Já estava descartado pela correção anterior por
+   ser opcional e nulo na maioria dos contatos. A pesquisa desta tarefa dá um
+   motivo **mais forte, e anterior a esse**: ele responde a outra pergunta. A
+   orientação do `indFinal` manda analisar a destinação *independentemente* de o
+   destinatário ser contribuinte. Não é dado esparso — é o eixo errado, e quem
+   diz é o fisco.
+2. **O CFOP que `resolveTaxRule` escolhe.** Não serve, e por uma razão
+   verificável no código: das cinco dimensões da `TaxRuleQuery`, `regime` é o
+   CRT **da filial**, `naturezaOperacao` é a constante `"venda"`/`"devolucao"`
+   (não o texto livre), `ufOrigem`/`ufDestino` são geografia — e `tipoCliente` é
+   `resolveTipoCliente(document, indicadorIe)`. Ou seja: **o CFOP é derivado do
+   `indicador_ie`**. Usá-lo como proxy seria usar o `indicador_ie` com passos
+   extras, herdando o defeito dele.
+3. **`sales.operation_type`.** Texto livre, já documentado no tipo como "não
+   usar para casar regra fiscal", e de fato `resolveTaxRule` nunca o lê — só a
+   `natureza_operacao` do XML o recebe, literal.
+4. **Segmento/atividade/CNAE do cliente.** Confirmado que não existe: `contacts`
+   não tem coluna de CNAE, segmento nem atividade. E mesmo que tivesse, não
+   fecharia — um supermercado (CNAE de comércio) compra prateleira para o ativo.
+
+**E o quarto candidato que o enunciado não listou: `indFinal`, que este motor já
+emite.** `buildNfePayloadFromSale` declara `consumidor_final` em toda NF-e —
+isto é, o motor **já responde esta pergunta por operação, em todas as notas**. O
+que falta não é um campo novo: é uma **fonte correta** para um campo que já
+existe. Hoje ele é `tipoCliente === "consumidor_final" ? 1 : 0`, ou seja,
+derivado do `indicador_ie` de novo.
+
+Esse é o achado que decide a tarefa. Criar `contacts.finalidade_aquisicao` agora
+seria instalar uma **segunda fonte de verdade, contraditória e per-cliente**,
+para uma dimensão que o motor já carrega per-operação — e a nova seria a errada
+das duas.
+
+#### Por que um campo no cliente seria pior que a lacuna
+
+Além do acima, há um defeito próprio do desenho que só aparece quando se escreve
+a mensagem de recusa. A recusa da condição 1 tem duas saídas acionáveis, e as
+duas funcionam: trocar o grupo tributário do produto, ou **corrigir o regime do
+cliente, se ele estiver errado** — genuína, porque o regime é um fato que pode
+estar certo ou errado.
+
+Na condição 2 as duas saídas se quebram:
+
+- "Cadastre o produto num grupo com CSOSN 102" muda o produto **globalmente** e
+  quebra a venda do mesmo produto a um revendedor. Na condição 1 esse beco é
+  tolerável porque a carteira de clientes de um vendedor pode ser homogênea em
+  regime; aqui o que varia é o **catálogo**, e a saída briga consigo mesma.
+- "Corrija o cadastro do cliente" não se aplica: o cadastro **não está errado** —
+  a operação é que é diferente desta vez.
+
+Um portão de recusa cuja única saída correta é **apagar o dado que o disparou** é
+um portão cujo dado está no lugar errado. Some-se que a marcação nem é
+propriedade da empresa compradora, e sim **da relação**: "este cliente compra
+para uso e consumo" só é verdade em relação ao que *você* vende a ele.
+
+O custo, portanto, não é zero como a lista de inclusão faz parecer. Nulo
+continuaria não recusando, sim — mas todo cliente marcado viraria uma emissão
+legítima travada no dia em que ele comprasse para revenda, com o operador
+descobrindo que a correção é desmarcar o campo. Mais recusas erradas do que
+lacunas fechadas, que era exatamente o critério do enunciado.
+
+#### O que precisaria existir para fechar
+
+Um indicador de **finalidade da aquisição por venda** — não por cliente —, na
+mesma forma que o leiaute já usa: revenda/industrialização × uso e consumo ×
+ativo imobilizado, preenchido na venda, com um padrão vindo do cliente que o
+operador possa sobrescrever. Ele resolveria **três** coisas de uma vez, e é por
+isso que vale como tarefa e não como remendo:
+
+1. a segunda condição do art. 23, §1º — esta lacuna;
+2. o `indFinal` da NF-e, que hoje sai derivado do campo errado (ver o achado
+   adjacente abaixo);
+3. o **DIFAL de `B4`**, promovido para a Etapa 2 hoje mesmo. O item 2 daquela
+   promoção já dizia que "é a mesma dimensão de que precisa a lacuna do CSOSN
+   `101`/`102` (…); as duas deveriam ser resolvidas na mesma tarefa" — esta
+   pesquisa **confirma** aquele palpite e acrescenta o porquê: o DIFAL da EC
+   87/2015 incide na venda a consumidor final, e "consumidor final" é
+   literalmente a negação da condição 2. Não são dimensões parecidas, são a
+   mesma. O Convênio ICMS 142/2018 usa o mesmo eixo para o ST-DIFAL de bens
+   "destinados a uso, consumo ou ativo imobilizado do adquirente contribuinte".
+
+**Sugestão de escopo registrada aqui, não aplicada**: dobrar esta lacuna dentro
+de `B4` em vez de mantê-la como candidata separada. O arquivo de plano mestre
+**não foi editado** — quem decide é o usuário.
+
+#### Achado adjacente, verificado e fora de escopo: a Rejeição 696
+
+Pesquisando o `indFinal` apareceu um bug **pré-existente**, sem relação com o
+crédito do Simples, e que não foi corrigido aqui.
+
+A regra de validação da **Rejeição 696** ("Operação com não contribuinte deve
+indicar operação com consumidor final", NT 2015.003) dispara quando
+`indIEDest = 9` **e** `indFinal ≠ 1`, em saída (`tpNF = 1`) que não seja para o
+exterior (`idDest ≠ 3`).
+
+Em `buildNfePayloadFromSale`, um contato **CNPJ com `indicador_ie` nulo** produz
+as quatro condições ao mesmo tempo: `resolveIndicadorIeCodigo(null)` → `9`;
+`resolveTipoCliente` → `"nao_contribuinte"` → `consumidor_final: 0`;
+`tipo_documento: 1`; e `local_destino` é sempre `1` ou `2`, nunca `3`. Como a
+correção anterior registrou que `indicador_ie` está nulo "na imensa maioria dos
+contatos já cadastrados", isso alcança quase toda NF-e para pessoa jurídica.
+
+**Não foi observado numa emissão real** — esta sessão não tem credencial de
+SEFAZ, e a regra foi conferida em duas fontes independentes de fornecedores de
+emissor, não numa rejeição vista. Fica como candidato a tarefa própria, com a
+ressalva; é o mesmo eixo do item 2 da lista acima, e provavelmente se corrige
+junto.
+
+#### O que foi feito, e o que não foi
+
+**Nenhum código foi escrito** — nem recusa, nem campo, nem migration, nem front.
+Era o desfecho previsto no enunciado para o caso de a pesquisa concluir que o
+cadastro não responde a pergunta, e é o que a pesquisa concluiu. Precedente da
+casa: `B2` deixou "IPI na base do ST" genuinamente em aberto em vez de forçar uma
+resposta.
+
+`npm test` rodado para confirmar que nada quebrou: **251 testes passando**,
+idêntico ao estado deixado pela correção anterior, com as duas baterias que
+dependem de credencial em `.env.local` falhando alto, como é o desenho delas.
+`npm run build`, `npm run lint` e `deno check` não foram rodados — não há
+diferença de código para eles verificarem.
