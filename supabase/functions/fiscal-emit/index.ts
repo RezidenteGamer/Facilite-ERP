@@ -74,6 +74,7 @@ import type { FiscalArtifact, FiscalModel, FiscalStatus, NfePayload } from "../_
 
 import {
   FiscalDataError,
+  readIbptRates,
   readMvaRules,
   readSaleForInvoice,
   readSaleReturnForInvoice,
@@ -220,9 +221,15 @@ async function buildPayload(
   origin: FiscalDocumentOrigin,
   model: FiscalModel,
 ): Promise<{ ok: true; payload: NfePayload } | { ok: false; errors: string[] }> {
-  // Os dois cadastros que o mapeamento consulta: CFOP pela operação e MVA por
-  // NCM × UF de destino. Lidos em paralelo — são independentes entre si.
-  const [rules, mvaRules] = await Promise.all([readTaxRules(ctx.admin), readMvaRules(ctx.admin)]);
+  // Os três cadastros que o mapeamento consulta: CFOP pela operação, MVA por
+  // NCM × UF de **destino** e os percentuais da Lei da Transparência por NCM ×
+  // UF de **origem** (B9 — a UF da filial, não a do cliente; ver
+  // `ibptRates.ts`). Lidos em paralelo — são independentes entre si.
+  const [rules, mvaRules, ibptRates] = await Promise.all([
+    readTaxRules(ctx.admin),
+    readMvaRules(ctx.admin),
+    readIbptRates(ctx.admin),
+  ]);
 
   if ("saleReturnId" in origin) {
     if (model !== "nfe") {
@@ -232,7 +239,7 @@ async function buildPayload(
     if (branchId !== ctx.branchId) {
       return { ok: false, errors: ["A devolução não pertence à filial informada."] };
     }
-    const built = buildReturnNfePayload(saleReturn, rules, mvaRules);
+    const built = buildReturnNfePayload(saleReturn, rules, mvaRules, ibptRates);
     return built.ok ? { ok: true, payload: built.payload } : { ok: false, errors: built.errors };
   }
 
@@ -242,8 +249,8 @@ async function buildPayload(
   }
   const built =
     model === "nfce"
-      ? buildNfcePayloadFromSale(sale, rules, mvaRules)
-      : buildNfePayloadFromSale(sale, rules, mvaRules);
+      ? buildNfcePayloadFromSale(sale, rules, mvaRules, ibptRates)
+      : buildNfePayloadFromSale(sale, rules, mvaRules, ibptRates);
   return built.ok ? { ok: true, payload: built.payload } : { ok: false, errors: built.errors };
 }
 

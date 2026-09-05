@@ -499,6 +499,36 @@ export type NfePayloadItem = {
   /** `vAliqProd` do grupo `COFINSQtde`, em reais por unidade. */
   cofins_aliquota_valor?: number;
   cofins_valor?: number;
+
+  /* --- Lei da Transparência Fiscal, Lei 12.741/2012 (B9, 05/09/2026) --- */
+
+  /**
+   * `vTotTrib` (id `M02`) — o valor aproximado dos tributos federais, estaduais
+   * e municipais deste item. Filho **direto** de `det/imposto`, não de nenhum
+   * grupo `ICMS`/`PIS`/`COFINS`, e `Decimal[13.2]` na tabela de campos da Focus
+   * NFe (nome do campo: `valor_total_tributos`, o mesmo do cabeçalho).
+   *
+   * **Opcional, e é o único campo deste motor cuja ausência é comportamento
+   * normal e não recusa.** Sem linha em `ibpt_rates` para o NCM, o campo não
+   * vai e a nota é emitida do mesmo jeito — ver a nota grande em
+   * `resolveIbptRate` (`ibptRates.ts`) para as três razões.
+   *
+   * ## A Focus calcula este campo sozinha quando ele não vem
+   *
+   * A tabela de campos dela diz, dos dois `valor_total_tributos`: "calculado
+   * automaticamente pela API, exceto quando `consumidor_final = 0` e/ou quando
+   * constar algum dos termos `REMESSA | EXPORTACAO | DEVOLUCAO | LANCAMENTO`
+   * no campo `natureza_operacao`" — usando a própria tabela do IBPT por NCM.
+   *
+   * Mandar o campo é, portanto, **substituir** a estimativa do provedor pela do
+   * cadastro do contador, e isso é deliberado: o número passa a sair da tabela
+   * que o contador transcreveu e conferiu, com fonte e versão registradas em
+   * `ibpt_rates`, e a nota deixa de depender de uma conta que o provedor faz
+   * sem o sistema ver. Onde não há cadastro o campo não vai, e o provedor volta
+   * a preencher — degradação para o comportamento de antes de B9, não para
+   * campo vazio.
+   */
+  valor_total_tributos?: number;
 };
 
 /**
@@ -618,6 +648,26 @@ export type NfePayload = {
   valor_ipi?: number;
   valor_pis?: number;
   valor_cofins?: number;
+  /**
+   * `vTotTrib` do grupo `total`/`ICMSTot` (id `W16a`) — a soma dos
+   * `valor_total_tributos` dos itens (B9, 05/09/2026).
+   *
+   * **Existe, ao contrário do que se poderia supor pelo desenho do DIFAL.** O
+   * `vTotTrib` é dos poucos campos que aparecem nos dois níveis, e a soma não é
+   * cosmética: a regra de validação exige que o `W16a` seja **exatamente** a
+   * soma dos `M02` dos itens, sob pena de **rejeição 685** ("Total do Valor
+   * Aproximado dos Tributos difere do somatório dos itens"), sem tolerância de
+   * arredondamento. Declarar o campo nos itens e não no total é rejeição certa.
+   *
+   * Por isso a soma é feita a partir dos valores **já arredondados** dos itens
+   * (`totalDeclarado`), e não recalculada sobre o total da nota.
+   *
+   * **Não entra no `valor_total`**, pelo mesmo motivo do DIFAL e por um a mais:
+   * a regra `W16-10` não o lista entre as parcelas de `vNF`, e ele não é um
+   * imposto a recolher — é uma estimativa informativa do que já está embutido
+   * no preço (Decreto 8.264/2014, art. 6º). Somá-lo dobraria o valor da nota.
+   */
+  valor_total_tributos?: number;
   /** 0 = por conta do emitente ... 9 = sem frete. */
   modalidade_frete?: number;
 

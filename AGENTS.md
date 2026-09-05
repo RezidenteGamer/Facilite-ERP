@@ -5089,3 +5089,323 @@ de alíquota interna por UF × NCM; o indicador de finalidade da aquisição por
 venda; a devolução lendo `fiscal_document_items` em vez de recalcular; e a
 escolha de CST por operação, que é o que resolveria a coexistência ST × DIFAL
 no plano substantivo.
+
+### Decisão arquitetural: a Lei da Transparência Fiscal — o `vTotTrib`, o cadastro manual do IBPT e a primeira vez que "não sei" não recusa a emissão (B9) (05/09/2026)
+
+Sexta tarefa da Etapa 2, e a primeira que **não calcula imposto nenhum**. B1,
+B2, B5, B8 e B4 ensinaram o motor a apurar o que o fisco cobra; B9 acrescenta a
+única informação do documento fiscal que existe para o **consumidor** ler:
+
+> Emitidos por ocasião da venda ao consumidor de mercadorias e serviços, em todo
+> território nacional, deverá constar, dos documentos fiscais ou equivalentes, a
+> informação do valor aproximado correspondente à totalidade dos tributos
+> federais, estaduais e municipais, cuja incidência influi na formação dos
+> respectivos preços de venda.
+>
+> — Lei 12.741/2012, art. 1º, *caput*
+
+Por ser informativa e não impositiva, ela inverte a regra de ouro deste motor.
+É o assunto principal desta entrada.
+
+#### As quatro perguntas de pesquisa, e as respostas
+
+**1. A forma exata do `vTotTrib` — e o enunciado da tarefa estava errado num
+ponto que muda o desenho.** O enunciado afirmava que o campo é só do item e que
+"**não existe total correspondente** no grupo `total/ICMSTot`", mandando não
+assumir e conferir. Conferido: **existe**, e ignorá-lo seria rejeição garantida.
+
+- **`det/imposto/vTotTrib` (id `M02`)** — filho **direto** de `imposto`, não de
+  nenhum grupo `ICMS`/`PIS`/`COFINS`. Isso o enunciado acertou.
+- **`total/ICMSTot/vTotTrib` (id `W16a`)** — existe, e é a soma dos `M02`.
+- Os dois são **opcionais** ("considerar valor = 0, se não informado"), e o
+  campo nasceu opcional na **NT 2013.003**, que o criou.
+- **A igualdade é validada sem tolerância**: `W16a` diferente da soma dos `M02`
+  é a **rejeição 685** ("Total do Valor Aproximado dos Tributos difere do
+  somatório dos itens"). Fonte: as bases de conhecimento de Tecnospeed,
+  Invoisys e Oobj, as três com o mesmo texto de regra, mais a tabela de campos
+  da Focus NFe, que traz `valor_total_tributos` (`Decimal[13.2]`) **nos dois
+  níveis**.
+
+Consequência prática: o total é somado a partir dos valores **já arredondados**
+dos itens (`totalDeclarado`), nunca recalculado sobre o total da nota. Há teste
+dedicado a isso — dois itens de 33,33 declaram 10,15 cada e o total sai 20,30;
+recalcular sobre 66,66 daria 20,29, que é a rejeição 685 em estado puro.
+
+**Descoberta lateral, e ela importa para entender o que este campo faz.** A
+tabela de campos da Focus NFe diz, dos dois `valor_total_tributos`: *"calculado
+automaticamente pela API, exceto quando `consumidor_final = 0` e/ou quando
+constar algum dos termos `REMESSA | EXPORTACAO | DEVOLUCAO | LANCAMENTO` no
+campo `natureza_operacao`"* — usando a própria tabela do IBPT por NCM. Ou seja:
+**o campo já vinha sendo preenchido pelo provedor, sem este sistema ver.**
+Mandá-lo é *substituir* a estimativa do provedor pela do cadastro do contador,
+com fonte e versão registradas. Onde não há cadastro o campo não vai e a Focus
+volta a preencher — a degradação é para o comportamento de antes de B9, não
+para campo vazio. Isso também deu duas confirmações independentes das decisões
+de escopo abaixo.
+
+**2. A dimensão do cadastro: NCM × UF, e a UF é a de ORIGEM.** Este é o ponto em
+que copiar `mva_rules` por simetria teria sido o erro da tarefa. A MVA é
+publicada pelo estado **que recebe** (daí `uf_destino`). A tabela do IBPT é
+baixada **por UF da empresa emitente**: o site pede a unidade federativa da
+empresa cadastrada e entrega um CSV por estado, e a coluna `estadual` daquele
+arquivo é a carga de ICMS **do estado em que a empresa está**. Fonte: o passo a
+passo do próprio IBPT e as bases de Oobj, Linx e Senior, todas mandando informar
+"a UF correspondente à sua empresa". Por isso a coluna se chama `uf` e quem a
+alimenta é `query.ufOrigem`. Há teste que emite SP → RJ com cadastro só de SP e
+exige que o campo saia — se o motor usasse o destino, ele sumiria.
+
+**3. Nacional vs. importado: sim, são duas colunas, mas só a federal.** A
+estrutura real do CSV do IBPT (`TabelaIBPTax`) é `codigo; ex; tipo; descricao;
+nacionalfederal; importadosfederal; estadual; municipal; vigenciainicio;
+vigenciafim; chave; versao; fonte`. **Só a parcela federal se desdobra** — o
+imposto de importação, o PIS/Cofins-Importação e afins são federais; estadual e
+municipal valem para os dois casos. O cadastro tem as quatro colunas com os
+nomes traduzidos, para a transcrição ser cópia direta.
+
+O conjunto de origens que usa a coluna de importado é `{1, 2, 3, 6, 7, 8}`, e
+**não** é o mesmo `{1, 2, 3, 8}` dos 4% da Resolução do Senado 13/2012 que
+`mvaRules.ts` já tinha — são perguntas diferentes, e confundi-las seria fácil.
+Lá o critério são as exceções expressas de uma resolução (que tira o `6` e o
+`7`, sem similar nacional); aqui é "este produto carrega tributos de importação
+no preço?", e `6`/`7` são estrangeiras, carregam. O único caso que exigiu
+critério é o `5` (nacional com Conteúdo de Importação **até 40%**): fica no
+caminho nacional, porque o gatilho do Decreto 8.264/2014, art. 3º, §2º, é
+afirmativo — os tributos de importação entram quando os insumos de comércio
+exterior representam "percentual **superior a vinte por cento** do preço de
+venda", e o `5` pode estar dos dois lados dessa linha sem dizer de qual. Mesmo
+critério conservador com que `aliquotaInterestadual` trata origem desconhecida.
+Os nove códigos têm teste.
+
+**4. Fonte e vigência: o enunciado estava errado de novo, e no sentido oposto.**
+Ele afirmava que "a Lei 12.741 (art. 2º) exige citar a fonte dos percentuais no
+próprio documento ou em local visível". Lido o art. 2º na íntegra no Planalto:
+ele diz **outra coisa** — que os valores "serão apurados sobre cada operação, e
+poderão, a critério das empresas vendedoras, ser calculados e fornecidos,
+semestralmente, por instituição de âmbito nacional reconhecidamente idônea". É
+a autorização para usar o IBPT, e **não diz uma palavra sobre informar a fonte
+ao consumidor**. O Decreto 8.264/2014 também não. A "obrigação de citar a
+fonte" que circula em prosa de mercado (e no enunciado) **não existe em lei
+nenhuma**; o que existe é o costume, e ele vale a pena. `fonte` e `versao` vão
+ao texto quando cadastradas, e sem `fonte` o trecho inteiro some — não se
+inventa "IBPT".
+
+**Mas a pesquisa da pergunta 4 achou uma exigência real que o enunciado não
+mencionava, e ela mudou o entregável.** Decreto 8.264/2014, art. 2º:
+
+> Nas vendas ao consumidor, a informação [...] **constará de três resultados
+> segregados para cada ente tributante**, que aglutinarão as somas dos valores
+> ou percentuais apurados em cada ente.
+>
+> Parágrafo único. [...] a informação deverá ser aposta em **campo próprio ou no
+> campo "Informações Complementares"** do respectivo documento fiscal.
+
+O `vTotTrib` do leiaute é **um número só** — não há, em lugar nenhum da
+NF-e/NFC-e 4.00, onde escrever as três parcelas separadas. O campo próprio
+sozinho cumpre o art. 1º da lei e fica devendo o art. 2º do decreto. Por isso
+`informacoesTributosAproximados` monta o texto que praticamente todo emissor do
+mercado escreve, e ele entra em `informacoes_adicionais_contribuinte` junto do
+"Venda V-0001" que já estava lá:
+
+```
+Venda V-0001. Trib aprox R$ 329,50 (Federal R$ 124,50, Estadual R$ 180,00,
+Municipal R$ 25,00) - Lei 12.741/2012. Fonte: IBPT 26.2.A.
+```
+
+**Isto é escopo a mais que o enunciado não pediu**, e está aqui declarado para
+quem revisar poder tirá-lo se discordar: é uma função, uma chamada em cada um
+dos três construtores de payload, e nada mais. As três parcelas são
+arredondadas antes de somar, de modo que elas somam **exatamente** o
+`vTotTrib` — não faria sentido a segregação do decreto discordar do campo que
+ela explica.
+
+#### A decisão: cadastro manual, e por que a importação em massa está fora
+
+Confirmada a hipótese do enunciado, com fonte. A tabela do IBPT **não** é
+catálogo público como CFOP e NCM, que este sistema importou em massa por
+migration (`import_cfop_codes_from_source`,
+`import_ncm_codes_from_siscomex`):
+
+- O **termo de uso** (deolhonoimposto.ibpt.org.br/Site/termodeuso) libera o
+  download **mediante cadastro** da "pessoa física ou jurídica usuária da tabela
+  em cumprimento à Lei 12.741/2012", e é expresso: "sendo vedada a
+  comercialização pelo Usuário". É licença de uso concedida a quem se cadastra.
+- **Correção ao enunciado, em favor do IBPT**: o enunciado dizia que a tabela é
+  "comercial [...] distribuída pelo próprio instituto sob licença". Ela é
+  **gratuita** — o termo diz que é "disponibilizado gratuitamente à sociedade".
+  Gratuito não é o mesmo que livre para redistribuir dentro de um produto, e é
+  a segunda coisa que decide, não a primeira: **o cadastro é por usuário**.
+- A tabela é **trimestral**. Uma cópia semeada nasceria a caminho de vencer.
+
+Então vale o padrão de `tax_rules` e `mva_rules`: **tabela vazia, alimentada
+pelo contador**, que tem o cadastro dele no IBPT (ou a assinatura da API) e
+transcreve as linhas dos NCM que a loja vende. Nada muda em nota nenhuma até
+alguém cadastrar a primeira linha.
+
+#### A inversão de filosofia: "não sei" vira **campo ausente**, não recusa
+
+Este é o ponto que mais importa para a próxima sessão, porque ele contradiz
+tudo que B1, B2, B5 e B8 fizeram — e a contradição é o desenho, não um
+esquecimento a "consertar".
+
+Todo o resto deste motor **recusa a emissão** quando o cadastro não responde:
+sem regra em `tax_rules` não há CFOP; sem MVA um CST com ST se contradiz; sem
+alíquota ad rem um CST `03` sairia com imposto a menos. Em todos esses casos o
+cadastro incompleto produziria uma **nota autorizada com imposto errado** — o
+desfecho pior. O `vTotTrib` inverte isso por três razões que se somam:
+
+1. **Ele não determina imposto devido.** Decreto 8.264/2014, art. 6º, é
+   literal: os valores "têm caráter meramente informativo, visando somente ao
+   esclarecimento dos consumidores".
+2. **O leiaute o declara opcional** nos dois níveis. Nota sem `vTotTrib` é nota
+   válida, autorizada normalmente.
+3. **Recusar seria o oposto do que a lei quer.** Uma loja que ainda não
+   cadastrou os percentuais deixaria de faturar — a Lei da Transparência
+   passaria a impedir a venda que ela existe para informar.
+
+Por isso `resolveIbptRate` não tem ramo de erro que chegue a `cadastroErrors`, e
+**o empate de especificidade também devolve "campo ausente"** em vez da recusa
+que `resolveMvaRule` dá — na prática ele não acontece (a unique `(ncm, uf)` o
+impede), e o ramo existe para não sortear em silêncio qual percentual o
+consumidor vê. Quatro testes fixam a inversão, inclusive o de cadastro
+inteiramente vazio.
+
+#### O escopo por documento: as três respostas, e nenhuma é arbitrária
+
+`ResolveItemsOptions` ganhou o **terceiro** campo,
+`declaraValorAproximadoDosTributos`. Ele tem forma igual aos dois de B4/B8 mas
+natureza um pouco diferente, e a nota está no código para ninguém procurar
+simetria onde não há: ele pergunta **que documento é este**, não só quem o
+recebe. Podia ser derivado de `query.naturezaOperacao` lá dentro — e é por isso
+que está fora: derivar em silêncio faria a próxima função de payload herdar uma
+resposta que ninguém escolheu.
+
+- **NFC-e: sempre.** Modelo 65, cupom presencial a consumidor final. É onde a
+  lei mais importa na prática.
+- **NF-e de venda: `consumidor_final === 1`.** Venda a contribuinte que vai
+  revender não é "venda ao consumidor" (art. 1º, *caput*). O corte coincide com
+  o do provedor — a Focus deixa de calcular o campo exatamente quando
+  `consumidor_final = 0` —, duas leituras independentes do mesmo artigo.
+- **Devolução: não.** E aqui, **ao contrário do DIFAL de B4, não há regra de
+  validação decidindo**: o `vTotTrib` é opcional em qualquer documento e
+  declará-lo numa nota de entrada não seria rejeitado. O que decide é o alcance
+  da lei — devolução não é venda, é a nota que desfaz uma. A Focus concorda
+  sozinha: ela para de calcular o campo quando `natureza_operacao` contém
+  `DEVOLUCAO`, que é literalmente o que `buildReturnNfePayload` escreve. Os três
+  documentos têm teste.
+
+#### O que o `/code-review alto` encontrou
+
+**Um defeito, corrigido**: a citação da fonte montava `[fonte, versao]` e
+juntava o que existisse — um cadastro com `versao` preenchida e `fonte` vazia
+escreveria "Fonte: 26.2.A", como se a versão fosse quem publicou os números.
+Agora a versão só é citada **junto** da fonte, e sem `fonte` o trecho some. Tem
+teste.
+
+**Duas limitações substantivas, registradas e não corrigidas**, as duas por
+falta de dado e as duas anotadas também no código:
+
+1. **O `vTotTrib` não olha o CST.** O Decreto 8.264, art. 3º, §1º, manda não
+   computar "valores que tenham sido eximidos por força de imunidades, isenções,
+   reduções e não incidências", e um item com CST `40` (isenta) sai com
+   `icms_valor` ausente e, ao mesmo tempo, com a parcela estadual cheia no
+   `vTotTrib`. A tabela do IBPT publica **um** percentual por NCM, sem dimensão
+   de CST; decidir qual das três parcelas zerar por código exigiria um mapa que
+   nenhuma fonte publica, e inventá-lo é exatamente o que este motor não faz.
+   Há teste **fixando** o comportamento, para ele não mudar por acidente.
+2. **O gate da NF-e não olha a natureza da operação.** Uma "Remessa para
+   conserto" a um CPF tem `consumidor_final = 1` e sai com `vTotTrib`, embora
+   não seja venda. Replicar o segundo filtro da Focus
+   (`REMESSA|EXPORTACAO|DEVOLUCAO|LANCAMENTO`) exigiria casar substring em texto
+   livre digitado pelo usuário, que erra nos dois sentidos. Sem rejeição
+   envolvida — o campo é opcional.
+
+#### Arquivos
+
+- `supabase/functions/_shared/fiscal/ibptRates.ts` — **novo**. `IbptRateRow`,
+  `toIbptRateRow`, `IBPT_RATE_COLUMNS`, `resolveIbptRate` (com a nota grande
+  sobre a inversão), `origemMercadoriaImportadaParaIbpt` e
+  `percentuaisTributosAproximados`. Irmão de `mvaRules.ts`, e o cabeçalho
+  explica onde os dois divergem.
+- `supabase/functions/_shared/fiscal/types.ts` — `valor_total_tributos` no item
+  e no cabeçalho, com a tag do XML, a regra da 685 e a nota sobre o cálculo
+  automático da Focus.
+- `supabase/functions/_shared/fiscal/invoiceMapping.ts` — o terceiro campo de
+  `ResolveItemsOptions`, o cálculo por item, os três acumuladores por ente,
+  `informacoesTributosAproximados`, `comInformacoesDeTributos` e a fiação nos
+  três documentos. **Nenhum outro imposto foi tocado** — há teste de regressão
+  comparando o item e o cabeçalho inteiros com e sem cadastro de IBPT.
+- `supabase/functions/fiscal-emit/data.ts` — `readIbptRates`, no molde de
+  `readMvaRules`. `index.ts` — a terceira leitura no `Promise.all` e os quatro
+  argumentos. `persist.ts` — as duas colunas novas.
+- `supabase/migrations/00000000000011_b9_ibpt_lei_transparencia.sql` — **escrita,
+  NÃO aplicada**. Cria `ibpt_rates` (unique `(ncm, uf)`, quatro `check` de
+  0–100, índice, RLS com as quatro policies separadas), o módulo
+  `tributos-aproximados` (`sort_order` 93, logo depois de `mva-icms-st`) com
+  nove `module_fields`, as permissões copiadas de quem já tem
+  `grupos-tributarios`, e as duas colunas de `vTotTrib` em
+  `fiscal_document_items`/`fiscal_documents`. **Vem antes do deploy da
+  `fiscal-emit`**, pelo motivo de sempre: `data.ts` passa a ler `ibpt_rates`
+  (PostgREST responde 400 para tabela inexistente) e `persist.ts` manda as duas
+  colunas no insert mesmo nulas (PGRST204, e falha *depois* de a SEFAZ
+  autorizar) — as duas coisas derrubariam a emissão inteira, não só a das notas
+  com `vTotTrib`.
+- `tests/unit/invoiceIbpt.test.ts` — bateria nova, **43 testes**, arquivo
+  separado pelo critério de sempre.
+
+`src/types/supabase.ts` **não** foi tocado, mesma decisão de B4: `ibpt_rates` só
+é lida pela Edge Function (que não tem `Database`) e pela `GenericModulePage`,
+que resolve tabela dinâmica com o cliente destipado; e as duas colunas novas de
+`fiscal_document_items`/`fiscal_documents` só são escritas pela Edge Function —
+nenhum consumidor tipado do front precisa delas.
+
+**O módulo `tributos-aproximados` não existia** — conferido em `modules` e
+`module_fields` antes de escrever, e não há nenhuma tela de IBPT no sistema
+hoje. Nenhum campo aponta `reference_module_id`, pelas mesmas duas razões de
+`mva_rules`: `uf` aceita o coringa `*`, e `ncm` é texto livre porque `ncm_codes`
+nunca virou módulo. Consequência prática idêntica: **o NCM é digitado à mão**.
+`vigencia_inicio` é o primeiro `data_type: 'date'` de um módulo de tabela real
+deste sistema — conferido que a `RegistryFormModal` renderiza `input type=date`
+para ele e que `normalize` converte vazio em `null` num campo opcional.
+
+#### Testado
+
+`npm run build` limpo. `npm run lint` com **zero erros e 62 avisos**, exatamente
+os mesmos de antes da tarefa. `deno check supabase/functions/fiscal-emit/index.ts`
+limpo. `npm test` com **337 testes passando** (43 a mais que B4) e as duas
+baterias que dependem de credencial em `.env.local` falhando alto, como é o
+desenho delas.
+
+**Nenhuma bateria antiga precisou de uma linha de mudança**, e isso é a melhor
+prova de que B9 é aditivo: os três construtores de payload ganharam um
+parâmetro **opcional** (`ibptRates: IbptRateRow[] = []`), então todo teste
+anterior continua chamando com três argumentos e continua sem `vTotTrib`.
+
+A bateria nova cobre: o cadastro isolado (UF exata, coringa, o desempate, NCM
+com pontuação, o não achado, o empate); o cálculo (nacional, importado, os nove
+códigos de origem um a um, origem ausente, a UF de origem contra a de destino,
+o arredondamento parcela a parcela, percentual zero declarando zero); a
+inversão (NCM sem linha, cadastro vazio, um item com e outro sem, o empate); o
+total (igualdade exata com a soma dos itens, a soma dos valores já
+arredondados, o `vTotTrib` fora do `valor_total`, a convivência com o ICMS-ST);
+as Informações Complementares (as três parcelas, a soma fechando, sem fonte,
+sem versão, versão sem fonte, e o texto sumindo inteiro); o escopo dos três
+documentos; e três regressões provando que nada mais do item ou do cabeçalho
+muda.
+
+**Nada foi testado no navegador nem no banco**: a migration não foi aplicada e a
+Edge Function não foi implantada — as duas coisas ficaram para a sessão de
+coordenação, junto com a revisão independente. Ver o que aconteceu em B4
+(04/09/2026) e por que esta regra existe.
+
+#### Fora de escopo
+
+B10 (IBS/CBS/IS). Também fora: as duas limitações substantivas acima; o `ex`
+(exceção fiscal do NCM), que `products` não guarda; serviços (NBS/LC 116), que
+este motor não emite; a vigência filtrando a busca (nenhum cadastro deste motor
+tem dimensão temporal, e este não seria o primeiro a ter); a importação
+automática pela API paga do IBPT, que resolveria a atualização trimestral e é
+tarefa própria; a fonte por item numa nota com NCMs de versões diferentes da
+tabela (vale a do primeiro item que declarou — citar uma por item deixaria o
+texto ilegível para o consumidor, que é quem ele existe para informar); e o XML
+do provedor simulado, que continua sem declarar `vTotTrib`, como já não declara
+ST nem DIFAL.

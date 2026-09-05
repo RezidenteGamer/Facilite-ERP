@@ -53,6 +53,11 @@ import {
   resolveMvaRule,
   type MvaRuleRow,
 } from "./mvaRules.ts";
+import {
+  type IbptRateRow,
+  percentuaisTributosAproximados,
+  resolveIbptRate,
+} from "./ibptRates.ts";
 import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
 import {
   icmsCalculaCreditoSimples,
@@ -372,6 +377,21 @@ type ResolvedItems = {
   ipiValorTotal?: number;
   pisValorTotal?: number;
   cofinsValorTotal?: number;
+  /**
+   * `vTotTrib` do grupo `total` (B9) — a soma dos campos homônimos dos itens.
+   * Obrigatoriamente igual a essa soma, ou é rejeição 685; ver o campo em
+   * `types.ts`.
+   */
+  valorTotalTributos?: number;
+  /**
+   * Os três resultados **segregados por ente tributante** que o Decreto
+   * 8.264/2014, art. 2º, exige — e que o XML não tem onde guardar, porque
+   * `vTotTrib` é um número só. Vão para as Informações Complementares; ver
+   * `informacoesTributosAproximados`.
+   */
+  tributosAproximadosPorEnte?: { federal: number; estadual: number; municipal: number };
+  /** Fonte e versão da linha de `ibpt_rates` usada — para as Informações Complementares. */
+  tributosAproximadosFonte?: { fonte: string | null; versao: string | null };
 };
 
 type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: string[] };
@@ -389,6 +409,13 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  * ganhou o segundo em B4 (o DIFAL). Os dois têm a mesma forma pelo mesmo
  * motivo: são perguntas sobre **quem recebe a nota**, e `resolveItemsForSale`
  * não conhece destinatário — quem o conhece é quem monta o cabeçalho.
+ *
+ * O terceiro (B9, o `vTotTrib`) tem forma igual mas natureza um pouco
+ * diferente, e vale dizer para ninguém procurar simetria onde não há: ele
+ * pergunta **que documento é este** ("isto é uma venda ao consumidor?"), não só
+ * quem o recebe. Podia ser derivado aqui dentro, de `query.naturezaOperacao` —
+ * e é justamente por isso que está aqui fora: derivar em silêncio faria a
+ * próxima função de payload herdar uma resposta que ninguém escolheu.
  */
 type ResolveItemsOptions = {
   /**
@@ -443,6 +470,34 @@ type ResolveItemsOptions = {
    *   dispensa. Ver a nota em `buildReturnNfePayload`.
    */
   destinatarioConsumidorFinalNaoContribuinte: boolean;
+  /**
+   * Este documento é uma **venda ao consumidor**, isto é, o documento de que a
+   * Lei 12.741/2012 trata, e portanto declara `vTotTrib` (B9, 05/09/2026)?
+   *
+   * O gatilho é o *caput* do art. 1º: a informação deve constar dos documentos
+   * fiscais "emitidos por ocasião da **venda ao consumidor** de mercadorias e
+   * serviços". Não é toda nota — é a nota de venda a quem consome.
+   *
+   * As três respostas, e nenhuma delas é arbitrária:
+   *
+   * - **NFC-e: sempre `true`.** É o modelo 65, cupom presencial a consumidor
+   *   final (`consumidor_final: 1` fixo). É onde a Lei da Transparência mais
+   *   importa na prática — o documento que o consumidor leva na mão.
+   * - **NF-e de venda: `consumidor_final === 1`.** Uma venda a contribuinte que
+   *   vai revender não é "venda ao consumidor", e a lei não a alcança. Este
+   *   corte coincide com o do próprio provedor: a Focus NFe deixa de calcular o
+   *   campo sozinha exatamente quando `consumidor_final = 0` — duas leituras
+   *   independentes do mesmo art. 1º.
+   * - **Devolução: `false`.** Nota de **entrada** (`tpNF = 0`), que desfaz uma
+   *   venda em vez de fazer uma; não há consumidor comprando nada a quem
+   *   informar carga tributária. Aqui, ao contrário do DIFAL, **não há regra de
+   *   validação decidindo por nós** — o `vTotTrib` é opcional em qualquer
+   *   documento e declará-lo não seria rejeitado. É decisão de escopo, tomada
+   *   pelo texto da lei, e o provedor de novo concorda por conta própria: a
+   *   Focus também para de calcular o campo quando `natureza_operacao` contém
+   *   `DEVOLUCAO`, que é literalmente o que `buildReturnNfePayload` escreve.
+   */
+  declaraValorAproximadoDosTributos: boolean;
 };
 
 /**
@@ -542,12 +597,25 @@ type ResolveItemsOptions = {
  * O FCP da **operação própria** (`pFCPUFDest`/`vFCPUFDest`) sai nessa mesma
  * camada — é o que restava de `B3`, já que B2 só calculava o FCP retido por
  * substituição tributária.
+ *
+ * ## O `vTotTrib` da Lei da Transparência (B9, 05/09/2026)
+ *
+ * A última camada por item, e a única que **não é imposto**: o valor aproximado
+ * dos tributos que a Lei 12.741/2012 manda informar ao consumidor, vindo de
+ * `ibpt_rates` por NCM × UF da filial. Ele não muda nenhuma outra grandeza
+ * deste item, não entra em base de nada e não soma no `valor_total`.
+ *
+ * É também o primeiro campo deste motor em que **a falta de cadastro não recusa
+ * a emissão** — o item sai sem o campo e a nota é emitida. As três razões estão
+ * em `resolveIbptRate` (`ibptRates.ts`), e vale lê-las antes de "consertar" a
+ * assimetria: ela é o ponto, não um esquecimento.
  */
 function resolveItemsForSale(
   sale: SaleForInvoice,
   rules: TaxRuleRow[],
   query: TaxRuleQuery,
   mvaRules: MvaRuleRow[],
+  ibptRates: IbptRateRow[],
   options: ResolveItemsOptions,
 ): ItemsResolution {
   const errors: string[] = [];
@@ -595,6 +663,16 @@ function resolveItemsForSale(
     !regimeRemetenteSemDifalUfDestino(query.regime);
 
   const cadastroErrors: string[] = [];
+  /**
+   * Os três resultados segregados do Decreto 8.264/2014, art. 2º, acumulados
+   * item a item (B9). Ficam fora do `map` porque o XML não os guarda por item:
+   * o que vai no item é a soma dos três, num campo só (`vTotTrib`), e o
+   * desdobramento por ente só cabe nas Informações Complementares, que são do
+   * documento inteiro.
+   */
+  const tributosPorEnte = { federal: 0, estadual: 0, municipal: 0 };
+  let tributosFonte: { fonte: string | null; versao: string | null } | undefined;
+
   const items: NfePayloadItem[] = sale.items.map((item, index) => {
     const group = item.product.taxGroup!;
     const base = item.totalAmount;
@@ -744,6 +822,42 @@ function resolveItemsForSale(
     if (!cofins.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${cofins.reason}`);
     const cofinsDeclarado = cofins.ok ? cofins : null;
 
+    /**
+     * `vTotTrib` (B9) — o valor aproximado dos tributos deste item.
+     *
+     * Repare no que **não** existe aqui: nenhum `cadastroErrors.push`. Sem
+     * linha em `ibpt_rates` o campo fica `undefined` e a emissão segue; é a
+     * inversão de filosofia descrita em `resolveIbptRate`.
+     *
+     * A base é a mesma `base` de todos os outros impostos (`item.totalAmount`),
+     * de propósito — "o valor da operação" tem uma fonte só neste motor. E as
+     * três parcelas são arredondadas **antes** de somar, para o total do item
+     * ser exatamente a soma dos três números que as Informações Complementares
+     * vão mostrar: a rejeição 685 não tolera um centavo de diferença entre o
+     * total da nota e a soma dos itens, e não faria sentido a segregação do
+     * decreto discordar do campo que ela explica.
+     */
+    const ibpt = options.declaraValorAproximadoDosTributos
+      ? resolveIbptRate({ ncm: item.product.ncm!, uf: query.ufOrigem }, ibptRates)
+      : { found: false as const, reason: "documento não declara vTotTrib" };
+    let valorTotalTributos: number | undefined;
+    if (ibpt.found) {
+      const percentuais = percentuaisTributosAproximados(ibpt.rule, item.product.origemMercadoria);
+      const federal = taxAmount(base, percentuais.federal);
+      const estadual = taxAmount(base, percentuais.estadual);
+      const municipal = taxAmount(base, percentuais.municipal);
+      tributosPorEnte.federal = toCents(tributosPorEnte.federal + federal);
+      tributosPorEnte.estadual = toCents(tributosPorEnte.estadual + estadual);
+      tributosPorEnte.municipal = toCents(tributosPorEnte.municipal + municipal);
+      // A fonte que vai nas Informações Complementares é a do **primeiro** item
+      // que declarou. Notas com NCMs de versões diferentes da tabela são
+      // possíveis e a limitação está registrada no AGENTS.md (B9): o decreto
+      // não pede fonte nenhuma, e citar uma por item deixaria o campo de texto
+      // ilegível para o consumidor, que é quem ele existe para informar.
+      tributosFonte ??= { fonte: ibpt.rule.fonte, versao: ibpt.rule.versao };
+      valorTotalTributos = toCents(federal + estadual + municipal);
+    }
+
     return {
       numero_item: index + 1,
       codigo_produto: item.product.code,
@@ -809,6 +923,8 @@ function resolveItemsForSale(
       cofins_quantidade_vendida: cofinsDeclarado?.quantidadeVendida,
       cofins_aliquota_valor: cofinsDeclarado?.aliquotaValor,
       cofins_valor: cofinsDeclarado?.valor,
+
+      valor_total_tributos: valorTotalTributos,
     };
   });
 
@@ -825,6 +941,12 @@ function resolveItemsForSale(
   const ipiValorTotal = totalDeclarado(items, (item) => item.ipi_valor);
   const pisValorTotal = totalDeclarado(items, (item) => item.pis_valor);
   const cofinsValorTotal = totalDeclarado(items, (item) => item.cofins_valor);
+  /**
+   * `vTotTrib` do `total` (B9): soma dos valores **já arredondados** dos itens,
+   * pelo mesmo `totalDeclarado` de todos os outros totais. É o que a regra da
+   * rejeição 685 exige — igualdade exata com a soma dos `M02`, sem tolerância.
+   */
+  const valorTotalTributos = totalDeclarado(items, (item) => item.valor_total_tributos);
 
   return {
     ok: true,
@@ -842,8 +964,65 @@ function resolveItemsForSale(
       ipiValorTotal,
       pisValorTotal,
       cofinsValorTotal,
+      valorTotalTributos,
+      tributosAproximadosPorEnte: valorTotalTributos === undefined ? undefined : tributosPorEnte,
+      tributosAproximadosFonte: valorTotalTributos === undefined ? undefined : tributosFonte,
     },
   };
+}
+
+/**
+ * O texto da Lei da Transparência para as **Informações Complementares** (B9,
+ * 05/09/2026), ou `undefined` quando a nota não declara `vTotTrib`.
+ *
+ * ## Por que este texto existe, se já há um campo próprio no XML
+ *
+ * Porque o campo próprio não basta. O Decreto 8.264/2014, art. 2º, é explícito:
+ *
+ * > Nas vendas ao consumidor, a informação, nos documentos fiscais, relativa ao
+ * > valor aproximado dos tributos federais, estaduais e municipais [...]
+ * > constará de **três resultados segregados para cada ente tributante** [...]
+ * >
+ * > Parágrafo único. [...] a informação deverá ser aposta em **campo próprio ou
+ * > no campo "Informações Complementares"** do respectivo documento fiscal.
+ *
+ * O `vTotTrib` do leiaute é **um número só** — não há, em lugar nenhum da
+ * NF-e/NFC-e 4.00, onde escrever as três parcelas separadas. O campo próprio,
+ * sozinho, cumpre o art. 1º da lei e fica devendo o art. 2º do decreto. É por
+ * isso que praticamente todo emissor do mercado escreve a segregação nas
+ * Informações Complementares, e é o que esta função monta.
+ *
+ * ## A fonte no texto: prática de mercado, não exigência legal
+ *
+ * Pesquisado antes de escrever, porque é o tipo de coisa que "todo mundo sabe"
+ * e ninguém confere: **nem a Lei 12.741/2012 nem o Decreto 8.264/2014 exigem
+ * citar a fonte dos percentuais no documento fiscal**. O art. 2º da lei apenas
+ * *faculta* que os valores sejam "calculados e fornecidos, semestralmente, por
+ * instituição de âmbito nacional reconhecidamente idônea" — e não diz uma
+ * palavra sobre informá-la ao consumidor. A fonte vai no texto assim mesmo,
+ * porque o dado já está cadastrado, porque é o costume consolidado do mercado e
+ * porque identifica de que tabela saiu o número quando alguém for conferir.
+ * `fonte` vazia simplesmente não escreve o trecho — não se inventa "IBPT".
+ */
+function informacoesTributosAproximados(resolved: ResolvedItems): string | undefined {
+  const total = resolved.valorTotalTributos;
+  const porEnte = resolved.tributosAproximadosPorEnte;
+  if (total === undefined || !porEnte) return undefined;
+
+  const reais = (valor: number) => valor.toFixed(2).replace(".", ",");
+  const partes =
+    `Trib aprox R$ ${reais(total)} (Federal R$ ${reais(porEnte.federal)}, ` +
+    `Estadual R$ ${reais(porEnte.estadual)}, Municipal R$ ${reais(porEnte.municipal)})`;
+
+  // A versão só é citada **junto** da fonte: "Fonte: 26.2.A" — versão sem nome
+  // de quem publicou — leria como se a versão fosse a fonte, que é o oposto do
+  // que a citação serve para dizer. Sem `fonte`, o trecho inteiro some.
+  const cadastro = resolved.tributosAproximadosFonte;
+  const fonte = cadastro?.fonte?.trim();
+  const versao = cadastro?.versao?.trim();
+  const citacao = fonte ? ` Fonte: ${[fonte, versao].filter(Boolean).join(" ")}.` : "";
+
+  return `${partes} - Lei 12.741/2012.${citacao}`;
 }
 
 /** O maior valor que `fiscal_document_items.icms_st_mva` (`numeric(7,4)`) guarda. */
@@ -1669,11 +1848,16 @@ function totalComImpostosPorFora(total: number, ...porFora: (number | undefined)
  * consultado para os CST/CSOSN que a declaram. Quem passa a lista é a Edge
  * Function (`readMvaRules`, em `data.ts`); os testes que não tratam de ST
  * simplesmente a omitem.
+ *
+ * `ibptRates` (B9) segue o mesmo padrão, e por um motivo ainda mais forte:
+ * lista vazia é o estado normal de quem ainda não cadastrou os percentuais da
+ * Lei da Transparência, e a nota sai sem o `vTotTrib` — nunca recusada.
  */
 export function buildNfePayloadFromSale(
   sale: SaleForInvoice,
   rules: TaxRuleRow[],
   mvaRules: MvaRuleRow[] = [],
+  ibptRates: IbptRateRow[] = [],
 ): BuildPayloadResult {
   const errors: string[] = [];
 
@@ -1709,13 +1893,17 @@ export function buildNfePayloadFromSale(
   // NF-e de venda: destinatário identificado e obrigatório (validado acima), e
   // é dele que dependem as duas dimensões de `ResolveItemsOptions` — o direito
   // ao crédito do Simples e o DIFAL da EC 87/2015.
-  const resolved = resolveItemsForSale(sale, rules, query, mvaRules, {
+  const resolved = resolveItemsForSale(sale, rules, query, mvaRules, ibptRates, {
     verificaDireitoAoCreditoDoDestinatario: true,
     // `indFinal = 1` e `indIEDest = 9`, as duas condições de destinatário da
     // regra `NA01-20`. São a mesma pergunta desde a correção da Rejeição 696
     // — `resolveConsumidorFinal` deriva uma da outra —, e a terceira condição
     // (interestadual) `resolveItemsForSale` decide sozinha.
     destinatarioConsumidorFinalNaoContribuinte: consumidorFinal === 1 && indicadorIeCodigo === 9,
+    // A Lei 12.741/2012 alcança a "venda ao consumidor" (art. 1º, caput) — não
+    // a venda a contribuinte que vai revender. `consumidor_final` é a resposta
+    // que o próprio cabeçalho já dá a essa pergunta; ver `ResolveItemsOptions`.
+    declaraValorAproximadoDosTributos: consumidorFinal === 1,
   });
   if (!resolved.ok) return resolved;
   const {
@@ -1732,6 +1920,7 @@ export function buildNfePayloadFromSale(
     ipiValorTotal,
     pisValorTotal,
     cofinsValorTotal,
+    valorTotalTributos,
   } = resolved.data;
 
   // `idDest`, e ele sai da **mesma** função que decide a alíquota interestadual
@@ -1797,13 +1986,28 @@ export function buildNfePayloadFromSale(
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
+    // `vTotTrib` do total (B9): igual à soma dos itens, ou é rejeição 685.
+    valor_total_tributos: valorTotalTributos,
     modalidade_frete: sale.freightAmount > 0 ? 0 : 9,
 
     items,
-    informacoes_adicionais_contribuinte: `Venda ${sale.code}`,
+    informacoes_adicionais_contribuinte: comInformacoesDeTributos(`Venda ${sale.code}`, resolved.data),
   };
 
   return { ok: true, payload, cfop };
+}
+
+/**
+ * Junta o texto que a nota já escrevia com a segregação por ente tributante da
+ * Lei da Transparência (B9), quando ela existe.
+ *
+ * Fica numa função só para os três documentos não divergirem no separador — e
+ * porque o texto tem de sumir inteiro quando a nota não declara `vTotTrib`, em
+ * vez de sobrar uma frase falando de tributos que não foram informados.
+ */
+function comInformacoesDeTributos(base: string, resolved: ResolvedItems): string {
+  const tributos = informacoesTributosAproximados(resolved);
+  return tributos ? `${base}. ${tributos}` : base;
 }
 
 /** `sale_payments.method` → código de forma de pagamento da SEFAZ (grupo `pag`, obrigatório na NFC-e). */
@@ -1869,6 +2073,7 @@ export function buildNfcePayloadFromSale(
   sale: SaleForInvoice,
   rules: TaxRuleRow[],
   mvaRules: MvaRuleRow[] = [],
+  ibptRates: IbptRateRow[] = [],
 ): BuildPayloadResult {
   const errors: string[] = [];
   if (!sale.branch.cnpj) errors.push("Filial sem CNPJ cadastrado.");
@@ -1897,9 +2102,14 @@ export function buildNfcePayloadFromSale(
   // interestadual. O `false` é redundante e explícito — a rejeição **807**
   // ("NFC-e com grupo de ICMS para a UF do destinatário") existe para o modelo
   // 65 nunca declarar este grupo.
-  const resolved = resolveItemsForSale(sale, rules, query, mvaRules, {
+  const resolved = resolveItemsForSale(sale, rules, query, mvaRules, ibptRates, {
     verificaDireitoAoCreditoDoDestinatario: false,
     destinatarioConsumidorFinalNaoContribuinte: false,
+    // **Sempre**, e é o único dos três documentos em que não há condição a
+    // avaliar: o modelo 65 é venda presencial a consumidor final por definição
+    // (`consumidor_final: 1`, logo abaixo). É o cupom que a Lei da
+    // Transparência existe para fazer o consumidor ler.
+    declaraValorAproximadoDosTributos: true,
   });
   if (!resolved.ok) return resolved;
   const {
@@ -1913,6 +2123,7 @@ export function buildNfcePayloadFromSale(
     ipiValorTotal,
     pisValorTotal,
     cofinsValorTotal,
+    valorTotalTributos,
   } = resolved.data;
 
   const payload: NfePayload = {
@@ -1949,11 +2160,12 @@ export function buildNfcePayloadFromSale(
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
+    valor_total_tributos: valorTotalTributos,
     modalidade_frete: sale.freightAmount > 0 ? 0 : 9,
 
     items,
     formas_pagamento: buildFormasPagamento(sale.payments),
-    informacoes_adicionais_contribuinte: `Venda ${sale.code}`,
+    informacoes_adicionais_contribuinte: comInformacoesDeTributos(`Venda ${sale.code}`, resolved.data),
   };
 
   return { ok: true, payload, cfop };
@@ -2025,6 +2237,20 @@ export type SaleReturnForInvoice = {
  * Declarar o grupo numa nota de entrada não é "escopo a mais": é a rejeição
  * **695** ("informado indevidamente o grupo de ICMS para a UF de destino").
  *
+ * ## O `vTotTrib` da Lei da Transparência **também não** vai (B9, 05/09/2026)
+ *
+ * Mesmo desfecho do DIFAL, mas por um caminho diferente, e a diferença importa
+ * para quem for revisar: aqui **não há regra de validação decidindo**. O
+ * `vTotTrib` é opcional em qualquer documento (`M02`/`W16a`) e declará-lo numa
+ * nota de entrada não seria rejeitado. O que decide é o alcance da própria lei
+ * — "documentos fiscais [...] emitidos por ocasião da **venda ao consumidor**"
+ * (Lei 12.741/2012, art. 1º, *caput*) —, e uma devolução não é venda: é a nota
+ * que desfaz uma, sem consumidor comprando nada a quem informar carga
+ * tributária. A Focus NFe chega à mesma conclusão sozinha, e é uma confirmação
+ * independente boa de ter: ela deixa de calcular o campo quando
+ * `natureza_operacao` contém `DEVOLUCAO`, que é exatamente o que esta função
+ * escreve.
+ *
  * Sobra, é verdade, uma pergunta substantiva que esta tarefa **não** responde:
  * a devolução de uma venda que recolheu DIFAL deveria produzir alguma reversão
  * do imposto recolhido ao estado de destino. Isso não se faz no XML da
@@ -2042,6 +2268,7 @@ export function buildReturnNfePayload(
   saleReturn: SaleReturnForInvoice,
   rules: TaxRuleRow[],
   mvaRules: MvaRuleRow[] = [],
+  ibptRates: IbptRateRow[] = [],
 ): BuildPayloadResult {
   const errors: string[] = [];
 
@@ -2098,9 +2325,14 @@ export function buildReturnNfePayload(
   // **Sem DIFAL**, e a decisão é da própria regra, não de escopo: a `NA01-20`
   // tem exceção expressa para NF-e de **entrada** (`tpNF = 0`), que é o que
   // esta função emite (`tipo_documento: 0`). Ver a nota abaixo, no cabeçalho.
-  const resolved = resolveItemsForSale(asSale, rules, query, mvaRules, {
+  const resolved = resolveItemsForSale(asSale, rules, query, mvaRules, ibptRates, {
     verificaDireitoAoCreditoDoDestinatario: true,
     destinatarioConsumidorFinalNaoContribuinte: false,
+    // **Sem `vTotTrib`** — ver a seção dedicada no cabeçalho desta função. Ao
+    // contrário do DIFAL logo acima, aqui não é regra de validação que decide:
+    // é o alcance da Lei 12.741, que fala de "venda ao consumidor", e esta é
+    // nota de entrada que desfaz uma venda.
+    declaraValorAproximadoDosTributos: false,
   });
   if (!resolved.ok) return resolved;
   const {

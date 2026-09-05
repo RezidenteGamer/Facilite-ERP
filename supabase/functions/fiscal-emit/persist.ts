@@ -219,6 +219,12 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
     total_icms_uf_destino: toNumberOrNull(payload.icms_valor_total_uf_destino),
     total_icms_uf_remetente: toNumberOrNull(payload.icms_valor_total_uf_remetente),
     total_fcp_uf_destino: toNumberOrNull(payload.fcp_valor_total_uf_destino),
+    // `vTotTrib` da Lei da Transparência (B9, 05/09/2026): coluna nova. Nula
+    // em toda nota que não é venda ao consumidor, e em toda venda cujos NCM
+    // ainda não têm linha em `ibpt_rates` — e nulo aqui continua sendo "não
+    // calculado" (A3), que é exatamente o significado certo: o campo também
+    // não foi para o XML.
+    total_tributos_aproximados: toNumberOrNull(payload.valor_total_tributos),
     // IBS e CBS seguem nulos: são a Reforma Tributária (B10), que ainda não tem
     // motor nenhum.
     total_ibs: null,
@@ -339,6 +345,12 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     ipi_base: toNumberOrNull(item.ipi_base_calculo),
     ipi_aliquota: toNumberOrNull(item.ipi_aliquota),
     ipi_valor: toNumberOrNull(item.ipi_valor),
+
+    // `vTotTrib` do item (B9): coluna nova, e a única deste `insert` que não
+    // guarda imposto nenhum — é a estimativa informativa da Lei 12.741/2012.
+    // Nula quando o NCM não tem linha em `ibpt_rates`, que é o estado normal de
+    // quem ainda não cadastrou os percentuais, não erro.
+    valor_tributos_aproximados: toNumberOrNull(item.valor_total_tributos),
   }));
 }
 

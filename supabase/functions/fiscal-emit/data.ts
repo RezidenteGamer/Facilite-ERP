@@ -33,6 +33,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 import type { SaleForInvoice, SaleReturnForInvoice } from "../_shared/fiscal/invoiceMapping.ts";
 import { MVA_RULE_COLUMNS, toMvaRuleRow, type MvaRuleRow } from "../_shared/fiscal/mvaRules.ts";
+import { IBPT_RATE_COLUMNS, toIbptRateRow, type IbptRateRow } from "../_shared/fiscal/ibptRates.ts";
 import { TAX_GROUP_COLUMNS, toTaxGroup } from "../_shared/fiscal/taxGroups.ts";
 import { toTaxRuleRow, type TaxRuleRow } from "../_shared/fiscal/taxRules.ts";
 
@@ -159,6 +160,7 @@ type SaleReturnQueryRow = {
 
 type TaxRuleQueryRow = Parameters<typeof toTaxRuleRow>[0];
 type MvaRuleQueryRow = Parameters<typeof toMvaRuleRow>[0];
+type IbptRateQueryRow = Parameters<typeof toIbptRateRow>[0];
 
 function toInvoiceBranch(branch: BranchRow): SaleForInvoice["branch"] {
   return {
@@ -349,4 +351,18 @@ export async function readMvaRules(admin: SupabaseClient): Promise<MvaRuleRow[]>
   const { data, error } = await admin.from("mva_rules").select(MVA_RULE_COLUMNS);
   if (error) throw error;
   return ((data ?? []) as unknown as MvaRuleQueryRow[]).map(toMvaRuleRow);
+}
+
+/**
+ * Os percentuais da Lei da Transparência (módulo Tributos aproximados (IBPT))
+ * — quem os aplica é `resolveIbptRate`, dentro do mapeamento (B9, 05/09/2026).
+ *
+ * Lê a tabela inteira, pelo mesmo motivo de `readTaxRules` e `readMvaRules`:
+ * poucas linhas, filtro que depende do NCM de cada item, e uma consulta por
+ * item trocaria uma leitura por N idas ao banco dentro do laço de montagem.
+ */
+export async function readIbptRates(admin: SupabaseClient): Promise<IbptRateRow[]> {
+  const { data, error } = await admin.from("ibpt_rates").select(IBPT_RATE_COLUMNS);
+  if (error) throw error;
+  return ((data ?? []) as unknown as IbptRateQueryRow[]).map(toIbptRateRow);
 }
