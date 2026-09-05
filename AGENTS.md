@@ -2807,11 +2807,11 @@ B2 (ICMS-ST, MVA, `mva_rules`, `pRedBCST`), B5 (as regras *positivas* de
 PIS/COFINS por CST — cálculo por unidade do CST 03, monofásico, os CSTs de
 crédito; o que B1 fez foi só **parar de declarar** onde o grupo XML não tem
 campo), B8 (Simples Nacional completo: `pCredSN` do CSOSN 101/201, anexo do
-cliente), B9 (IBPT) e B10 (IBS/CBS/IS). Também fora: filtrar `pRedBC` por CST
-(ver Decisão 2), remover `products.cst_ipi` (ver Decisão 1), e
-`ipi_codigo_enquadramento`, que existe em `fiscal_document_items` desde A3 e
-continua nulo — é código de enquadramento legal, dado de cadastro que ninguém
-tem hoje.
+cliente), B9 (IBPT) e B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa
+própria. Também fora: filtrar `pRedBC` por CST (ver Decisão 2), remover
+`products.cst_ipi` (ver Decisão 1), e `ipi_codigo_enquadramento`, que existe em
+`fiscal_document_items` desde A3 e continua nulo — é código de enquadramento
+legal, dado de cadastro que ninguém tem hoje.
 
 ### Decisão arquitetural: ICMS-ST com MVA — a tabela `mva_rules`, a alíquota interestadual e o que ficou deliberadamente de fora (B2) (01/09/2026)
 
@@ -3102,11 +3102,12 @@ coordenação, junto com a revisão independente.
 
 #### Fora de escopo
 
-B5 (PIS/COFINS por CST — monofásico, cálculo por unidade), B8 (Simples
-Nacional completo: `pCredSN` do CSOSN 101/201, e a dedução do próprio no ST
-descrita acima), B9 (IBPT) e B10 (IBS/CBS/IS). Também fora: tudo da seção "o
-que ficou deliberadamente de fora", e a alíquota interna por UF × NCM, que é a
-correção de raiz das três limitações registradas aqui.
+B5 (PIS/COFINS por CST — monofásico, cálculo por unidade), B8 (Simples Nacional
+completo: `pCredSN` do CSOSN 101/201, e a dedução do próprio no ST descrita
+acima), B9 (IBPT) e B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria.
+Também fora: tudo da seção "o que ficou deliberadamente de fora", e a alíquota
+interna por UF × NCM, que é a correção de raiz das três limitações registradas
+aqui.
 
 ### Decisão arquitetural: PIS/COFINS por unidade de medida — o CST 03, e o que a pesquisa sobre monofásico encontrou (B5) (01/09/2026)
 
@@ -3320,10 +3321,11 @@ coordenação, junto com a revisão independente.
 #### Fora de escopo
 
 B8 (Simples Nacional completo: `pCredSN` do CSOSN 101/201, e a dedução do ICMS
-próprio no ST que ficou pendente de B2), B9 (IBPT) e B10 (IBS/CBS/IS). Também
-fora: a limitação de B2 sobre o ICMS próprio em venda interestadual (não foi
-tocada); a forma ad rem do grupo `PISOutr` (ver acima); o fator de conversão
-entre unidade comercial e tributável, que é a limitação que esta tarefa expôs;
+próprio no ST que ficou pendente de B2), B9 (IBPT) e B10 (IBS/CBS) — feito; IS
+ainda em aberto, tarefa própria. Também fora: a limitação de B2 sobre o ICMS
+próprio em venda interestadual (não foi tocada); a forma ad rem do grupo
+`PISOutr` (ver acima); o fator de conversão entre unidade comercial e
+tributável, que é a limitação que esta tarefa expôs;
 `quantidade_tributavel`/`valor_unitario_tributavel` no payload, que continuam
 nunca preenchidos desde a etapa 8; e o XML do provedor simulado, que declara
 apenas o CST de PIS/COFINS e nenhum valor — como já fazia antes de B1, e como
@@ -3638,14 +3640,15 @@ Configurações, e o que ela provou é o acoplamento descrito acima.
 
 #### Fora de escopo
 
-B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, e cada um registrado acima com o
-motivo: o cálculo automático de RBT12 e enquadramento no Simples; o `pCredSN` no
-CSOSN `900`; a dedução do próprio no CSOSN `203`; a alíquota interestadual na
-dedução do próprio (limitação de B1, herdada de propósito); a dimensão de
-cliente na escolha do CSOSN `101`/`102` (a lacuna que a pesquisa do "anexo do
-cliente" achou); o crédito na NFC-e e na devolução; um módulo de cadastro de
-Filiais; e o XML do provedor simulado, que continua declarando apenas os CST e
-nenhum valor — como já ficava para o ICMS-ST de B2 e o ad rem de B5.
+B9 (IBPT) e B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria. Também
+fora, e cada um registrado acima com o motivo: o cálculo automático de RBT12 e
+enquadramento no Simples; o `pCredSN` no CSOSN `900`; a dedução do próprio no
+CSOSN `203`; a alíquota interestadual na dedução do próprio (limitação de B1,
+herdada de propósito); a dimensão de cliente na escolha do CSOSN `101`/`102` (a
+lacuna que a pesquisa do "anexo do cliente" achou); o crédito na NFC-e e na
+devolução; um módulo de cadastro de Filiais; e o XML do provedor simulado, que
+continua declarando apenas os CST e nenhum valor — como já ficava para o
+ICMS-ST de B2 e o ad rem de B5.
 
 ### Correção: a alíquota interestadual chega ao ICMS próprio — fechando a lacuna que B1, B2 e B8 registraram (04/09/2026)
 
@@ -3836,11 +3839,11 @@ recorrente de B1/B2/B5/B8: cada `deploy_edge_function` precisa do conjunto
 
 #### Fora de escopo
 
-B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, cada um registrado acima: o CSOSN
-`900`; a alíquota interna do destino por UF × NCM (a aproximação de B2, que
-segue sendo a lacuna de raiz do ICMS neste motor); e a devolução lendo
-`fiscal_document_items` em vez de recalcular, que continua sendo uma correção
-para os quatro casos de uma vez.
+B9 (IBPT) e B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria. Também
+fora, cada um registrado acima: o CSOSN `900`; a alíquota interna do destino
+por UF × NCM (a aproximação de B2, que segue sendo a lacuna de raiz do ICMS
+neste motor); e a devolução lendo `fiscal_document_items` em vez de recalcular,
+que continua sendo uma correção para os quatro casos de uma vez.
 
 E o **DIFAL da EC 87/2015**, que esta correção não cria nem descobre — apenas
 deixa sozinho. A partir do momento em que a venda interestadual destaca a
@@ -4167,13 +4170,14 @@ com a revisão independente.
 
 #### Fora de escopo
 
-B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, e cada um registrado acima com o
-motivo: a condição "destinadas à comercialização ou industrialização" do §1º (o
-cadastro não consegue respondê-la sem transformar `indicador_ie` em gate, o que
-recusaria clientes com o campo em branco); a checagem na NFC-e; a escolha
-automática do CSOSN por venda; a checagem no sentido contrário (`102` a cliente
-elegível); a devolução recalcular com o cadastro de hoje (quinta ocorrência da
-mesma limitação); e o campo no `QuickContactFormModal`.
+B9 (IBPT) e B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria. Também
+fora, e cada um registrado acima com o motivo: a condição "destinadas à
+comercialização ou industrialização" do §1º (o cadastro não consegue
+respondê-la sem transformar `indicador_ie` em gate, o que recusaria clientes
+com o campo em branco); a checagem na NFC-e; a escolha automática do CSOSN por
+venda; a checagem no sentido contrário (`102` a cliente elegível); a devolução
+recalcular com o cadastro de hoje (quinta ocorrência da mesma limitação); e o
+campo no `QuickContactFormModal`.
 
 ### Pesquisa: a segunda condição do art. 23, §1º ("destinadas à comercialização ou industrialização") — decisão de **não implementar** (04/09/2026)
 
@@ -5084,11 +5088,11 @@ se ficar errado.
 
 #### Fora de escopo
 
-B9 (IBPT) e B10 (IBS/CBS/IS). Também fora, cada um registrado acima: a tabela
-de alíquota interna por UF × NCM; o indicador de finalidade da aquisição por
-venda; a devolução lendo `fiscal_document_items` em vez de recalcular; e a
-escolha de CST por operação, que é o que resolveria a coexistência ST × DIFAL
-no plano substantivo.
+B9 (IBPT) e B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria. Também
+fora, cada um registrado acima: a tabela de alíquota interna por UF × NCM; o
+indicador de finalidade da aquisição por venda; a devolução lendo
+`fiscal_document_items` em vez de recalcular; e a escolha de CST por operação,
+que é o que resolveria a coexistência ST × DIFAL no plano substantivo.
 
 ### Decisão arquitetural: a Lei da Transparência Fiscal — o `vTotTrib`, o cadastro manual do IBPT e a primeira vez que "não sei" não recusa a emissão (B9) (05/09/2026)
 
@@ -5399,13 +5403,351 @@ coordenação, junto com a revisão independente. Ver o que aconteceu em B4
 
 #### Fora de escopo
 
-B10 (IBS/CBS/IS). Também fora: as duas limitações substantivas acima; o `ex`
-(exceção fiscal do NCM), que `products` não guarda; serviços (NBS/LC 116), que
-este motor não emite; a vigência filtrando a busca (nenhum cadastro deste motor
-tem dimensão temporal, e este não seria o primeiro a ter); a importação
-automática pela API paga do IBPT, que resolveria a atualização trimestral e é
-tarefa própria; a fonte por item numa nota com NCMs de versões diferentes da
-tabela (vale a do primeiro item que declarou — citar uma por item deixaria o
-texto ilegível para o consumidor, que é quem ele existe para informar); e o XML
-do provedor simulado, que continua sem declarar `vTotTrib`, como já não declara
-ST nem DIFAL.
+B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria. Também fora: as duas
+limitações substantivas acima; o `ex` (exceção fiscal do NCM), que `products`
+não guarda; serviços (NBS/LC 116), que este motor não emite; a vigência
+filtrando a busca (nenhum cadastro deste motor tem dimensão temporal, e este
+não seria o primeiro a ter); a importação automática pela API paga do IBPT, que
+resolveria a atualização trimestral e é tarefa própria; a fonte por item numa
+nota com NCMs de versões diferentes da tabela (vale a do primeiro item que
+declarou — citar uma por item deixaria o texto ilegível para o consumidor, que
+é quem ele existe para informar); e o XML do provedor simulado, que continua
+sem declarar `vTotTrib`, como já não declara ST nem DIFAL.
+### Decisão arquitetural: IBS e CBS — o grupo `IBSCBS`, o ano de teste da Reforma Tributária e a primeira tarefa que **quebra** nota que hoje sai (B10) (05/09/2026)
+
+Última tarefa da Etapa 2, e a única cuja lei ainda está sendo escrita enquanto
+o código é escrito. B1–B9 trataram de tributos assentados há décadas; aqui a
+regulamentação tem versão, data e prazo de validade — o que muda o padrão de
+pesquisa (toda afirmação abaixo vem com fonte **e** data) e muda o resultado:
+esta é a primeira tarefa da série que faz **recusar notas que ontem saíam**.
+
+O ponto de partida já estava pronto e não precisou de migration nenhuma:
+`tax_groups.cst_ibs_cbs` e `tax_groups.cclasstrib` existem desde a criação de
+`tax_groups` (19/08/2026) e **já aparecem na tela de Grupos Tributários**; as
+oito colunas `ibs_*`/`cbs_*` de `fiscal_document_items` e as duas `total_ibs`/
+`total_cbs` de `fiscal_documents` existem desde A3 (01/09/2026). O que faltava
+era o meio do caminho: `NfePayloadItem` e `NfePayload` não tinham campo nenhum
+de IBS/CBS, e `persist.ts` gravava `null` fixo nos dois totais com o comentário
+"são a Reforma Tributária (B10), que ainda não tem motor nenhum".
+
+#### As fontes, com data — porque aqui elas envelhecem
+
+| Fonte | Versão / data | O que responde |
+| --- | --- | --- |
+| **LC 214/2025** (Planalto, texto consolidado consultado em 05/09/2026, já com a LC 227/2026) | 16/01/2025 | arts. 343, 344, 346, 347 e 348 — alíquotas, compensação, dispensa e Simples |
+| **NT 2025.002-RTC** (Portal Nacional da NF-e) | **v1.51, publicada em 04/08/2026** | leiaute do grupo `UB`, dos totais `IBSCBSTot` e as regras de validação |
+| **Informe Técnico 2025.002** (Portal da NF-e / Portal DFe SVRS) | **v1.60, publicado em 23/06/2026** | tabela CST do IBS/CBS (18 códigos) e tabela `cClassTrib` (164 códigos, com `pRedIBS`/`pRedCBS`) |
+| **Ato Conjunto RFB/CGIBS nº 4** (DOU) | 30/07/2026, DOU de 31/07/2026 | cronograma de obrigatoriedade por documento fiscal |
+| **Tabela de campos da Focus NFe** (`campos.focusnfe.com.br/nfe/NotaFiscalXML.html`) | consultada em 05/09/2026 | os nomes `snake_case` do payload, item e cabeçalho |
+| **Guia "A reforma tributária e a emissão de documentos fiscais"** da Focus | atualizado em dez/2025 | exemplo de JSON com as alíquotas de teste preenchidas |
+
+**Uma contradição encontrada, e como foi resolvida.** Uma análise de escritório
+de advocacia sobre a v1.51 afirmava que ela havia **removido** as datas da regra
+`UB12-10`, substituindo-as por "implantação futura" — o que significaria que a
+ausência do grupo IBS/CBS não gera rejeição hoje. O texto da NT diz o oposto: o
+PDF da v1.51 (e o da v1.50) traz, no corpo da regra, "Observação 2:
+implementação em produção para NFe com data de emissão maior ou igual a
+**03/08/2026** e emitente com CRT 3 = Regime Normal", e a linha do histórico da
+própria v1.51 registra "Alteração do cronograma de implantação das regras de
+validação UB12-10 — Até 03/08/2026 — 03/08/2026". As duas versões do PDF
+carregam **também** o texto antigo ("implementação futura para produção"), que é
+a redação anterior mantida à vista, como essas NT costumam fazer. Prevaleceu o
+documento primário. É o motivo de a decisão central desta tarefa (recusar) estar
+apoiada no PDF oficial e não em prosa de mercado.
+
+#### As seis perguntas de pesquisa, e as respostas
+
+**1. Qual é o tratamento vigente em 05/09/2026 — e as alíquotas de teste são
+mesmo fixas?** Sim para as alíquotas, **não** para "independentes do
+`cClassTrib`".
+
+- **IBS estadual: 0,1%.** "Art. 343. Em relação aos fatos geradores ocorridos de
+  1º de janeiro a 31 de dezembro de 2026, o IBS será cobrado mediante aplicação
+  da **alíquota estadual de 0,1%**". Regra `UB18-10`, rejeição **1026**.
+- **IBS municipal: 0%.** O art. 343 não fixa alíquota municipal para 2026 (ela
+  só aparece no art. 344, com 0,05%, a partir de 2027). A `UB37-10` confirma:
+  "0% para documento com data de emissão no ano de 2025 e 2026". **O grupo
+  `gIBSMun` continua obrigatório** — o que é zero é a alíquota.
+- **CBS: 0,9%.** "Art. 346. […] a CBS será cobrada mediante aplicação da
+  alíquota de 0,9%". Regra `UB56-10`.
+- **A compensação existe e o caixa é neutro**: art. 348, I (o recolhido é
+  compensado com PIS/COFINS do mesmo período) e § 1º ("Fica **dispensado o
+  recolhimento** […] em relação aos sujeitos passivos que **cumprirem as
+  obrigações acessórias** previstas na legislação"). Nesta fase a obrigação
+  acessória *é* o tributo — a nota certa é o que evita o desembolso.
+- **E as alíquotas NÃO são iguais para todo mundo.** Art. 348, III, "a": as
+  alíquotas dos arts. 343 e 346 "serão aplicadas **com a respectiva redução** no
+  caso das operações sujeitas a alíquota reduzida". O `cClassTrib` continua
+  modulando a carga no ano de teste — um item de cesta básica (redução de 100%)
+  declara 0,1% nominal e **0%** efetivo. Era a armadilha da tarefa: tratar as
+  alíquotas como constantes teria produzido a rejeição **1041** em todo produto
+  com benefício.
+
+**2. O `cClassTrib` precisa de cadastro? Não — precisa da tabela oficial, e ela
+mora no código.** O Informe Técnico 2025.002 publica, por código, as colunas
+`pRedIBS` ("Percentual de redução da alíquota do IBS associado ao código
+informado em cClassTrib") e `pRedCBS`. São 164 códigos, dos quais 59 têm alguma
+redução (30%, 40%, 50%, 60%, 70%, 80% ou 100%) e **97 valem para NF-e ou
+NFC-e**. A tabela CST tem 18 códigos, cada um com os indicadores que dizem quais
+grupos do leiaute ele exige.
+
+Três razões para **tabela fixa no código** e não um cadastro novo no molde de
+`mva_rules`/`ibpt_rates`:
+
+1. **É catálogo público e oficial**, como CFOP e NCM (que este sistema importou
+   em massa por migration) — e ao contrário da tabela do IBPT, que é licenciada
+   por usuário e por isso virou o cadastro `ibpt_rates` de B9.
+2. **O `pRedAliq` não é decisão de quem opera o sistema.** Ele é *função* do
+   `cClassTrib` que o contador já digita em Grupos Tributários, e a regra
+   `UB27-10` (rejeição **1034**) confere exatamente essa correspondência. Um
+   campo de digitação aqui só poderia acrescentar erro.
+3. **O volume é pequeno e a forma é a de `taxSituations.ts`**: 18 linhas de
+   indicadores por CST mais 164 de códigos. É a mesma natureza da tabela fixa de
+   alíquota interestadual que B2 preferiu a um cadastro.
+
+O preço está registrado no cabeçalho de `ibsCbs.ts`: **a tabela envelhece**. O
+Informe Técnico já teve dez revisões em treze meses (v1.00 em 19/05/2025, v1.60
+em 23/06/2026), e um `cClassTrib` publicado depois de 23/06/2026 é recusado aqui
+como inexistente até alguém atualizar o bloco.
+
+**3. A forma exata no XML.** Conferida na NT v1.51 campo a campo e cruzada com a
+tabela de campos da Focus:
+
+- **O grupo é `det/imposto/IBSCBS`** (id `UB12`), com `CST` (`UB13`, 3 dígitos) e
+  `cClassTrib` (`UB14`, **6 dígitos**, obrigatório sempre que o grupo existe).
+- **Sim, há sub-grupos separados para as duas partes do IBS.** Dentro de
+  `gIBSCBS` (`UB15`) vêm `vBC` (`UB16`, **uma base só, compartilhada por IBS e
+  CBS**), `gIBSUF` (`UB17`: `pIBSUF`, `gRed`, `vIBSUF`), `gIBSMun` (`UB36`:
+  `pIBSMun`, `gRed`, `vIBSMun`), `vIBS` (`UB54a` = `vIBSUF + vIBSMun`, regra
+  `UB54a-10`) e `gCBS` (`UB55`: `pCBS`, `gRed`, `vCBS`).
+- **`fiscal_document_items` tem uma coluna `ibs_aliquota` para duas alíquotas, e
+  isso é limitação registrada, não corrigida.** `ibs_base`/`cbs_base` recebem a
+  mesma `vBC` (o XML tem uma só); `ibs_valor` recebe o `vIBS` do item; e
+  `ibs_aliquota` recebe a **soma das duas parcelas efetivamente aplicadas**, para
+  `base × alíquota / 100` reencontrar o valor gravado. Em 2026 a municipal é zero
+  e a soma é a própria estadual; em 2027–2028 seria 0,05 + 0,05 = 0,1. O que se
+  perde é o desdobramento, e ele é recuperável do XML. Criar colunas novas foi
+  descartado pelo mesmo critério que manteve B10 sem migration (abaixo).
+- **Existe total de cabeçalho, e ele é obrigatório em bloco.** `total/IBSCBSTot`
+  (`W34`) traz `vBCIBSCBS`, `gIBS` (com `gIBSUF`, `gIBSMun`, `vIBS`, `vCredPres`,
+  `vCredPresCondSus`) e `gCBS`. **As regras de igualdade item↔total existem e são
+  cinco**, cada uma com rejeição própria: `W35-10`/**1076** (base), `W41-10`/**1080**
+  (IBS UF), `W46-10`/**1084** (IBS municipal), `W47-10`/**1085** (IBS) e
+  `W56-10`/**1091** (CBS) — o mesmo problema da 685 do `vTotTrib` em B9, e a
+  mesma solução: somar os valores **já arredondados** dos itens. Há teste
+  dedicado (dois itens de 333,33 declaram 0,33 cada e o total sai 0,66;
+  recalcular sobre 666,66 daria 0,67).
+- **E há um par de regras que amarra o grupo de totais aos itens nos dois
+  sentidos**: `W34-10`/**1118** (totais sem item que declare) e `W34-20`/**1119**
+  (item que declara sem totais). Por isso os quinze campos saem juntos, com zero
+  explícito nos que este motor nunca calcula (diferimento, devolução de tributos,
+  crédito presumido) — eles são de ocorrência `1-1` no leiaute, e omitir é erro
+  de schema. Mesma disciplina do `icms_valor_total_uf_remetente` de B4. **O
+  gatilho da `W34-20` é o grupo externo (`UB12`) e não o `gIBSCBS` (`UB15`)** —
+  distinção que custou uma correção na revisão; ver a seção do `/code-review`.
+- **O `valor_total` da nota não muda.** O leiaute criou um campo próprio para o
+  total com os novos tributos — `vNFTot`, id `W60` — e as duas regras dele
+  (`W60-05` e `W60-10`) estão marcadas na NT como *implementação futura*. O `vNF`
+  segue como estava.
+
+**4. Escopo por documento: os três declaram, e pela primeira vez o escopo não é
+uma escolha.** A `UB12-10` se aplica aos **modelos 55 e 65** e não distingue
+venda de devolução, nem consumidor final de contribuinte. A suspeita registrada
+no enunciado estava certa: a distinção "só venda ao consumidor" era do
+`vTotTrib` (Lei 12.741/2012, art. 1º, *caput*) e **não** se herda aqui — IBS e
+CBS incidem sobre o consumo em geral. Por isso `ResolveItemsOptions` ganhou um
+quarto campo que **não** é uma decisão de escopo: `modeloDocumento` (`"55"` /
+`"65"`), que existe só porque a tabela de `cClassTrib` publica em que modelos
+cada código vale (`indNFe`/`indNFCe`) e usá-lo no modelo errado é a rejeição
+**1025** (`UB14-25`). Quem decide se a nota declara são o **regime do emitente** e
+o **ano de emissão**, e as duas coisas `resolveItemsForSale` já conhece.
+
+A devolução declara junto. A `UB12-10` tem exceção para a NF-e de devolução que
+referencia nota "com data de emissão **anterior a 2026**" — exceção que apenas
+*dispensa* o grupo, nunca o proíbe —, e este motor não a explora: a nota original
+de uma devolução deste sistema é sempre de 2026 em diante. Uma devolução de nota
+de 2025 sairia com o grupo desnecessariamente, sem rejeição (a `UB18-10` tem
+exceção expressa para `finNFe = 4`, então nem a alíquota é conferida ali).
+
+**5. Simples Nacional: fora desta fase, e a fonte é dupla.** Art. 348, III, "c":
+as alíquotas de 2026 "**não serão aplicadas** em relação às operações dos
+contribuintes optantes pelo Simples Nacional". O cronograma da própria NT
+2025.002 diz o mesmo com todas as letras: "As orientações para CRT=1 – Simples
+Nacional, CRT=2 – Simples Nacional, excesso sublimite de receita bruta, CRT=4 –
+MEI e Tributação Monofásica serão publicadas em NT futura, tendo em vista que a
+tributação do IBS/CBS/IS para estes contribuintes ocorre somente a partir de
+2027". A `UB12-10` só alcança esses CRT em **04/01/2027**, e o Ato Conjunto
+RFB/CGIBS nº 4 põe o Simples em 01/01/2027.
+
+Consequência no código: o gate é `regimeOptantePeloSimples` (CRT 1, 2 e 4), a
+mesma função que B4 usa para o DIFAL — **por um motivo diferente**, e a nota
+está no código para ninguém achar que é a mesma regra: lá o Simples é excluído
+porque **não deve** o imposto (ADI 5464); aqui porque a lei ainda **não o
+alcança**. Filial do Simples emite sem o grupo, sem recusa, e sem precisar de
+cadastro nenhum de IBS/CBS.
+
+**6. O Imposto Seletivo ficou de fora, e o schema confirma que ele é tarefa
+própria.** Conferido: `fiscal_document_items` **não tem coluna nenhuma** de IS
+(A3 criou `ibs_*` e `cbs_*` e mais nada), e o grupo `IS` do leiaute tem campos
+que nenhuma tabela deste sistema guarda (`CSTIS`, `cClassTribIS`, `adRemIS`,
+`uTrib`/`qTrib`). Excluí-lo não quebra nada — nem o schema, nem a `UB12-10`, que
+fala do grupo `IBSCBS`. As oito menções antigas a "B10 (IBS/CBS/IS)" nas seções
+de B1, B2, B5, B8, B4, B9 e das duas correções de 04/09/2026 foram ajustadas para
+"B10 (IBS/CBS) — feito; IS ainda em aberto, tarefa própria", **sem** tocar no
+conteúdo substantivo delas.
+
+#### A decisão que mais importa: a falta de cadastro **recusa**
+
+B9 inaugurou o oposto — "não sei" virando campo ausente — e a entrada dele avisa
+que a assimetria é o desenho. Ela continua sendo, e B10 é a prova pelo
+contraste. As três razões de B9 para omitir eram: o campo não determina imposto
+devido, o leiaute o declara opcional, e recusar seria o oposto do que a lei quer.
+**Nenhuma das três vale aqui**:
+
+1. **Determina imposto devido.** É tributo de verdade, apurado, compensado com
+   PIS/COFINS (art. 348, I) e dispensado de recolhimento **só** para quem cumprir
+   a obrigação acessória (§ 1º). Nota errada custa dinheiro em 2026.
+2. **O leiaute o exige.** `UB12-10` → rejeição **1115** ("Grupo IBSCBS não
+   informado"), em produção desde **03/08/2026** para CRT 3.
+3. **Recusar é o que protege a venda.** Uma nota de Regime Normal sem o grupo
+   **é rejeitada pela SEFAZ hoje**. Recusar aqui, com o nome do grupo tributário
+   na mensagem e o número da rejeição, é estritamente melhor do que mandar a nota
+   para tomar 1115 e o lojista descobrir sozinho o que faltou.
+
+**Isto quebra notas que hoje saem, e é a primeira tarefa da série a fazer isso de
+propósito.** Toda venda de filial de Regime Normal passa a exigir
+`cst_ibs_cbs` + `cclasstrib` no grupo tributário do produto. Os dois campos já
+estão na tela de Grupos Tributários desde 19/08/2026 — o que esta tarefa faz é
+finalmente dar destino a eles. Oito baterias de teste precisaram ganhar
+`cstIbsCbs: "000"` / `cclasstrib: "000001"` na fixture; **nenhuma asserção
+antiga mudou**.
+
+**A recusa por ano é a outra novidade, e ela tem prazo.** `ALIQUOTAS_PADRAO` só
+conhece 2025 e 2026. Documento de 2027 em diante **recusa o documento inteiro**
+(um erro só, sem "Item N": não é cadastro de ninguém que falta, é o motor que
+precisa ser atualizado), porque o art. 344 dá o IBS de 2027–2028 (0,05% + 0,05%)
+mas o art. 347 remete a CBS à alíquota de referência que resolução do Senado
+Federal ainda vai publicar. Inventar esse número é exatamente o que este motor
+não faz — e emitir sem o grupo tomaria 1115 do mesmo jeito. **Esta tarefa tem
+data de validade: 31/12/2026.**
+
+#### Os CST que este motor ainda não emite, e por quê
+
+`resolveIbsCbs` recusa, com o nome do grupo faltante na mensagem, os CST cujos
+indicadores exigem grupos que B10 não monta: `510`/`515` (`gDif`, diferimento),
+`222` (redutor da base de cálculo), `620` (`gIBSCBSMono`, monofásica), `800`
+(`gTransfCred`), `810` (`gCredPresIBSZFM`) e `811` (`gAjusteCompet`). Recusa
+também os 27 `cClassTrib` com indicador de **Tributação Regular** (os 25 de
+suspensão do CST `550`, mais o `200022` e o `200024`), que exigem o grupo
+`gTribRegular` (rejeição **1065**) carregando a tributação que *seria* devida —
+número que não há de onde tirar aqui.
+
+O que sobra cobre o varejo inteiro: `000` (tributação integral), `200` (alíquota
+reduzida, com `gRed`), `400`/`410` (isenção e imunidade, que declaram **só** CST
+e `cClassTrib` — mandar `gIBSCBS` neles é a rejeição **1021**), além de `010`,
+`011`, `220`, `221`, `820` e `830`.
+
+#### Por que B10 não tem migration — e por que isso importa para o deploy
+
+**Nenhuma coluna nova.** As dez colunas de IBS/CBS existem desde A3 e a tela de
+Grupos Tributários já expunha os dois códigos; a tabela oficial mora no código.
+Isso dá a B10 uma propriedade que nenhuma tarefa da Etapa 2 teve: **a ordem de
+implantação é indiferente**. Não há tabela nova para `data.ts` ler (nenhuma
+leitura foi acrescentada ao `Promise.all` do `index.ts`) e não há coluna nova
+para `persist.ts` mandar num `insert` — os dois riscos que as entradas de B2, B5,
+B8, B4 e B9 registraram como "a migration vem antes do deploy" simplesmente não
+existem aqui.
+
+Duas colunas foram **deliberadamente não criadas**: `fiscal_documents` não ganhou
+`total_ibs_cbs_base` (o `vBCIBSCBS`) nem o desdobramento `total_ibs_uf`/
+`total_ibs_mun`. As duas são recuperáveis somando os itens, e A3 já tinha optado
+por não criar um total para cada campo do XML.
+
+#### O que o `/code-review alto` encontrou
+
+**Um defeito, corrigido — e ele teria rejeitado nota.** O grupo de totais
+`IBSCBSTot` estava saindo apenas quando **algum item tinha `gIBSCBS`**, isto é,
+base e valores. Mas a regra `W34-20` (rejeição **1119**) exige o total quando
+"pelo menos um item possui IBS / CBS informado (id: **UB12**, tag: `IBSCBS`)" —
+e `UB12` é o grupo **externo**, o que carrega `CST` e `cClassTrib`. Um item de
+isenção (`400`) ou imunidade (`410`) tem `IBSCBS` e **não** tem `gIBSCBS`: uma
+nota cujos itens fossem todos imunes (uma remessa de bonificação, por exemplo)
+saía sem o grupo de totais e tomaria 1119. Agora o gatilho é o grupo externo, e
+a nota inteiramente isenta/imune declara `IBSCBSTot` com `vBCIBSCBS = 0` e sem
+os sub-grupos `gIBS`/`gCBS`, que são `0-1` no leiaute. Dois testes fixam isso —
+um na NF-e, outro na NFC-e —, e o teste que antes afirmava o comportamento
+errado (citando a 1118, que trata do caso oposto) foi corrigido junto.
+
+**Um ajuste menor**: `somaDeAliquotas`, em `persist.ts`, passou a arredondar a
+soma na quarta casa. Somar duas alíquotas de ponto flutuante pode devolver
+`0.08000000000000002` onde o certo é `0.08`; a coluna é `numeric(7,4)` e o
+banco arredondaria de qualquer jeito, mas o número que sai daqui é o mesmo que
+alguém lê ao depurar.
+
+**Uma limitação registrada e não corrigida**: `fiscal_document_items.ibs_aliquota`
+guarda a **soma** das duas alíquotas de IBS (estadual e municipal), porque a
+coluna é uma e o XML tem duas. Ver a pergunta 3.
+
+#### Arquivos
+
+- `supabase/functions/_shared/fiscal/ibsCbs.ts` — **novo**. O cabeçalho grande
+  com as citações da LC 214/2025 e da NT; `resolveAliquotasPadraoIbsCbs` (as duas
+  dimensões do documento), `aliquotaEfetivaIbsCbs` (a conta da `UB28-10`, com 4
+  casas), `resolveIbsCbs` (a resolução por item, com as recusas na ordem das
+  regras de validação), `aliquotasAplicadasIbsCbs`, e as duas tabelas oficiais.
+- `supabase/functions/_shared/fiscal/types.ts` — dezesseis campos novos em
+  `NfePayloadItem` e quinze em `NfePayload`, cada um com a tag do XML, o id do
+  leiaute e a rejeição que ele evita.
+- `supabase/functions/_shared/fiscal/invoiceMapping.ts` — o quarto campo de
+  `ResolveItemsOptions`, a resolução por documento fora do laço, o cálculo por
+  item, os cinco totais, `totaisIbsCbs` e a fiação nos três construtores.
+  **Nenhum outro imposto foi tocado** — há regressão provando que ICMS, PIS,
+  COFINS, `valor_total` e as Informações Complementares não mudam.
+- `supabase/functions/fiscal-emit/persist.ts` — as oito colunas do item, os dois
+  totais do cabeçalho e o helper `somaDeAliquotas`.
+- `tests/unit/invoiceIbsCbs.test.ts` — bateria nova, **49 testes**.
+- As oito fixtures de teste que ganharam `cstIbsCbs`/`cclasstrib`.
+
+`src/types/supabase.ts` **não** foi tocado, mesma decisão de B4 e B9: as colunas
+novas de `fiscal_document_items`/`fiscal_documents` só são escritas pela Edge
+Function, que não usa `Database`, e `tax_groups` já expunha os dois campos.
+Nenhuma migration foi escrita — ver a seção acima.
+
+#### Testado
+
+`npm run build` limpo. `npm run lint` com **zero erros e 62 avisos**, exatamente
+os mesmos de antes da tarefa. `deno check supabase/functions/fiscal-emit/index.ts`
+limpo. `npm test` com **386 testes passando** (49 a mais que B9) e as duas
+baterias que dependem de credencial em `.env.local` falhando alto, como é o
+desenho delas.
+
+A bateria nova cobre: as duas dimensões do documento (2025, 2026, CRT 1/2/4,
+ano anterior ao leiaute, 2027 recusando); a conta da alíquota efetiva (60%, 100%,
+0%, o arredondamento na quarta casa); o cadastro isolado (CST e `cClassTrib`
+ausentes, inexistentes, incompatíveis entre si, o código válido só em NF-e
+recusado na NFC-e, a Tributação Regular, os cinco CST de grupo não implementado,
+espaço em volta do código); a conta no item (tributação integral, redução de 60%,
+redução de 100% declarando zero e não ausente, imunidade declarando só os dois
+códigos); a recusa (item identificado, NFC-e, o ano recusando o documento
+inteiro); o escopo dos três documentos mais o Simples; os totais (soma dos itens,
+os dez campos zerados, itens imunes fora da soma, nota inteiramente imune sem o
+grupo de totais, e a soma dos valores já arredondados); e três regressões.
+
+**Nada foi aplicado nem implantado**: não há migration a aplicar e a Edge
+Function não foi implantada — pelo mesmo motivo de sempre, e ver o que aconteceu
+em B4 (04/09/2026).
+
+#### Fora de escopo
+
+**O Imposto Seletivo (IS)**, que é tarefa própria — ver a pergunta 6. Também
+fora, cada um registrado acima: os CST de diferimento, monofásica, transferência
+de crédito, ZFM, ajuste de competência e redutor de base; o grupo `gTribRegular`;
+o grupo `gCompraGov` (compras governamentais, cujo `pRedutor` entraria como
+segundo multiplicador da `UB28-10`); o `indDoacao`; o `vNFTot` (`W60`, regra
+futura); a composição do `vBC` pela `UB16-10` (que a própria NT marca como
+"Implementação Futura, aguardando orientação normativa" — este motor usa o valor
+bruto do item, a mesma expressão de todos os outros impostos); as colunas de
+`fiscal_documents` que dariam o `vBCIBSCBS` e o desdobramento UF/município; a
+atualização automática das duas tabelas oficiais quando sair um Informe Técnico
+novo; as alíquotas de 2027 em diante; e o XML do provedor simulado, que continua
+sem declarar IBS/CBS, como já não declara ST, DIFAL nem `vTotTrib`.

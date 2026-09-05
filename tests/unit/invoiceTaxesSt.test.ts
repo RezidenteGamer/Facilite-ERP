@@ -82,8 +82,11 @@ function taxGroup(overrides: Partial<TaxGroup> = {}): TaxGroup {
     aliquotaCofinsValor: null,
     cstIpi: null,
     aliquotaIpi: null,
-    cstIbsCbs: null,
-    cclasstrib: null,
+    // B10 (05/09/2026): CST 000 (tributação integral) e cClassTrib 000001
+    // ("Situações tributadas integralmente pelo IBS e CBS") passaram a ser
+    // obrigatórios — sem eles a emissão recusa. Ver tests/unit/invoiceIbsCbs.test.ts.
+    cstIbsCbs: "000",
+    cclasstrib: "000001",
     ...overrides,
   };
 }

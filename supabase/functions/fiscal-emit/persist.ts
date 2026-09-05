@@ -139,6 +139,24 @@ function toNumberOrNull(value: number | undefined): number | null {
 }
 
 /**
+ * Soma duas alíquotas em percentual, devolvendo `null` quando **nenhuma** das
+ * duas foi declarada (B10).
+ *
+ * Existe para uma coisa só: `fiscal_document_items.ibs_aliquota` é uma coluna
+ * e o XML tem duas alíquotas de IBS (`pIBSUF` e `pIBSMun`). Somar mantém a
+ * identidade `base × alíquota / 100 = valor` dentro da linha gravada. Uma das
+ * duas ausente conta como zero — o que não pode acontecer é a soma virar `0`
+ * num item que não declarou IBS nenhum, e é isso que o `null` evita.
+ */
+function somaDeAliquotas(a: number | undefined, b: number | undefined): number | null {
+  if (a === undefined && b === undefined) return null;
+  // Arredondado a quatro casas, que é a precisão da coluna (`numeric(7,4)`) e a
+  // mesma da `pAliqEfet` no XML: somar dois números de ponto flutuante pode
+  // devolver `0.08000000000000002` onde o certo é `0.08`.
+  return Math.round(((a ?? 0) + (b ?? 0)) * 10000) / 10000;
+}
+
+/**
  * `NfePayload` → colunas de cabeçalho de `fiscal_documents`.
  *
  * O payload é o que foi efetivamente declarado ao provedor, então ele — e não a
@@ -225,10 +243,18 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
     // calculado" (A3), que é exatamente o significado certo: o campo também
     // não foi para o XML.
     total_tributos_aproximados: toNumberOrNull(payload.valor_total_tributos),
-    // IBS e CBS seguem nulos: são a Reforma Tributária (B10), que ainda não tem
-    // motor nenhum.
-    total_ibs: null,
-    total_cbs: null,
+    // IBS e CBS (B10, 05/09/2026): as duas colunas existem desde A3 e só agora
+    // têm quem as preencha. Guardam o `vIBS` e o `vCBS` do grupo `IBSCBSTot`,
+    // e ficam nulas na nota de emitente optante pelo Simples Nacional (que só
+    // declara IBS/CBS a partir de 2027) — nulo continua sendo "não calculado".
+    //
+    // A base compartilhada (`vBCIBSCBS`) e o desdobramento do IBS entre estado
+    // e município (`vIBSUF`/`vIBSMun`) **não têm coluna** em `fiscal_documents`
+    // e não ganharam uma: os dois são recuperáveis somando os itens, e A3
+    // deliberadamente não criou um total para cada campo do XML. Ver a entrada
+    // de B10 no AGENTS.md.
+    total_ibs: toNumberOrNull(payload.ibs_valor_total),
+    total_cbs: toNumberOrNull(payload.cbs_valor_total),
 
     informacoes_adicionais: payload.informacoes_adicionais_contribuinte ?? null,
   };
@@ -243,10 +269,10 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
  * XML com imposto —, as duas metades de A3 contariam histórias diferentes sobre
  * a mesma nota.
  *
- * A lista do que fica nulo encolheu três vezes: B1 (01/09/2026) passou a
- * preencher IPI e `icms_reducao_base`, B2 (mesmo dia) o ICMS-ST e o FCP, e B8
- * (03/09/2026) o crédito de ICMS do Simples. Restam `ibs_*`/`cbs_*` (B10),
- * `ipi_codigo_enquadramento` (dado de cadastro que ninguém tem) e
+ * A lista do que fica nulo encolheu quatro vezes: B1 (01/09/2026) passou a
+ * preencher IPI e `icms_reducao_base`, B2 (mesmo dia) o ICMS-ST e o FCP, B8
+ * (03/09/2026) o crédito de ICMS do Simples e B10 (05/09/2026) o IBS e a CBS.
+ * Restam `ipi_codigo_enquadramento` (dado de cadastro que ninguém tem) e
  * `icms_st_reducao_base`.
  */
 function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record<string, unknown>[] {
@@ -351,6 +377,29 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     // Nula quando o NCM não tem linha em `ibpt_rates`, que é o estado normal de
     // quem ainda não cadastrou os percentuais, não erro.
     valor_tributos_aproximados: toNumberOrNull(item.valor_total_tributos),
+
+    // IBS e CBS (B10): as oito colunas existem desde A3 e só agora têm quem as
+    // preencha. Nulas em toda nota que não declara IBS/CBS, e também nos itens
+    // cujo CST admite só os dois códigos (isenção `400`, imunidade `410`) — ali
+    // o XML não tem `gIBSCBS` e não haveria valor a guardar.
+    ibs_cbs_situacao_tributaria: item.ibs_cbs_situacao_tributaria ?? null,
+    cclasstrib: item.ibs_cbs_classificacao_tributaria ?? null,
+    // A base é **uma só** no XML (`gIBSCBS/vBC`, compartilhada pelos dois
+    // tributos) e são duas colunas aqui, herdadas de A3. As duas recebem o
+    // mesmo número, de propósito: preencher uma e deixar a outra nula faria a
+    // linha parecer meia calculada.
+    ibs_base: toNumberOrNull(item.ibs_cbs_base_calculo),
+    // A alíquota gravada é a **soma das duas parcelas efetivamente aplicadas**
+    // (estadual + municipal), para `ibs_base × ibs_aliquota / 100` reencontrar
+    // o `ibs_valor` da mesma linha. O XML tem `pIBSUF` e `pIBSMun` separados e
+    // esta tabela não — limitação registrada na entrada de B10 do AGENTS.md.
+    // Em 2026 a municipal é zero, então a soma é a própria estadual.
+    ibs_aliquota: somaDeAliquotas(item.ibs_uf_aliquota_efetiva ?? item.ibs_uf_aliquota,
+      item.ibs_mun_aliquota_efetiva ?? item.ibs_mun_aliquota),
+    ibs_valor: toNumberOrNull(item.ibs_valor_total),
+    cbs_base: toNumberOrNull(item.ibs_cbs_base_calculo),
+    cbs_aliquota: toNumberOrNull(item.cbs_aliquota_efetiva ?? item.cbs_aliquota),
+    cbs_valor: toNumberOrNull(item.cbs_valor),
   }));
 }
 

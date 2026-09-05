@@ -529,6 +529,102 @@ export type NfePayloadItem = {
    * campo vazio.
    */
   valor_total_tributos?: number;
+
+  /* --- IBS e CBS: o grupo `UB` da NT 2025.002-RTC (B10, 05/09/2026) --- */
+
+  /**
+   * `CST` (id `UB13`) do grupo `det/imposto/IBSCBS` — três dígitos, da tabela
+   * CST do IBS/CBS do Informe Técnico 2025.002.
+   *
+   * **É um código só para os dois tributos**, ao contrário de PIS e COFINS,
+   * que têm CST próprio cada um. Vem de `tax_groups.cst_ibs_cbs`, coluna que
+   * existe desde a criação de `tax_groups` (19/08/2026) e que só agora tem
+   * quem a leia.
+   *
+   * Presente **sempre** que a nota declara IBS/CBS: desde 03/08/2026 a regra
+   * `UB12-10` rejeita (1115) a NF-e/NFC-e de Regime Normal sem este grupo. Sai
+   * ausente só nos dois casos em que o documento inteiro não declara — emitente
+   * optante pelo Simples Nacional e documento de ano fora da transição —, e aí
+   * nenhum dos campos abaixo vai junto.
+   */
+  ibs_cbs_situacao_tributaria?: string;
+  /**
+   * `cClassTrib` (id `UB14`) — seis dígitos, da Tabela de Classificação
+   * Tributária do IBS e da CBS. Os três primeiros são o próprio CST.
+   *
+   * Ele é o que torna objetiva a informação do contribuinte sobre **como** o
+   * item é tributado (qual dispositivo da LC 214/2025 se aplica), e é dele que
+   * sai o percentual de redução de alíquota — ver `ibs_uf_percentual_reducao_aliquota`.
+   */
+  ibs_cbs_classificacao_tributaria?: string;
+  /**
+   * `vBC` (id `UB16`) do grupo `gIBSCBS` — a base de cálculo **compartilhada**
+   * por IBS e CBS. Uma base só para os dois tributos, e não uma por tributo:
+   * é a diferença estrutural em relação a ICMS/PIS/COFINS deste mesmo item.
+   *
+   * Este motor a preenche com o valor bruto do item — a mesma expressão que
+   * alimenta todos os outros impostos, para "o valor da operação" ter uma fonte
+   * só aqui dentro. A regra `UB16-10` (rejeição 1104) define outra composição
+   * (`vProd + vServ + vFrete + vSeg + vOutro + vII − vDesc − vPIS − vCOFINS −
+   * vICMS − …`), mas ela está marcada na NT como **"Implementação Futura,
+   * aguardando orientação normativa"** e por isso não é conferida hoje. A
+   * divergência está registrada como limitação conhecida na entrada de B10 do
+   * AGENTS.md.
+   */
+  ibs_cbs_base_calculo?: number;
+  /** `pIBSUF` (id `UB18`) — alíquota nominal do IBS estadual. 0,1% em 2026 (LC 214/2025, art. 343). */
+  ibs_uf_aliquota?: number;
+  /**
+   * `pRedAliq` do grupo `gIBSUF/gRed` (id `UB27`) — o percentual de redução de
+   * alíquota que o `cClassTrib` carrega.
+   *
+   * Sai **apenas** nos CST cujo indicador `ind_gRed` é 1 (`011`, `200`, `515`):
+   * o grupo `gRed` num CST que não o admite é a rejeição 1032, e a falta dele
+   * num CST que o exige é a 1033. Não existe "redução de zero" — ausente
+   * significa que o CST não tem o grupo.
+   */
+  ibs_uf_percentual_reducao_aliquota?: number;
+  /**
+   * `pAliqEfet` do grupo `gIBSUF/gRed` (id `UB28`) — `pIBSUF × (1 − pRedAliq/100)`,
+   * com 4 casas decimais (regra `UB28-10`, rejeição 1035). É **esta** a alíquota
+   * que multiplica a base quando o grupo existe.
+   */
+  ibs_uf_aliquota_efetiva?: number;
+  /** `vIBSUF` (id `UB35`) — `vBC × alíquota aplicada`. Regra `UB35-10`, rejeição 1041. */
+  ibs_uf_valor?: number;
+  /**
+   * `pIBSMun` (id `UB37`) — alíquota nominal do IBS municipal. **Zero em 2026**
+   * (regra `UB37-10`), e o grupo `gIBSMun` continua obrigatório mesmo assim: o
+   * que é zero é a alíquota, não a existência do grupo.
+   */
+  ibs_mun_aliquota?: number;
+  /** `pRedAliq` do grupo `gIBSMun/gRed` (id `UB46`). Ver `ibs_uf_percentual_reducao_aliquota`. */
+  ibs_mun_percentual_reducao_aliquota?: number;
+  /** `pAliqEfet` do grupo `gIBSMun/gRed` (id `UB47`). */
+  ibs_mun_aliquota_efetiva?: number;
+  /** `vIBSMun` (id `UB54`). Zero em 2026, porque `pIBSMun` é zero. */
+  ibs_mun_valor?: number;
+  /**
+   * `vIBS` (id `UB54a`) — o IBS **do item**, que a regra `UB54a-10` (rejeição
+   * 1150) define como `vIBSUF + vIBSMun`.
+   *
+   * Nome do campo na tabela da Focus NFe: `ibs_valor_total`, o mesmo do
+   * cabeçalho — a homonímia entre os dois níveis é da própria tabela, como já
+   * acontecia com `valor_total_tributos` em B9.
+   */
+  ibs_valor_total?: number;
+  /** `pCBS` (id `UB56`) — alíquota nominal da CBS. 0,9% em 2026 (LC 214/2025, art. 346). */
+  cbs_aliquota?: number;
+  /**
+   * `pRedAliq` do grupo `gCBS/gRed` (id `UB65`) — **coluna própria**, e não a
+   * mesma do IBS: o Informe Técnico publica `pRedIBS` e `pRedCBS` separados, e
+   * eles divergem (hoje no `cClassTrib` 200025, com 60% de IBS e 100% de CBS).
+   */
+  cbs_percentual_reducao_aliquota?: number;
+  /** `pAliqEfet` do grupo `gCBS/gRed` (id `UB66`). */
+  cbs_aliquota_efetiva?: number;
+  /** `vCBS` (id `UB70`) — `vBC × alíquota aplicada`. Regra `UB67-10`, rejeição 1069. */
+  cbs_valor?: number;
 };
 
 /**
@@ -668,6 +764,61 @@ export type NfePayload = {
    * no preço (Decreto 8.264/2014, art. 6º). Somá-lo dobraria o valor da nota.
    */
   valor_total_tributos?: number;
+
+  /* --- IBS e CBS: o grupo `IBSCBSTot` (id `W34`) do `total` (B10) --- */
+
+  /**
+   * `vBCIBSCBS` (id `W35`) — total da base de cálculo de IBS/CBS, a soma dos
+   * `ibs_cbs_base_calculo` dos itens (regra `W35-10`, rejeição 1076).
+   *
+   * **O grupo de totais e os grupos dos itens andam juntos, nos dois
+   * sentidos**: mandar `IBSCBSTot` sem nenhum item com `IBSCBS` é a rejeição
+   * 1118 (`W34-10`), e ter item com `IBSCBS` sem o grupo de totais é a 1119
+   * (`W34-20`). Por isso todos os campos abaixo são preenchidos em bloco.
+   *
+   * Como em B9, as somas partem dos valores **já arredondados** dos itens —
+   * cada total tem regra própria conferindo a igualdade com o somatório
+   * (`W41-10`/1080, `W46-10`/1084, `W47-10`/1085, `W56-10`/1091).
+   */
+  ibs_cbs_base_calculo?: number;
+  /**
+   * `vDif` do grupo `total/IBSCBSTot/gIBS/gIBSUF` (id `W38`) — total do
+   * diferimento do IBS estadual.
+   *
+   * **Sempre `0`, e presente de propósito**: os campos dentro de `gIBSUF`,
+   * `gIBSMun` e `gCBS` do grupo de totais são de ocorrência `1-1` no leiaute,
+   * então omiti-los é erro de schema. Este motor não emite diferimento nenhum
+   * (os CST `510`/`515` são recusados por `resolveIbsCbs`), de modo que zero é
+   * o número certo — mesma situação do `icms_valor_total_uf_remetente` de B4.
+   */
+  ibs_uf_valor_total_diferimento?: number;
+  /** `vDevTrib` do `gIBS/gIBSUF` (id `W39`) — devolução de tributos. Sempre `0`; ver acima. */
+  ibs_uf_valor_total_devolucao?: number;
+  /** `vIBSUF` (id `W41`) — soma dos `ibs_uf_valor` dos itens. */
+  ibs_uf_valor_total?: number;
+  /** `vDif` do `gIBS/gIBSMun` (id `W43`). Sempre `0`. */
+  ibs_mun_valor_total_diferimento?: number;
+  /** `vDevTrib` do `gIBS/gIBSMun` (id `W44`). Sempre `0`. */
+  ibs_mun_valor_total_devolucao?: number;
+  /** `vIBSMun` (id `W46`) — soma dos `ibs_mun_valor` dos itens. Zero em 2026. */
+  ibs_mun_valor_total?: number;
+  /** `vIBS` (id `W47`) — soma dos `ibs_valor_total` dos itens. */
+  ibs_valor_total?: number;
+  /** `vCredPres` do `gIBS` (id `W48`) — crédito presumido. Sempre `0`; ver `ibs_uf_valor_total_diferimento`. */
+  ibs_valor_total_credito_presumido?: number;
+  /** `vCredPresCondSus` do `gIBS` (id `W49`) — crédito presumido em condição suspensiva. Sempre `0`. */
+  ibs_valor_total_condicao_suspensiva?: number;
+  /** `vDif` do `gCBS` (id `W53`). Sempre `0`. */
+  cbs_valor_total_diferimento?: number;
+  /** `vDevTrib` do `gCBS` (id `W54`). Sempre `0`. */
+  cbs_valor_total_devolucao?: number;
+  /** `vCBS` (id `W56`) — soma dos `cbs_valor` dos itens. */
+  cbs_valor_total?: number;
+  /** `vCredPres` do `gCBS` (id `W56a`). Sempre `0`. */
+  cbs_valor_total_credito_presumido?: number;
+  /** `vCredPresCondSus` do `gCBS` (id `W56b`). Sempre `0`. */
+  cbs_valor_total_condicao_suspensiva?: number;
+
   /** 0 = por conta do emitente ... 9 = sem frete. */
   modalidade_frete?: number;
 

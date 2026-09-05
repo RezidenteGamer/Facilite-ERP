@@ -58,6 +58,12 @@ import {
   percentuaisTributosAproximados,
   resolveIbptRate,
 } from "./ibptRates.ts";
+import {
+  aliquotasAplicadasIbsCbs,
+  type ModeloDocumentoFiscal,
+  resolveAliquotasPadraoIbsCbs,
+  resolveIbsCbs,
+} from "./ibsCbs.ts";
 import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
 import {
   icmsCalculaCreditoSimples,
@@ -392,6 +398,16 @@ type ResolvedItems = {
   tributosAproximadosPorEnte?: { federal: number; estadual: number; municipal: number };
   /** Fonte e versão da linha de `ibpt_rates` usada — para as Informações Complementares. */
   tributosAproximadosFonte?: { fonte: string | null; versao: string | null };
+  /**
+   * Os totais do grupo `IBSCBSTot` (B10). Ou **todos** presentes, ou nenhum: a
+   * regra `W34-20` (rejeição 1119) exige o grupo de totais assim que um item
+   * declara `IBSCBS`, e a `W34-10` (1118) proíbe o contrário.
+   */
+  ibsCbsBaseCalculoTotal?: number;
+  ibsUfValorTotal?: number;
+  ibsMunValorTotal?: number;
+  ibsValorTotal?: number;
+  cbsValorTotal?: number;
 };
 
 type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: string[] };
@@ -498,6 +514,32 @@ type ResolveItemsOptions = {
    *   `DEVOLUCAO`, que é literalmente o que `buildReturnNfePayload` escreve.
    */
   declaraValorAproximadoDosTributos: boolean;
+  /**
+   * O modelo do documento — `"55"` para NF-e, `"65"` para NFC-e (B10,
+   * 05/09/2026).
+   *
+   * **É o primeiro campo deste tipo que não é uma decisão de escopo, e sim um
+   * fato**, e vale dizer para ninguém procurar aqui a mesma pergunta dos três
+   * anteriores. Ele existe por uma razão só: a Tabela de Classificação
+   * Tributária do IBS/CBS publica, código a código, em que modelos de DF-e
+   * aquele `cClassTrib` pode ser usado (`indNFe` e `indNFCe`), e usá-lo no
+   * modelo errado é a **rejeição 1025** (`UB14-25`). `resolveItemsForSale` não
+   * tem como saber o modelo sozinha — quem o sabe é quem monta o cabeçalho.
+   *
+   * **O IBS/CBS em si não tem dimensão de escopo por documento**, ao contrário
+   * do DIFAL (que depende do destinatário) e do `vTotTrib` (que depende de a
+   * nota ser venda ao consumidor). A `UB12-10` vale para os modelos 55 e 65 e
+   * não distingue venda de devolução; quem decide se a nota declara é o regime
+   * do emitente e o ano de emissão, e as duas coisas `resolveItemsForSale`
+   * conhece — ver `resolveAliquotasPadraoIbsCbs`.
+   *
+   * A devolução declara junto, portanto. A `UB12-10` tem exceção para a NF-e de
+   * devolução "que referencia NFe com data de emissão **anterior a 2026**" —
+   * exceção que apenas *dispensa* o grupo, nunca o proíbe, e que este motor não
+   * explora: a nota original de uma devolução deste sistema é sempre de 2026 em
+   * diante. Ver a limitação registrada na entrada de B10 do AGENTS.md.
+   */
+  modeloDocumento: ModeloDocumentoFiscal;
 };
 
 /**
@@ -609,6 +651,21 @@ type ResolveItemsOptions = {
  * a emissão** — o item sai sem o campo e a nota é emitida. As três razões estão
  * em `resolveIbptRate` (`ibptRates.ts`), e vale lê-las antes de "consertar" a
  * assimetria: ela é o ponto, não um esquecimento.
+ *
+ * ## O IBS e a CBS da Reforma Tributária (B10, 05/09/2026)
+ *
+ * A camada mais nova, e a primeira que **quebra notas que hoje saem**: desde
+ * 03/08/2026 a regra `UB12-10` da NT 2025.002-RTC rejeita (1115) a NF-e/NFC-e
+ * de emitente de Regime Normal que não traga o grupo `det/imposto/IBSCBS`. Por
+ * isso, aqui, grupo tributário sem `cst_ibs_cbs`/`cclasstrib` **recusa a
+ * emissão** — o oposto exato do `vTotTrib` logo acima, e o porquê da assimetria
+ * está no cabeçalho de `ibsCbs.ts`.
+ *
+ * Duas decisões ficam fora do laço porque não são do produto: o **regime** de
+ * quem emite (o Simples Nacional só entra em 2027 — art. 348, III, "c", da LC
+ * 214/2025) e o **ano** de emissão (as alíquotas de teste de 2026 estão nos
+ * arts. 343 e 346). Dentro do laço fica o par CST × `cClassTrib` do grupo
+ * tributário, a redução de alíquota que o `cClassTrib` implica e a conta.
  */
 function resolveItemsForSale(
   sale: SaleForInvoice,
@@ -661,6 +718,23 @@ function resolveItemsForSale(
     options.destinatarioConsumidorFinalNaoContribuinte &&
     operacaoInterestadual(query) &&
     !regimeRemetenteSemDifalUfDestino(query.regime);
+
+  /**
+   * IBS/CBS (B10): as duas dimensões **do documento** — o regime de quem emite
+   * (art. 348, III, "c", da LC 214/2025 tira o Simples Nacional desta fase) e o
+   * ano de emissão (as alíquotas de 2026 estão nos arts. 343 e 346).
+   *
+   * Fora do laço porque nenhuma delas olha o produto; o que sobra por item é o
+   * par CST × `cClassTrib` do grupo tributário e a conta.
+   */
+  const aliquotasIbsCbs = resolveAliquotasPadraoIbsCbs(sale.issueDate, query.regime);
+  // Ano fora da tabela de alíquotas: a nota não pode sair. Não é "cadastro
+  // incompleto" de ninguém — é o motor que precisa ser atualizado —, e por isso
+  // a recusa é do documento inteiro, não de um item.
+  if (aliquotasIbsCbs.situacao === "sem_aliquota_publicada") {
+    return { ok: false, errors: [aliquotasIbsCbs.reason] };
+  }
+  const declaraIbsCbs = aliquotasIbsCbs.situacao === "declara";
 
   const cadastroErrors: string[] = [];
   /**
@@ -858,6 +932,54 @@ function resolveItemsForSale(
       valorTotalTributos = toCents(federal + estadual + municipal);
     }
 
+    /**
+     * IBS e CBS (B10) — o grupo `UB` da NT 2025.002-RTC.
+     *
+     * O oposto exato do `vTotTrib` logo acima, e os dois lado a lado são o
+     * melhor resumo da diferença: lá a falta de cadastro deixa o campo de fora
+     * e a nota sai; aqui ela **recusa**, porque desde 03/08/2026 a nota de
+     * Regime Normal sem este grupo é rejeitada (1115). Ver o cabeçalho de
+     * `ibsCbs.ts`.
+     *
+     * A base é a mesma `base` de todos os outros impostos — "o valor da
+     * operação" tem uma fonte só neste motor. A regra `UB16-10`, que compõe o
+     * `vBC` a partir de dez parcelas, está marcada como implementação futura na
+     * própria NT; ver `ibs_cbs_base_calculo` em `types.ts`.
+     */
+    const ibsCbs = declaraIbsCbs
+      ? resolveIbsCbs({
+          nomeDoGrupo: group.name,
+          cst: group.cstIbsCbs,
+          cclasstrib: group.cclasstrib,
+          aliquotas: aliquotasIbsCbs.aliquotas,
+          modelo: options.modeloDocumento,
+        })
+      : null;
+    if (ibsCbs && !ibsCbs.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${ibsCbs.reason}`);
+    const ibsCbsDeclarado = ibsCbs?.ok ? ibsCbs.declarado : null;
+
+    // Os cinco valores do grupo `gIBSCBS`. Ficam todos `undefined` quando o CST
+    // não admite o grupo (`ind_gIBSCBS = 0` — isenção, imunidade), caso em que o
+    // item declara só CST e `cClassTrib`: mandar `gIBSCBS` ali é a rejeição 1021.
+    let ibsCbsBase: number | undefined;
+    let ibsUfValor: number | undefined;
+    let ibsMunValor: number | undefined;
+    let ibsValor: number | undefined;
+    let cbsValor: number | undefined;
+    if (ibsCbsDeclarado?.declaraGrupo) {
+      // A alíquota que multiplica a base é a **efetiva** quando o CST exige
+      // `gRed`, e a nominal quando não exige — observação 2 das regras
+      // `UB35-10`, `UB54-10` e `UB67-10`.
+      const aplicadas = aliquotasAplicadasIbsCbs(ibsCbsDeclarado);
+      ibsCbsBase = base;
+      ibsUfValor = taxAmount(base, aplicadas.ibsUf);
+      ibsMunValor = taxAmount(base, aplicadas.ibsMun);
+      // `vIBS = vIBSUF + vIBSMun` (regra `UB54a-10`), somando os dois valores
+      // **já arredondados** — é o número que o total da nota vai reencontrar.
+      ibsValor = toCents(ibsUfValor + ibsMunValor);
+      cbsValor = taxAmount(base, aplicadas.cbs);
+    }
+
     return {
       numero_item: index + 1,
       codigo_produto: item.product.code,
@@ -925,6 +1047,23 @@ function resolveItemsForSale(
       cofins_valor: cofinsDeclarado?.valor,
 
       valor_total_tributos: valorTotalTributos,
+
+      ibs_cbs_situacao_tributaria: ibsCbsDeclarado?.situacaoTributaria,
+      ibs_cbs_classificacao_tributaria: ibsCbsDeclarado?.classificacaoTributaria,
+      ibs_cbs_base_calculo: ibsCbsBase,
+      ibs_uf_aliquota: ibsCbsDeclarado?.aliquotaIbsUf,
+      ibs_uf_percentual_reducao_aliquota: ibsCbsDeclarado?.reducaoIbs,
+      ibs_uf_aliquota_efetiva: ibsCbsDeclarado?.aliquotaEfetivaIbsUf,
+      ibs_uf_valor: ibsUfValor,
+      ibs_mun_aliquota: ibsCbsDeclarado?.aliquotaIbsMun,
+      ibs_mun_percentual_reducao_aliquota: ibsCbsDeclarado?.reducaoIbs,
+      ibs_mun_aliquota_efetiva: ibsCbsDeclarado?.aliquotaEfetivaIbsMun,
+      ibs_mun_valor: ibsMunValor,
+      ibs_valor_total: ibsValor,
+      cbs_aliquota: ibsCbsDeclarado?.aliquotaCbs,
+      cbs_percentual_reducao_aliquota: ibsCbsDeclarado?.reducaoCbs,
+      cbs_aliquota_efetiva: ibsCbsDeclarado?.aliquotaEfetivaCbs,
+      cbs_valor: cbsValor,
     };
   });
 
@@ -947,6 +1086,21 @@ function resolveItemsForSale(
    * rejeição 685 exige — igualdade exata com a soma dos `M02`, sem tolerância.
    */
   const valorTotalTributos = totalDeclarado(items, (item) => item.valor_total_tributos);
+  /**
+   * Os totais do `IBSCBSTot` (B10), pelo mesmo `totalDeclarado` de todos os
+   * outros: soma dos valores **já arredondados** dos itens, que é o que as
+   * regras `W35-10`, `W41-10`, `W46-10`, `W47-10` e `W56-10` conferem.
+   *
+   * `ibsCbsBaseCalculoTotal` é o que decide se o grupo inteiro sai: ele existe
+   * exatamente quando algum item declarou `gIBSCBS`, e é essa a condição da
+   * `W34-20`. Os itens que declaram só CST e `cClassTrib` (isenção, imunidade)
+   * não entram em soma nenhuma — não têm valor a somar.
+   */
+  const ibsCbsBaseCalculoTotal = totalDeclarado(items, (item) => item.ibs_cbs_base_calculo);
+  const ibsUfValorTotal = totalDeclarado(items, (item) => item.ibs_uf_valor);
+  const ibsMunValorTotal = totalDeclarado(items, (item) => item.ibs_mun_valor);
+  const ibsValorTotal = totalDeclarado(items, (item) => item.ibs_valor_total);
+  const cbsValorTotal = totalDeclarado(items, (item) => item.cbs_valor);
 
   return {
     ok: true,
@@ -967,7 +1121,68 @@ function resolveItemsForSale(
       valorTotalTributos,
       tributosAproximadosPorEnte: valorTotalTributos === undefined ? undefined : tributosPorEnte,
       tributosAproximadosFonte: valorTotalTributos === undefined ? undefined : tributosFonte,
+      ibsCbsBaseCalculoTotal,
+      ibsUfValorTotal,
+      ibsMunValorTotal,
+      ibsValorTotal,
+      cbsValorTotal,
     },
+  };
+}
+
+/**
+ * O grupo `IBSCBSTot` (B10) do cabeçalho, em três formas possíveis.
+ *
+ * **O gatilho é o grupo de fora, e a distinção é sutil o bastante para ter
+ * custado uma correção na revisão desta tarefa.** A regra `W34-20` (rejeição
+ * 1119) exige o total quando "pelo menos um item possui IBS / CBS informado
+ * (id: **UB12**, tag: IBSCBS)" — e `UB12` é o grupo **externo**, o que carrega
+ * `CST` e `cClassTrib`, não o `gIBSCBS` (`UB15`) que carrega base e valores.
+ * Um item de isenção (CST `400`) ou imunidade (`410`) tem `IBSCBS` e **não**
+ * tem `gIBSCBS`: uma nota inteira desses itens precisa do grupo de totais do
+ * mesmo jeito, com a base somando zero. Amarrar a saída do total à existência
+ * de base seria a rejeição 1119 na cara.
+ *
+ * Por isso três formas:
+ *
+ * 1. **Nada** — nenhum item declarou `IBSCBS` (emitente do Simples Nacional,
+ *    ou documento de ano fora da transição). Mandar o total aqui é a rejeição
+ *    1118 (`W34-10`).
+ * 2. **Só `vBCIBSCBS = 0`** — todos os itens são isentos/imunes. O `vBCIBSCBS`
+ *    é `1-1` dentro de `IBSCBSTot`, mas os sub-grupos `gIBS` e `gCBS` são
+ *    `0-1`: sem nenhum valor a totalizar, eles não saem.
+ * 3. **O bloco inteiro** — algum item tem `gIBSCBS`. Aí os campos de `gIBSUF`,
+ *    `gIBSMun` e `gCBS` são todos `1-1`, e os que este motor nunca calcula
+ *    (diferimento, devolução de tributos, crédito presumido) vão **zerados**, e
+ *    não ausentes. Mesma disciplina do `icms_valor_total_uf_remetente` de B4.
+ *
+ * Fica numa função só porque os três documentos escrevem exatamente o mesmo
+ * bloco, e um deles esquecer um campo seria erro de schema difícil de ver.
+ */
+function totaisIbsCbs(resolved: ResolvedItems): Partial<NfePayload> {
+  const algumItemDeclara = resolved.items.some(
+    (item) => item.ibs_cbs_situacao_tributaria !== undefined,
+  );
+  if (!algumItemDeclara) return {};
+  // Nota inteiramente isenta/imune: o total existe, e a soma de nenhuma base é
+  // zero (regra `W35-10`). Sem `gIBS` nem `gCBS`, que são opcionais.
+  if (resolved.ibsCbsBaseCalculoTotal === undefined) return { ibs_cbs_base_calculo: 0 };
+  return {
+    ibs_cbs_base_calculo: resolved.ibsCbsBaseCalculoTotal,
+    ibs_uf_valor_total_diferimento: 0,
+    ibs_uf_valor_total_devolucao: 0,
+    ibs_uf_valor_total: resolved.ibsUfValorTotal,
+    ibs_mun_valor_total_diferimento: 0,
+    ibs_mun_valor_total_devolucao: 0,
+    ibs_mun_valor_total: resolved.ibsMunValorTotal,
+    ibs_valor_total: resolved.ibsValorTotal,
+    ibs_valor_total_credito_presumido: 0,
+    ibs_valor_total_condicao_suspensiva: 0,
+    cbs_valor_total_diferimento: 0,
+    cbs_valor_total_devolucao: 0,
+    cbs_valor_total: resolved.cbsValorTotal,
+    cbs_valor_total_credito_presumido: 0,
+    cbs_valor_total_condicao_suspensiva: 0,
   };
 }
 
@@ -1904,6 +2119,9 @@ export function buildNfePayloadFromSale(
     // a venda a contribuinte que vai revender. `consumidor_final` é a resposta
     // que o próprio cabeçalho já dá a essa pergunta; ver `ResolveItemsOptions`.
     declaraValorAproximadoDosTributos: consumidorFinal === 1,
+    // Modelo 55. Ver `ResolveItemsOptions`: não é escopo, é o dado que a
+    // Tabela de Classificação Tributária do IBS/CBS cruza (`indNFe`).
+    modeloDocumento: "55",
   });
   if (!resolved.ok) return resolved;
   const {
@@ -1988,6 +2206,12 @@ export function buildNfePayloadFromSale(
     valor_cofins: cofinsValorTotal,
     // `vTotTrib` do total (B9): igual à soma dos itens, ou é rejeição 685.
     valor_total_tributos: valorTotalTributos,
+    // `IBSCBSTot` (B10): quinze campos ou nenhum — ver `totaisIbsCbs`. Nenhum
+    // deles entra no `valor_total`: em 2026 o `vNF` continua sendo o que já
+    // era, e o total com os novos tributos tem campo próprio (`vNFTot`, id
+    // `W60`), cujas regras `W60-05` e `W60-10` a NT marca como implementação
+    // futura.
+    ...totaisIbsCbs(resolved.data),
     modalidade_frete: sale.freightAmount > 0 ? 0 : 9,
 
     items,
@@ -2110,6 +2334,10 @@ export function buildNfcePayloadFromSale(
     // (`consumidor_final: 1`, logo abaixo). É o cupom que a Lei da
     // Transparência existe para fazer o consumidor ler.
     declaraValorAproximadoDosTributos: true,
+    // Modelo 65. A `UB12-10` vale para 55 e 65 igualmente — a NFC-e declara
+    // IBS/CBS como a NF-e —, mas a tabela de `cClassTrib` tem coluna própria
+    // para ela (`indNFCe`), e há códigos válidos só na NF-e.
+    modeloDocumento: "65",
   });
   if (!resolved.ok) return resolved;
   const {
@@ -2161,6 +2389,7 @@ export function buildNfcePayloadFromSale(
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
     valor_total_tributos: valorTotalTributos,
+    ...totaisIbsCbs(resolved.data),
     modalidade_frete: sale.freightAmount > 0 ? 0 : 9,
 
     items,
@@ -2333,6 +2562,11 @@ export function buildReturnNfePayload(
     // é o alcance da Lei 12.741, que fala de "venda ao consumidor", e esta é
     // nota de entrada que desfaz uma venda.
     declaraValorAproximadoDosTributos: false,
+    // Modelo 55 — a devolução é NF-e de entrada. **Ela declara IBS/CBS**, ao
+    // contrário do `vTotTrib` logo acima: a `UB12-10` não distingue venda de
+    // devolução, e a exceção que ela tem (devolução que referencia nota
+    // anterior a 2026) só dispensa o grupo, nunca o proíbe.
+    modeloDocumento: "55",
   });
   if (!resolved.ok) return resolved;
   const {
@@ -2399,6 +2633,7 @@ export function buildReturnNfePayload(
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
+    ...totaisIbsCbs(resolved.data),
     modalidade_frete: 9,
 
     notas_referenciadas: saleReturn.originalChave ? [{ chave_nfe: saleReturn.originalChave }] : undefined,
