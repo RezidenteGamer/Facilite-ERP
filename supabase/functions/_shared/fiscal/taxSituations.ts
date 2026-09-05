@@ -422,3 +422,117 @@ const IPI_TRIBUTADO = new Set(["00", "49", "50", "99"]);
 export function ipiCalculaValor(cst: string | null | undefined): boolean {
   return IPI_TRIBUTADO.has(normalizeCode(cst));
 }
+
+/* ------------------------------------------------------------------------ */
+/* DIFAL da EC 87/2015 — o grupo `ICMSUFDest` (B4, 04/09/2026)               */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * CST/CSOSN que **dispensam** o grupo `ICMSUFDest` mesmo quando as três
+ * condições da operação estão satisfeitas (interestadual + consumidor final +
+ * não contribuinte) — B4, 04/09/2026.
+ *
+ * Ao contrário dos outros conjuntos deste arquivo, este não sai da tabela de
+ * campos do leiaute: sai da **exceção 10 da regra de validação `NA01-20`**, a
+ * que produz a rejeição **694** ("Não informado o grupo de ICMS para a UF de
+ * destino"). A lista da exceção é literal e fechada:
+ *
+ * > operações isentas (`CST = 40`, `CSOSN = 103`) ou não tributadas
+ * > (`CST = 41`, `CSOSN = 300`, `CSOSN = 400`)
+ *
+ * O critério substantivo é o mesmo do schema: o DIFAL é a *diferença entre
+ * duas alíquotas* sobre uma operação tributada. Operação isenta, imune ou não
+ * tributada não tem imposto nenhum a repartir, então não há diferença — e o
+ * grupo, se viesse, cairia na rejeição **695** ("informado indevidamente").
+ *
+ * **Ficam de fora, e não é descuido:** `30` e `60` (Regime Normal) e `500`
+ * (Simples) — os três "ICMS já cobrado/retido por substituição tributária" —
+ * **não** constam da exceção, logo o grupo continua exigido para eles. Vale o
+ * mesmo para os CSOSN `101`, `102`, `201`, `202`, `203` e `900`. Aqui o
+ * critério é a regra, não a intuição: só quem a `NA01-20` dispensa é
+ * dispensado.
+ *
+ * Lista de **exclusão**, como a de `icmsCalculaValorProprio` e pelo mesmo
+ * motivo: código desconhecido devolve `true` (o grupo é exigido), que é o lado
+ * seguro — a exceção é enumerada, e o que não está nela cai na regra geral. O
+ * risco de errar para `false` seria emitir sem o grupo e colher a 694; o de
+ * errar para `true` é uma recusa por cadastro incompleto, que diz o que
+ * corrigir.
+ */
+const ICMS_SEM_DIFAL_UF_DESTINO = new Set([
+  // CST — Regime Normal (CRT 3)
+  "40",
+  "41",
+  // CSOSN — Simples Nacional
+  "103",
+  "300",
+  "400",
+]);
+
+/**
+ * O item com este CST/CSOSN declara o grupo `ICMSUFDest` numa operação
+ * interestadual a consumidor final não contribuinte?
+ *
+ * Código desconhecido devolve `true` — ver a nota do conjunto acima.
+ */
+export function icmsCalculaDifalUfDestino(situacaoTributaria: string | null | undefined): boolean {
+  return !ICMS_SEM_DIFAL_UF_DESTINO.has(normalizeCode(situacaoTributaria));
+}
+
+/**
+ * CRT de **emitente** que não deve o DIFAL da EC 87/2015 — e por isso não
+ * declara o grupo `ICMSUFDest` (B4, 04/09/2026).
+ *
+ * É o segundo conjunto deste arquivo que fala de cadastro de pessoa e não de
+ * CST, como `REGIMES_OPTANTES_SIMPLES`. A diferença entre os dois é o eixo:
+ * lá o regime é do **destinatário** e decide se ele faz jus a um crédito; aqui
+ * é do **remetente** e decide se ele deve um imposto.
+ *
+ * ## Não é só exceção de schema — é exceção substantiva, e essa é a resposta
+ *
+ * A regra `NA01-20` traz a dispensa na exceção 12 ("emitentes optantes pelo
+ * Simples Nacional, `CRT = 1`", estendida ao `CRT = 4` — MEI — pela NT
+ * 2024.001 v1.10). Mas a dispensa de schema é consequência, não causa: a razão
+ * é que **o optante não deve o DIFAL**.
+ *
+ * A cláusula nona do Convênio ICMS 93/2015 mandava aplicar o DIFAL da EC
+ * 87/2015 também aos optantes pelo Simples Nacional. O STF **suspendeu a
+ * eficácia dessa cláusula** em medida cautelar na **ADI 5464** (fevereiro de
+ * 2016), e depois a declarou inconstitucional no julgamento de mérito
+ * (ADI 5469, 2021), por exigir lei complementar. A LC 190/2022, que supriu a
+ * exigência formal para os demais contribuintes, não reverteu isso para o
+ * Simples. A SEFAZ/SP diz o mesmo com todas as letras na **Resposta a Consulta
+ * 23730/2021**: "não há obrigatoriedade de a empresa optante pelo Simples
+ * Nacional recolher, em operação interestadual, o DIFAL" (repetida nas RC
+ * 28072/2023 e 31286/2025).
+ *
+ * Ou seja: as duas leituras que a pesquisa desta tarefa precisava separar
+ * — "não precisa mandar o grupo" e "não deve nada" — **convergem** aqui. Não é
+ * o caso, comum em outros pontos do Simples, de o imposto ser devido e
+ * recolhido por outro mecanismo (GNRE à parte): ele simplesmente não é devido.
+ *
+ * ## O `2` fica de fora, e é decisão
+ *
+ * `CRT = 2` é "Simples Nacional — **excesso de sublimite** de receita bruta":
+ * a empresa continua optante, mas está impedida de recolher o ICMS dentro do
+ * DAS e o apura pelas regras do Regime Normal (LC 123/2006, art. 20, §1º).
+ * Como o fundamento da dispensa é justamente o ICMS estar embutido no
+ * recolhimento unificado, ele não alcança o `2` — e a `NA01-20` acompanha:
+ * a exceção 12 nomeia `1` e `4`, nunca `2`. Um emitente `CRT 2` declara o
+ * grupo como qualquer Regime Normal.
+ *
+ * Lista de **inclusão**, como as demais que falam de regime: código
+ * desconhecido ou ausente devolve `false`, isto é, "declara o grupo". É o lado
+ * seguro na direção certa — a dispensa é exceção nomeada, e omitir o grupo por
+ * um regime que este arquivo não conhece produziria a rejeição 694.
+ */
+const REGIMES_REMETENTE_SEM_DIFAL = new Set(["1", "4"]);
+
+/**
+ * Este CRT de emitente está dispensado do DIFAL da EC 87/2015?
+ *
+ * Nulo/vazio/desconhecido devolve `false` — ver a nota do conjunto acima.
+ */
+export function regimeRemetenteSemDifalUfDestino(regimeTributario: string | null | undefined): boolean {
+  return REGIMES_REMETENTE_SEM_DIFAL.has(normalizeCode(regimeTributario));
+}

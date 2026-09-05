@@ -56,6 +56,7 @@ import {
 import { resolveIcmsSituacaoTributaria, type TaxGroup } from "./taxGroups.ts";
 import {
   icmsCalculaCreditoSimples,
+  icmsCalculaDifalUfDestino,
   icmsCalculaSubstituicaoTributaria,
   icmsCalculaValorProprio,
   icmsProprioIgnoraAliquotaInterestadual,
@@ -64,6 +65,7 @@ import {
   pisCofinsCalculaValor,
   pisCofinsCalculaValorPorUnidade,
   regimeOptantePeloSimples,
+  regimeRemetenteSemDifalUfDestino,
 } from "./taxSituations.ts";
 import type { NfePayload, NfePayloadItem, NfePayloadPagamento } from "./types.ts";
 import { resolveTaxRule, type TaxRuleQuery, type TaxRuleRow } from "./taxRules.ts";
@@ -363,6 +365,10 @@ type ResolvedItems = {
   icmsStBaseCalculoTotal?: number;
   icmsStValorTotal?: number;
   fcpStValorTotal?: number;
+  /** Somas do grupo `ICMSUFDest` (B4) — nenhuma delas entra no `valor_total`. */
+  icmsUfDestinoValorTotal?: number;
+  icmsUfRemetenteValorTotal?: number;
+  fcpUfDestinoValorTotal?: number;
   ipiValorTotal?: number;
   pisValorTotal?: number;
   cofinsValorTotal?: number;
@@ -374,10 +380,15 @@ type ItemsResolution = { ok: true; data: ResolvedItems } | { ok: false; errors: 
  * O que muda entre os três documentos que compartilham `resolveItemsForSale`
  * (correção de 04/09/2026).
  *
- * Hoje é um campo só, e ele é obrigatório de propósito: as três funções que
- * montam payload têm de **dizer** o que fazem com a elegibilidade do
- * destinatário, em vez de herdar um padrão silencioso. Um documento novo que
- * esqueça de decidir não compila.
+ * Os campos são obrigatórios de propósito: as três funções que montam payload
+ * têm de **dizer** o que fazem com cada dimensão que depende do destinatário,
+ * em vez de herdar um padrão silencioso. Um documento novo que esqueça de
+ * decidir não compila.
+ *
+ * Nasceu com um campo só (o crédito do Simples, correção de 04/09/2026) e
+ * ganhou o segundo em B4 (o DIFAL). Os dois têm a mesma forma pelo mesmo
+ * motivo: são perguntas sobre **quem recebe a nota**, e `resolveItemsForSale`
+ * não conhece destinatário — quem o conhece é quem monta o cabeçalho.
  */
 type ResolveItemsOptions = {
   /**
@@ -402,6 +413,36 @@ type ResolveItemsOptions = {
    * desfaz não pode reverter um crédito que não existiu.
    */
   verificaDireitoAoCreditoDoDestinatario: boolean;
+  /**
+   * Este documento pode disparar o DIFAL da EC 87/2015, isto é, declara
+   * **`indFinal = 1` e `indIEDest = 9`** (B4, 04/09/2026)?
+   *
+   * São duas das três condições da regra `NA01-20`; a terceira (`idDest = 2`,
+   * operação interestadual) `resolveItemsForSale` decide sozinha, olhando as
+   * UFs da `TaxRuleQuery`.
+   *
+   * Neste motor as duas condições viraram **uma** depois da correção da
+   * Rejeição 696: `resolveConsumidorFinal` deriva o `indFinal` do próprio
+   * código do `indIEDest`, então `indFinal = 1` ⟺ `indIEDest = 9`. É por isso
+   * que um campo booleano basta — e é também por isso que o DIFAL só alcança,
+   * hoje, os dois casos em que o cadastro responde com confiança: CNPJ sem IE
+   * (ou com indicador `9`) e CPF sem IE. Ver a limitação registrada em
+   * `resolveDifalUfDestino`.
+   *
+   * `false` nos outros dois documentos, cada um por um motivo próprio:
+   *
+   * - **NFC-e**: `buildNfcePayloadFromSale` força `ufDestino = branch.uf`, de
+   *   modo que a operação nunca é interestadual e a regra nunca dispara. O
+   *   `false` explícito é redundante por construção e está aqui para o campo
+   *   não ter valor-padrão; a rejeição **807** ("NFC-e com grupo de ICMS para
+   *   a UF do destinatário") existe justamente para o modelo 65 nunca declarar
+   *   este grupo.
+   * - **Devolução**: a `NA01-20` tem exceção expressa para **NF-e de entrada
+   *   (`tpNF = 0`)**, que é o que `buildReturnNfePayload` emite. Não é escolha
+   *   de escopo com risco de rejeição embutido — é a própria regra que a
+   *   dispensa. Ver a nota em `buildReturnNfePayload`.
+   */
+  destinatarioConsumidorFinalNaoContribuinte: boolean;
 };
 
 /**
@@ -486,6 +527,21 @@ type ResolveItemsOptions = {
  * destinatário e recusa a emissão quando ele está cadastrado como optante.
  * Quem decide se o destinatário chega até lá é `options`, e a NFC-e é a única
  * das três que diz não — ver `ResolveItemsOptions`.
+ *
+ * ## O DIFAL da EC 87/2015 (B4, 04/09/2026)
+ *
+ * A quarta camada de ICMS do item, e a que fecha a conta que a correção da
+ * alíquota interestadual deixou pela metade: numa venda interestadual a
+ * consumidor final, o `pICMS`/`vICMS` do item é a fatia da **origem**, e a
+ * diferença até a alíquota interna do destino cabe ao **estado de destino**,
+ * no grupo `ICMSUFDest`. Quem calcula é `resolveDifalUfDestino`; o gatilho é a
+ * combinação de `options.destinatarioConsumidorFinalNaoContribuinte` com as
+ * UFs da `query` e o regime de quem emite. Ele **não** substitui o ICMS-ST:
+ * os dois rodam no mesmo item, e o porquê está lá.
+ *
+ * O FCP da **operação própria** (`pFCPUFDest`/`vFCPUFDest`) sai nessa mesma
+ * camada — é o que restava de `B3`, já que B2 só calculava o FCP retido por
+ * substituição tributária.
  */
 function resolveItemsForSale(
   sale: SaleForInvoice,
@@ -516,6 +572,27 @@ function resolveItemsForSale(
     return { ok: false, errors: [resolution.reason] };
   }
   const cfop = resolution.cfop;
+
+  /**
+   * As três condições **da operação** que a regra `NA01-20` cruza para exigir
+   * o grupo `ICMSUFDest` (B4, 04/09/2026): interestadual (`idDest = 2`),
+   * consumidor final (`indFinal = 1`) e destinatário não contribuinte
+   * (`indIEDest = 9`) — mais a exceção 12 da mesma regra, que dispensa o
+   * emitente optante pelo Simples Nacional (`CRT 1` e `CRT 4`).
+   *
+   * Fica fora do laço porque nenhuma delas é do item; o que sobra por item é a
+   * exceção 10 (isentas/não tributadas) e a conta em si.
+   *
+   * O gate de regime aqui é o **oposto** do que o ICMS próprio faz logo abaixo
+   * e vale reparar na assimetria: lá o Simples é excluído porque não apura o
+   * imposto por operação; aqui ele é excluído porque **não deve este imposto**
+   * — o STF suspendeu a cláusula nona do Convênio ICMS 93/2015 na ADI 5464.
+   * Ver `regimeRemetenteSemDifalUfDestino`.
+   */
+  const difalDaOperacao =
+    options.destinatarioConsumidorFinalNaoContribuinte &&
+    operacaoInterestadual(query) &&
+    !regimeRemetenteSemDifalUfDestino(query.regime);
 
   const cadastroErrors: string[] = [];
   const items: NfePayloadItem[] = sale.items.map((item, index) => {
@@ -599,6 +676,28 @@ function resolveItemsForSale(
     if (credito && !credito.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${credito.reason}`);
     const creditoDeclarado = credito?.ok ? credito : null;
 
+    // DIFAL da EC 87/2015 — a quarta camada de ICMS, e a única que depende de
+    // **quem recebe** a nota. Roda **junto** com o ICMS-ST acima, não no lugar
+    // dele: ver a nota sobre a convivência dos dois em `resolveDifalUfDestino`.
+    const difal =
+      difalDaOperacao && icmsCalculaDifalUfDestino(icmsSituacaoTributaria)
+        ? resolveDifalUfDestino({
+            group,
+            query,
+            mvaRules,
+            ncm: item.product.ncm!,
+            origemMercadoria: item.product.origemMercadoria,
+            // A base única do Convênio ICMS 236/2021: a mesma que alimenta o
+            // ICMS próprio (já reduzida quando há `pRedBC`), e o valor bruto
+            // quando o CST/CSOSN não declara base própria. É a mesma
+            // expressão que o ICMS-ST recebe como `basePropria`, de propósito
+            // — as duas descrevem o mesmo "valor da operação".
+            base: icmsBase ?? base,
+          })
+        : null;
+    if (difal && !difal.ok) cadastroErrors.push(`${itemLabel(item, index)}: ${difal.reason}`);
+    const difalDeclarado = difal?.ok ? difal : null;
+
     /**
      * CST de IPI: o grupo tributário manda, o cadastro do produto é fallback
      * para os produtos que já tinham `cst_ipi` antes de B1 (ver AGENTS.md).
@@ -679,6 +778,16 @@ function resolveItemsForSale(
       fcp_percentual_st: stDeclarado?.fcpAliquota,
       fcp_valor_st: stDeclarado?.fcpValor,
 
+      icms_base_calculo_uf_destino: difalDeclarado?.base,
+      fcp_base_calculo_uf_destino: difalDeclarado?.fcpBase,
+      fcp_percentual_uf_destino: difalDeclarado?.fcpAliquota,
+      icms_aliquota_interna_uf_destino: difalDeclarado?.aliquotaInternaDestino,
+      icms_aliquota_interestadual: difalDeclarado?.aliquotaInterestadual,
+      icms_percentual_partilha: difalDeclarado?.percentualPartilha,
+      fcp_valor_uf_destino: difalDeclarado?.fcpValor,
+      icms_valor_uf_destino: difalDeclarado?.valorDestino,
+      icms_valor_uf_remetente: difalDeclarado?.valorRemetente,
+
       icms_aliquota_credito_simples: creditoDeclarado?.aliquota,
       icms_valor_credito_simples: creditoDeclarado?.valor,
 
@@ -710,6 +819,9 @@ function resolveItemsForSale(
   const icmsStBaseCalculoTotal = totalDeclarado(items, (item) => item.icms_base_calculo_st);
   const icmsStValorTotal = totalDeclarado(items, (item) => item.icms_valor_st);
   const fcpStValorTotal = totalDeclarado(items, (item) => item.fcp_valor_st);
+  const icmsUfDestinoValorTotal = totalDeclarado(items, (item) => item.icms_valor_uf_destino);
+  const icmsUfRemetenteValorTotal = totalDeclarado(items, (item) => item.icms_valor_uf_remetente);
+  const fcpUfDestinoValorTotal = totalDeclarado(items, (item) => item.fcp_valor_uf_destino);
   const ipiValorTotal = totalDeclarado(items, (item) => item.ipi_valor);
   const pisValorTotal = totalDeclarado(items, (item) => item.pis_valor);
   const cofinsValorTotal = totalDeclarado(items, (item) => item.cofins_valor);
@@ -724,6 +836,9 @@ function resolveItemsForSale(
       icmsStBaseCalculoTotal,
       icmsStValorTotal,
       fcpStValorTotal,
+      icmsUfDestinoValorTotal,
+      icmsUfRemetenteValorTotal,
+      fcpUfDestinoValorTotal,
       ipiValorTotal,
       pisValorTotal,
       cofinsValorTotal,
@@ -943,6 +1058,234 @@ function resolveSubstituicaoTributaria(input: {
     // Base do FCP-ST é a mesma do ICMS-ST (confirmado antes de decidir; é como
     // os emissores de referência preenchem `vBCFCPST`). Nula quando o NCM/UF
     // não tem FCP cadastrado — nula é "não calculado", nunca zero.
+    fcpBase: fcp !== null ? base : undefined,
+    fcpAliquota: fcp ?? undefined,
+    fcpValor: fcp !== null ? taxAmount(base, fcp) : undefined,
+  };
+}
+
+/**
+ * O que um item declara no grupo `ICMSUFDest` (o DIFAL da EC 87/2015), ou o
+ * motivo de a emissão não poder sair (B4, 04/09/2026).
+ */
+type DifalUfDestino =
+  | {
+      ok: true;
+      base: number;
+      aliquotaInternaDestino: number;
+      aliquotaInterestadual: number;
+      percentualPartilha: number;
+      valorDestino: number;
+      valorRemetente: number;
+      fcpBase?: number;
+      fcpAliquota?: number;
+      fcpValor?: number;
+    }
+  | { ok: false; reason: string };
+
+/**
+ * `pICMSInterPart` — o percentual do DIFAL que cabe à UF de destino.
+ *
+ * Constante, e é a resposta à segunda pergunta de pesquisa desta tarefa. O
+ * art. 99 do ADCT (acrescentado pela EC 87/2015) escalonou a partilha entre
+ * origem e destino — 40% em 2016, 60% em 2017, 80% em 2018 — e a **encerrou em
+ * 100% para o destino a partir de 2019**. O que terminou foi o escalonamento,
+ * não o campo: `pICMSInterPart` e `vICMSUFRemet` continuam no leiaute 4.00 e
+ * continuam entre os campos que a `NA01-20` exige no grupo. Por isso o
+ * `vICMSUFRemet` sai **zerado e presente**, não ausente.
+ *
+ * Não vira cadastro pelo mesmo critério das alíquotas interestaduais em
+ * `mvaRules.ts`: mudá-lo exigiria emenda constitucional, não decisão do
+ * contador que usa o sistema. Uma nota com data de emissão anterior a 2019
+ * precisaria da tabela por ano — cenário que este motor não tem como produzir
+ * (a emissão é do dia) e que não vale a generalidade.
+ */
+const PARTILHA_DESTINO = 100;
+
+/**
+ * O DIFAL da EC 87/2015 — o grupo `ICMSUFDest` (B4, 04/09/2026).
+ *
+ * ## O que é, e por que faltava
+ *
+ * O art. 155, §2º, VII, da Constituição, na redação da **EC 87/2015**, manda
+ * que a operação interestadual que destina bem a **consumidor final**,
+ * contribuinte ou não, adote a **alíquota interestadual** — e que caiba ao
+ * estado de destino "o imposto correspondente à diferença entre a alíquota
+ * interna do Estado destinatário e a alíquota interestadual".
+ *
+ * A correção de 04/09/2026 fez a primeira metade: o `pICMS`/`vICMS` do item
+ * passou a sair pela alíquota interestadual. A segunda metade — a diferença
+ * que sobra para o destino — é esta função. Enquanto ela não existia, a nota
+ * declarava metade da conta, e a regra `NA01-20` a recusava com a rejeição
+ * **694** ("Não informado o grupo de ICMS para a UF de destino").
+ *
+ * ## As três contas
+ *
+ * 1. **Alíquota interna do destino** (`pICMSUFDest`). Aproximada por
+ *    `group.aliquotaIcms`, a mesma proxy com que B2 calcula a base do ICMS-ST.
+ *    Sem ela não há diferença a apurar, e a recusa é explícita — mesma família
+ *    de recusa de B1/B2/B5/B8.
+ * 2. **Alíquota interestadual** (`pICMSInter`). `aliquotaInterestadual`, a
+ *    mesma função de B2, e por definição o mesmo número que o `pICMS` do item
+ *    declara: o `vICMS` já destacado é exatamente a fatia da origem.
+ * 3. **DIFAL** = `vBCUFDest × (pICMSUFDest − pICMSInter) × pICMSInterPart`.
+ *    É a fórmula literal da regra de validação **`NA15-10`** (rejeição 815),
+ *    e o `pICMSInterPart` é `100` desde 2019 — logo `vICMSUFRemet` é zero,
+ *    mas presente (a `NA01-20` lista os seis campos como exigidos).
+ *
+ * O **FCP da operação própria** (`pFCPUFDest`/`vFCPUFDest`) sai junto, com a
+ * alíquota de `mva_rules.fcp_aliquota` — a mesma coluna que B2 criou para o
+ * `pFCPST`, e literalmente o mesmo percentual: o FCP é do estado de destino,
+ * por NCM, e não muda conforme o imposto seja retido por ST ou devido por
+ * diferencial. Era o que restava de `B3`. **Não ter linha em `mva_rules` não é
+ * erro aqui** (ao contrário do ICMS-ST, onde a MVA é indispensável): significa
+ * "este NCM/UF não tem FCP", e o grupo sai sem os três campos.
+ *
+ * ## Base única, e por que a base é a mesma do ICMS próprio
+ *
+ * A cláusula segunda, §1º, do **Convênio ICMS 236/2021** — que substituiu o
+ * 93/2015 depois da LC 190/2022 — é literal: "a base de cálculo do imposto de
+ * que tratam os incisos I e II do *caput* é **única** e corresponde ao valor
+ * da operação ou o preço do serviço, observado o art. 13 da Lei Complementar
+ * nº 87, de 13 de setembro de 1996". Uma base só para os dois estados, e ela é
+ * o valor da operação. Redução de base e isenção entram no cálculo pelo
+ * Convênio ICMS 153/2015, ao qual o 236/2021 remete — por isso quem chama
+ * passa a base **já reduzida** quando o grupo tributário tem `pRedBC`.
+ *
+ * ## O ICMS-ST e o DIFAL rodam **juntos** no mesmo item
+ *
+ * Esta era a terceira pergunta de pesquisa da tarefa, e a resposta é que os
+ * dois grupos convivem — não são excludentes no XML:
+ *
+ * - A `NA01-20` exige o `ICMSUFDest` olhando **só** `idDest`, `indFinal` e
+ *   `indIEDest`. Nenhuma das doze exceções dela é de CST de substituição
+ *   tributária; as únicas exceções por código são as isentas e não tributadas
+ *   (ver `icmsCalculaDifalUfDestino`). A regra espelhada, `NA01-30` (rejeição
+ *   **695**, "informado indevidamente"), também não veda o grupo por CST.
+ * - Suprimir o ST não seria sequer possível sem quebrar o schema: o grupo
+ *   `ICMS10`/`ICMS70` **exige** `vBCST`/`pICMSST`/`vICMSST`. Um item com CST
+ *   `10` e sem ST é XML inválido.
+ *
+ * O que é verdade — e fica registrado como limitação, não como conta a fazer —
+ * é que **substantivamente** os dois não deveriam coexistir: a substituição
+ * tributária antecipa o imposto das operações *subsequentes*, e uma venda a
+ * consumidor final não tem operação subsequente a substituir. O outro DIFAL, o
+ * do Convênio ICMS 142/2018 (cláusula décima segunda), é de outro eixo: ele
+ * alcança bens "destinados a uso, consumo ou ativo imobilizado do **adquirente
+ * contribuinte**", é recolhido *como* ST (nas tags `*ST`) e nunca no
+ * `ICMSUFDest`. Para o não contribuinte desta função, o correto seria o item
+ * sair com CST `00` em vez de `10` — o que este motor não sabe fazer, porque o
+ * CST vem do grupo tributário do produto e não da operação. É a mesma lacuna
+ * de "tributação por operação" que a pesquisa do art. 23, §1º já registrou.
+ *
+ * ## A lacuna conhecida: o contribuinte que compra para uso próprio
+ *
+ * O DIFAL da EC 87/2015 alcança consumidor final "**contribuinte ou não**".
+ * Este motor só o calcula quando `indIEDest = 9`, isto é, quando o cadastro
+ * **afirma** que o destinatário não é contribuinte (ou não tem IE). Um cliente
+ * com `indicador_ie = "1"` que compra para uso e consumo também é consumidor
+ * final naquela operação, e continua saindo sem DIFAL.
+ *
+ * Isso **não é regressão desta tarefa** e não é lacuna que ela pudesse fechar:
+ * a pesquisa do art. 23, §1º (04/09/2026) já decidiu, com fonte, que a
+ * destinação da mercadoria é atributo **da aquisição** e não do cadastro do
+ * cliente, e que criar um campo por cliente seria pior que a lacuna. A correção
+ * certa continua sendo a mesma que aquela entrada apontou: um indicador de
+ * finalidade da aquisição **por venda**, que resolveria de uma vez o `indFinal`,
+ * a segunda condição do art. 23 e este caso. Enquanto ele não existe, o que
+ * sobra é subdeclaração num cenário estreito — e, do lado do schema, nenhuma
+ * rejeição: com `indIEDest = 1` a `NA01-30` **proíbe** o grupo.
+ */
+function resolveDifalUfDestino(input: {
+  group: TaxGroup;
+  query: TaxRuleQuery;
+  mvaRules: MvaRuleRow[];
+  ncm: string;
+  origemMercadoria: string | null;
+  /** A base única: a do ICMS próprio já reduzida, ou o valor bruto do item. */
+  base: number;
+}): DifalUfDestino {
+  const { group, query, mvaRules, ncm, origemMercadoria, base } = input;
+
+  const aliquotaInternaDestino = group.aliquotaIcms;
+  if (aliquotaInternaDestino === null) {
+    return {
+      ok: false,
+      reason:
+        `esta é uma venda interestadual a consumidor final não contribuinte, que exige o grupo de ICMS ` +
+        `para a UF de destino (DIFAL da EC 87/2015), mas o grupo tributário "${group.name}" não tem ` +
+        `alíquota de ICMS cadastrada — é ela que o cálculo usa como alíquota interna do destino. ` +
+        `Complete o cadastro em Grupos tributários.`,
+    };
+  }
+  // Mesma defesa em profundidade de `resolveSubstituicaoTributaria`, e pelo
+  // mesmo motivo: `aliquota_icms` nasceu em 19/08/2026 sem check de 0–100.
+  // Aqui um valor fora da faixa não estoura coluna nenhuma, mas produz um
+  // DIFAL absurdo numa nota autorizada — imposto declarado a mais.
+  //
+  // A faixa é **idêntica** à do ICMS-ST (`>= 100` recusa, não `> 100`), e isso
+  // é decisão da revisão de B4: com limites diferentes, o mesmo cadastro
+  // absurdo (`aliquota_icms = 100`) recusaria num item de CST `10` e passaria
+  // num de CST `00`, na mesma nota — o desfecho passaria a depender do CST do
+  // produto em vez do cadastro. Lá o motivo do `>= 100` é a divisão por zero
+  // no ajuste da MVA; aqui é só coerência, e não há alíquota interna de 100%.
+  if (aliquotaInternaDestino < 0 || aliquotaInternaDestino >= 100) {
+    return {
+      ok: false,
+      reason:
+        `esta é uma venda interestadual a consumidor final não contribuinte, que exige o grupo de ICMS ` +
+        `para a UF de destino (DIFAL da EC 87/2015), mas a alíquota de ICMS cadastrada no grupo ` +
+        `tributário "${group.name}" (${aliquotaInternaDestino}%) está fora da faixa aceitável de 0 a 100 ` +
+        `— ela é usada como alíquota interna do estado de destino. Corrija em Grupos tributários.`,
+    };
+  }
+
+  const aliquotaInter = aliquotaInterestadual(query.ufOrigem, query.ufDestino, origemMercadoria);
+
+  // `Math.max(0, …)`: um DIFAL negativo não existe — o imposto é do destino
+  // quando a interna dele supera a interestadual, e nunca o contrário. Só
+  // acontece com a aproximação de `group.aliquotaIcms` abaixo da alíquota
+  // interestadual do trajeto (uma interna cadastrada de 4%, por exemplo), que
+  // é cadastro incoerente com a operação e não um caso legal. Zerar é o
+  // resultado correto — nada a repartir —, e é o mesmo critério do ICMS-ST.
+  const diferenca = Math.max(0, aliquotaInternaDestino - aliquotaInter);
+  const valorDestino = toCents((taxAmount(base, diferenca) * PARTILHA_DESTINO) / 100);
+  const valorRemetente = toCents((taxAmount(base, diferenca) * (100 - PARTILHA_DESTINO)) / 100);
+
+  // O FCP da UF de destino, quando houver. Ao contrário do ICMS-ST, a ausência
+  // de linha em `mva_rules` **não** recusa: quem exige MVA é o CST com ST, e
+  // aqui a consulta serve só para saber se o estado cobra FCP naquele NCM.
+  //
+  // **A ambiguidade, porém, recusa** — e a distinção é da revisão de B4.
+  // `resolveMvaRule` devolve `found: false` por dois motivos diferentes: "não
+  // há linha" (o caso normal, que é a resposta "este estado não cobra FCP") e
+  // "há mais de uma linha de mesma especificidade", que é cadastro incoerente.
+  // A `mva_rules_dimensions_unique` é sobre o texto cru e não impede o segundo:
+  // `22021000` e `2202.10.00` são duas linhas no banco e a mesma chave depois
+  // de `normNcm`. Tratar as duas igual faria o mesmo cadastro recusar a
+  // emissão num item de CST `10` (pelo ICMS-ST) e sair silenciosamente sem FCP
+  // num de CST `00`, na mesma nota.
+  const resolucao = resolveMvaRule({ ncm, ufDestino: query.ufDestino }, mvaRules);
+  if (!resolucao.found && resolucao.ambiguousRuleIds) {
+    return {
+      ok: false,
+      reason:
+        `esta é uma venda interestadual a consumidor final não contribuinte, que exige o grupo de ICMS ` +
+        `para a UF de destino (DIFAL da EC 87/2015), e ${resolucao.reason}`,
+    };
+  }
+  const fcp = resolucao.found ? resolucao.rule.fcpAliquota : null;
+
+  return {
+    ok: true,
+    base,
+    aliquotaInternaDestino,
+    aliquotaInterestadual: aliquotaInter,
+    percentualPartilha: PARTILHA_DESTINO,
+    valorDestino,
+    valorRemetente,
+    // Base do FCP é a mesma do DIFAL — mesma decisão que B2 tomou para o
+    // `vBCFCPST`. Nula quando o NCM/UF não tem FCP: nula é "não calculado".
     fcpBase: fcp !== null ? base : undefined,
     fcpAliquota: fcp ?? undefined,
     fcpValor: fcp !== null ? taxAmount(base, fcp) : undefined,
@@ -1353,6 +1696,7 @@ export function buildNfePayloadFromSale(
   // Um código só para os dois campos que a Rejeição 696 cruza — ver
   // `resolveConsumidorFinal`.
   const indicadorIeCodigo = resolveIndicadorIeCodigo(contact.indicadorIe);
+  const consumidorFinal = resolveConsumidorFinal(indicadorIeCodigo);
 
   const query: TaxRuleQuery = {
     regime,
@@ -1363,10 +1707,15 @@ export function buildNfePayloadFromSale(
   };
 
   // NF-e de venda: destinatário identificado e obrigatório (validado acima), e
-  // é dele que depende o direito ao crédito do Simples — ver
-  // `ResolveItemsOptions`.
+  // é dele que dependem as duas dimensões de `ResolveItemsOptions` — o direito
+  // ao crédito do Simples e o DIFAL da EC 87/2015.
   const resolved = resolveItemsForSale(sale, rules, query, mvaRules, {
     verificaDireitoAoCreditoDoDestinatario: true,
+    // `indFinal = 1` e `indIEDest = 9`, as duas condições de destinatário da
+    // regra `NA01-20`. São a mesma pergunta desde a correção da Rejeição 696
+    // — `resolveConsumidorFinal` deriva uma da outra —, e a terceira condição
+    // (interestadual) `resolveItemsForSale` decide sozinha.
+    destinatarioConsumidorFinalNaoContribuinte: consumidorFinal === 1 && indicadorIeCodigo === 9,
   });
   if (!resolved.ok) return resolved;
   const {
@@ -1377,19 +1726,30 @@ export function buildNfePayloadFromSale(
     icmsStBaseCalculoTotal,
     icmsStValorTotal,
     fcpStValorTotal,
+    icmsUfDestinoValorTotal,
+    icmsUfRemetenteValorTotal,
+    fcpUfDestinoValorTotal,
     ipiValorTotal,
     pisValorTotal,
     cofinsValorTotal,
   } = resolved.data;
 
-  const localDestino = branch.uf === contact.uf ? 1 : 2;
+  // `idDest`, e ele sai da **mesma** função que decide a alíquota interestadual
+  // e o gatilho do DIFAL (correção da revisão de B4). Antes era
+  // `branch.uf === contact.uf`, comparação crua: um cliente cadastrado com
+  // `"sp"` minúsculo (ou com espaço) fazia o cabeçalho declarar `local_destino:
+  // 2` enquanto `operacaoInterestadual` — que normaliza — dizia que a operação
+  // era interna. A divergência sempre existiu, mas passou a ter consequência
+  // com B4: `idDest = 2` sem o grupo `ICMSUFDest` é a rejeição 694, exatamente
+  // a que esta tarefa fecha. Uma fonte só para o mesmo fato.
+  const localDestino = operacaoInterestadual(query) ? 2 : 1;
 
   const payload: NfePayload = {
     natureza_operacao: sale.operationType?.trim() || "Venda de mercadoria",
     data_emissao: new Date(`${sale.issueDate}T12:00:00-03:00`).toISOString(),
     tipo_documento: 1,
     finalidade_emissao: 1,
-    consumidor_final: resolveConsumidorFinal(indicadorIeCodigo),
+    consumidor_final: consumidorFinal,
     presenca_comprador: 1,
     local_destino: localDestino,
 
@@ -1427,6 +1787,13 @@ export function buildNfePayloadFromSale(
     icms_base_calculo_st: icmsStBaseCalculoTotal,
     icms_valor_total_st: icmsStValorTotal,
     fcp_valor_total_st: fcpStValorTotal,
+    // Os três totais do DIFAL ficam **fora** do `valor_total` acima, ao
+    // contrário do IPI e do ICMS-ST: a regra W16-10 não os lista entre as
+    // parcelas de `vNF`, porque o DIFAL não é acrescido ao documento — já está
+    // no preço da mercadoria (base única, Convênio ICMS 236/2021).
+    icms_valor_total_uf_destino: icmsUfDestinoValorTotal,
+    icms_valor_total_uf_remetente: icmsUfRemetenteValorTotal,
+    fcp_valor_total_uf_destino: fcpUfDestinoValorTotal,
     valor_ipi: ipiValorTotal,
     valor_pis: pisValorTotal,
     valor_cofins: cofinsValorTotal,
@@ -1524,8 +1891,15 @@ export function buildNfcePayloadFromSale(
   // NFC-e: sem checagem de elegibilidade do destinatário, por decisão de
   // escopo — o modelo 65 é venda presencial a consumidor final e não exige
   // cliente identificado. Ver `ResolveItemsOptions`.
+  //
+  // Sem DIFAL também, e aqui não é decisão de escopo e sim construção: a UF de
+  // destino é a da própria filial (`query` acima), então a operação nunca é
+  // interestadual. O `false` é redundante e explícito — a rejeição **807**
+  // ("NFC-e com grupo de ICMS para a UF do destinatário") existe para o modelo
+  // 65 nunca declarar este grupo.
   const resolved = resolveItemsForSale(sale, rules, query, mvaRules, {
     verificaDireitoAoCreditoDoDestinatario: false,
+    destinatarioConsumidorFinalNaoContribuinte: false,
   });
   if (!resolved.ok) return resolved;
   const {
@@ -1643,6 +2017,24 @@ export type SaleReturnForInvoice = {
  * motor que ninguém está olhando, a mesma classe de defeito que a correção
  * acabou de fechar: um campo com duas fontes que podem discordar.
  *
+ * ## O DIFAL da EC 87/2015 **não** vai na devolução (B4, 04/09/2026)
+ *
+ * E, ao contrário do `indFinal`, aqui não há decisão a tomar: a regra
+ * `NA01-20` — a que exige o grupo `ICMSUFDest` — tem **exceção expressa para
+ * NF-e de entrada (`tpNF = 0`)**, que é exatamente o que esta função emite.
+ * Declarar o grupo numa nota de entrada não é "escopo a mais": é a rejeição
+ * **695** ("informado indevidamente o grupo de ICMS para a UF de destino").
+ *
+ * Sobra, é verdade, uma pergunta substantiva que esta tarefa **não** responde:
+ * a devolução de uma venda que recolheu DIFAL deveria produzir alguma reversão
+ * do imposto recolhido ao estado de destino. Isso não se faz no XML da
+ * devolução — o mecanismo é de apuração/GNRE do estado de destino, fora do
+ * documento —, e este motor não o modela. Fica como limitação conhecida, na
+ * mesma família das outras da devolução (recalcular MVA, IPI, `pCredSN` e a
+ * alíquota interestadual com o cadastro de hoje em vez de ler
+ * `fiscal_document_items`), com uma diferença a favor: aqui não há campo
+ * nenhum saindo errado, porque não há campo nenhum saindo.
+ *
  * Pesquisado contra a documentação da Focus NFe antes de desenhar (mesmo
  * procedimento das etapas F1/8/8.5) — ver `NfePayloadNotaReferenciada`.
  */
@@ -1702,8 +2094,13 @@ export function buildReturnNfePayload(
   // Devolução: mesma checagem da venda original, porque é o mesmo cliente
   // identificado — se aquela venda não podia transferir crédito, esta nota não
   // pode revertê-lo.
+  //
+  // **Sem DIFAL**, e a decisão é da própria regra, não de escopo: a `NA01-20`
+  // tem exceção expressa para NF-e de **entrada** (`tpNF = 0`), que é o que
+  // esta função emite (`tipo_documento: 0`). Ver a nota abaixo, no cabeçalho.
   const resolved = resolveItemsForSale(asSale, rules, query, mvaRules, {
     verificaDireitoAoCreditoDoDestinatario: true,
+    destinatarioConsumidorFinalNaoContribuinte: false,
   });
   if (!resolved.ok) return resolved;
   const {
@@ -1726,7 +2123,8 @@ export function buildReturnNfePayload(
     finalidade_emissao: 4,
     consumidor_final: resolveConsumidorFinal(indicadorIeCodigo),
     presenca_comprador: 0,
-    local_destino: branch.uf === contact.uf ? 1 : 2,
+    // Mesma fonte única da venda — ver a nota em `buildNfePayloadFromSale`.
+    local_destino: operacaoInterestadual(query) ? 2 : 1,
 
     cnpj_emitente: branch.cnpj!,
     nome_emitente: branch.name,

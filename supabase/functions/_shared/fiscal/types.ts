@@ -342,6 +342,95 @@ export type NfePayloadItem = {
   /** `vFCPST`. */
   fcp_valor_st?: number;
 
+  /* --- DIFAL da EC 87/2015: grupo `ICMSUFDest` (B4, 04/09/2026) --- */
+
+  /**
+   * `vBCUFDest` — a base de cálculo do ICMS devido à UF de **destino**.
+   *
+   * É **base única**: a cláusula segunda, §1º, do Convênio ICMS 236/2021 diz
+   * que "a base de cálculo do imposto (…) é única e corresponde ao valor da
+   * operação ou o preço do serviço, observado o art. 13 da Lei Complementar nº
+   * 87, de 13 de setembro de 1996". Isto é: a mesma base que serve ao ICMS da
+   * operação própria serve ao imposto devido ao destino — não há uma segunda
+   * base a construir.
+   *
+   * Por isso este motor a preenche com o **mesmo número que alimenta o ICMS
+   * próprio**: a base já reduzida quando o grupo tributário tem `pRedBC`
+   * (o Convênio ICMS 153/2015 manda considerar redução de base e isenção no
+   * cálculo do DIFAL, e o Convênio 236/2021 remete a ele), e o valor bruto do
+   * item quando o CST/CSOSN não declara base própria (CST `30`/`60`, CSOSN).
+   */
+  icms_base_calculo_uf_destino?: number;
+  /**
+   * `vBCFCPUFDest` — a base do FCP devido à UF de destino, que é **a mesma**
+   * `vBCUFDest`. Existe como campo próprio no leiaute (o FCP pode ter base
+   * distinta em legislação estadual), e aqui acompanha a mesma decisão que B2
+   * tomou para `fcp_base_calculo_st`.
+   *
+   * Ausente quando o NCM × UF de destino não tem FCP cadastrado — ausente é
+   * "não calculado", nunca zero.
+   */
+  fcp_base_calculo_uf_destino?: number;
+  /**
+   * `pFCPUFDest` — percentual do Fundo de Combate à Pobreza da UF de destino.
+   *
+   * Vem de `mva_rules.fcp_aliquota`, a mesma coluna que B2 criou para o
+   * `pFCPST`, e **é o mesmo número**: o percentual de FCP é do estado de
+   * destino por NCM, e não muda conforme o imposto seja retido por
+   * substituição tributária ou devido por diferencial de alíquota. O que muda
+   * é a tag em que ele sai — `pFCPST` num caso, `pFCPUFDest` no outro.
+   *
+   * Este é o FCP da **operação própria**, que B2 não calculava: a parte de
+   * `B3` que sobrou e virou carga de `B4`.
+   */
+  fcp_percentual_uf_destino?: number;
+  /**
+   * `pICMSUFDest` — a alíquota **interna** da UF de destino.
+   *
+   * Aproximada por `tax_groups.aliquota_icms`, a mesma proxy que B2 usa na
+   * base do ICMS-ST, e com a mesma ressalva: não existe neste sistema uma
+   * tabela de alíquota interna por UF × NCM. A ressalva pesa mais aqui — o
+   * DIFAL *é* a diferença entre duas alíquotas —, e está registrada na entrada
+   * de B4 no AGENTS.md como a lacuna de raiz do ICMS deste motor.
+   */
+  icms_aliquota_interna_uf_destino?: number;
+  /**
+   * `pICMSInter` — a alíquota interestadual da operação (4%, 7% ou 12%), a
+   * mesma que `aliquotaInterestadual` já calcula desde B2 e que o `pICMS` do
+   * item declara desde a correção de 04/09/2026. Sai também aqui porque o
+   * fisco refaz a conta do grupo sem olhar o grupo vizinho.
+   */
+  icms_aliquota_interestadual?: number;
+  /**
+   * `pICMSInterPart` — o percentual do DIFAL que cabe à UF de destino.
+   *
+   * **Sempre `100`.** O art. 99 do ADCT escalonou a partilha entre origem e
+   * destino (40% em 2016, 60% em 2017, 80% em 2018) e a encerrou em **100% a
+   * partir de 2019**. O campo continua no leiaute e continua obrigatório no
+   * grupo — o que acabou foi o escalonamento, não a tag.
+   */
+  icms_percentual_partilha?: number;
+  /** `vFCPUFDest` — `vBCFCPUFDest × pFCPUFDest`. Ausente quando não há FCP cadastrado. */
+  fcp_valor_uf_destino?: number;
+  /**
+   * `vICMSUFDest` — o DIFAL devido à UF de destino.
+   *
+   * A regra de validação **`NA15-10`** (rejeição **815**) confere
+   * `vBCUFDest × (pICMSUFDest − pICMSInter) × pICMSInterPart`, e é essa a
+   * conta que este motor faz. O FCP **não** entra nela: é campo próprio, com
+   * conferência própria.
+   */
+  icms_valor_uf_destino?: number;
+  /**
+   * `vICMSUFRemet` — a parte do DIFAL que caberia à UF de **origem**.
+   *
+   * **Sempre `0`**, e presente de propósito: com `pICMSInterPart = 100` a
+   * fatia da origem é `vBCUFDest × (pICMSUFDest − pICMSInter) × 0`. O campo
+   * segue obrigatório no grupo (a `NA01-20` o lista entre os exigidos), então
+   * zerado é diferente de ausente — omiti-lo seria rejeição de schema.
+   */
+  icms_valor_uf_remetente?: number;
+
   /* --- Crédito de ICMS do Simples Nacional (B8, 03/09/2026) --- */
 
   /**
@@ -509,6 +598,23 @@ export type NfePayload = {
   icms_valor_total_st?: number;
   /** `vFCPST` do grupo `total` — a soma do FCP-ST dos itens (B2). Entra no `valor_total`. */
   fcp_valor_total_st?: number;
+  /**
+   * `vFCPUFDest`, `vICMSUFDest` e `vICMSUFRemet` do grupo `total` — as somas
+   * dos campos homônimos dos itens (B4, 04/09/2026).
+   *
+   * **Nenhum dos três entra no `valor_total`**, e é a diferença que separa o
+   * DIFAL do ICMS-ST e do IPI: a regra `W16-10` define `vNF` como
+   * `vProd − vDesc − vICMSDeson + vST + vFCPST + vFrete + vSeg + vOutro + vII
+   * + vIPI + …`, e o DIFAL não é parcela dela. Ele não é acrescido ao
+   * documento — já está embutido no preço da mercadoria, que é o que a base
+   * única do Convênio ICMS 236/2021 significa. Somá-lo em `valor_total` seria
+   * cobrar duas vezes e rejeitar a nota.
+   */
+  fcp_valor_total_uf_destino?: number;
+  /** `vICMSUFDest` do grupo `total`. Ver `fcp_valor_total_uf_destino`. */
+  icms_valor_total_uf_destino?: number;
+  /** `vICMSUFRemet` do grupo `total` — zero desde 2019, pelo mesmo motivo do campo do item. */
+  icms_valor_total_uf_remetente?: number;
   valor_ipi?: number;
   valor_pis?: number;
   valor_cofins?: number;

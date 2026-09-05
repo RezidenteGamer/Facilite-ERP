@@ -205,10 +205,20 @@ function headerFromPayload(payload: NfePayload): Record<string, unknown> {
     // nulo em `total_*` significa "não calculado", nunca zero (A3).
     total_icms_st_base: toNumberOrNull(payload.icms_base_calculo_st),
     total_icms_st: toNumberOrNull(payload.icms_valor_total_st),
-    // `total_fcp` recebe o FCP **retido por ST** (`vFCPST`), o único que este
-    // motor calcula: a alíquota vem de `mva_rules`, consultada só para itens
-    // com ST. O FCP da operação própria continua sem quem o preencha.
+    // `total_fcp` recebe o FCP **retido por ST** (`vFCPST`). O FCP da operação
+    // própria — que B2 não calculava — passou a existir em B4 (04/09/2026) e
+    // tem coluna própria, `total_fcp_uf_destino`: são impostos diferentes em
+    // tags diferentes do XML, e somá-los numa coluna só perderia a distinção
+    // que uma fiscalização pediria.
     total_fcp: toNumberOrNull(payload.fcp_valor_total_st),
+    // DIFAL da EC 87/2015 (B4): colunas novas. Nulas em toda nota que não é
+    // venda interestadual a consumidor final não contribuinte — e nulo
+    // continua sendo "não calculado" (A3). `total_icms_uf_remetente` é o único
+    // total deste motor que sai **zero e não nulo** quando existe: a partilha
+    // com a origem acabou em 2019, mas o campo continua no leiaute.
+    total_icms_uf_destino: toNumberOrNull(payload.icms_valor_total_uf_destino),
+    total_icms_uf_remetente: toNumberOrNull(payload.icms_valor_total_uf_remetente),
+    total_fcp_uf_destino: toNumberOrNull(payload.fcp_valor_total_uf_destino),
     // IBS e CBS seguem nulos: são a Reforma Tributária (B10), que ainda não tem
     // motor nenhum.
     total_ibs: null,
@@ -288,6 +298,23 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     // que não é CSOSN 101/201, e nulo continua sendo "não calculado" (A3).
     icms_aliquota_credito_simples: toNumberOrNull(item.icms_aliquota_credito_simples),
     icms_valor_credito_simples: toNumberOrNull(item.icms_valor_credito_simples),
+
+    // DIFAL da EC 87/2015 — o grupo `ICMSUFDest` (B4, 04/09/2026). Nove
+    // colunas novas: nenhuma existia, porque nenhuma tarefa anterior declarava
+    // partilha de ICMS com a UF de destino. Nulas em todo item que não é venda
+    // interestadual a consumidor final não contribuinte. As duas alíquotas
+    // ficam gravadas junto dos valores pelo mesmo motivo de B8: a interna do
+    // destino é uma aproximação do cadastro de hoje (`tax_groups.aliquota_icms`)
+    // e a nota tem de continuar dizendo com que número ela calculou.
+    icms_uf_destino_base: toNumberOrNull(item.icms_base_calculo_uf_destino),
+    icms_uf_destino_aliquota_interna: toNumberOrNull(item.icms_aliquota_interna_uf_destino),
+    icms_uf_destino_aliquota_interestadual: toNumberOrNull(item.icms_aliquota_interestadual),
+    icms_uf_destino_percentual_partilha: toNumberOrNull(item.icms_percentual_partilha),
+    icms_uf_destino_valor: toNumberOrNull(item.icms_valor_uf_destino),
+    icms_uf_remetente_valor: toNumberOrNull(item.icms_valor_uf_remetente),
+    fcp_uf_destino_base: toNumberOrNull(item.fcp_base_calculo_uf_destino),
+    fcp_uf_destino_aliquota: toNumberOrNull(item.fcp_percentual_uf_destino),
+    fcp_uf_destino_valor: toNumberOrNull(item.fcp_valor_uf_destino),
 
     // `*_quantidade_vendida` e `*_aliquota_valor` (B5) são o caminho **por
     // unidade de medida** (CST 03, grupo `PISQtde`); `*_base` e `*_aliquota`
