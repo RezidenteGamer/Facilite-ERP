@@ -5987,3 +5987,219 @@ combustíveis, medicamentos, armamentos, cana, transporte, duplicatas, volumes,
 ISSQN, retenções). E o XML do provedor simulado, que continua parcial de
 propósito — não declara ST, DIFAL, `vTotTrib` nem IBS/CBS, e nada disso mudou
 aqui.
+
+### Decisão arquitetural: a emissão fiscal passa a ser travada no banco — a reserva atômica, a corrida provada e o corte com A6 (A5) (07/09/2026)
+
+Segunda tarefa da Etapa 3. O plano mestre descrevia A5 como "`ref` idempotente já
+existe (`venda-{id}`, unique) mas depende do cliente chamar; passa a ser gerado e
+travado no banco". **A primeira metade já estava feita desde A1** (01/09/2026): a
+`ref` é derivada dentro da própria Edge Function (`refFor` em `index.ts`, a partir
+de `_shared/fiscal/refs.ts`) e nunca aceita do corpo da requisição — conferido
+antes de escrever qualquer linha, para não refazer trabalho existente. O que
+faltava era a segunda: **travar**.
+
+**Nada foi aplicado nem implantado. Nenhuma migration foi escrita** — e a
+conferência de por que ela não é necessária está abaixo. `fiscal-emit` não foi
+implantada. Nenhuma regra de cálculo tributário foi tocada.
+
+#### A corrida existe, e está provada
+
+`handleEmit` fazia, nesta ordem: `readDocumentByRef` (leitura) → `buildPayload` →
+`provider.emit()` → `persistEmission` (escrita). Entre a leitura e a escrita há
+trabalho assíncrono de verdade — três consultas de cadastro em paralelo
+(`readTaxRules`, `readMvaRules`, `readIbptRates`), a leitura da venda, e a chamada
+ao provedor. Duas requisições de emissão para a **mesma venda** que caiam dentro
+dessa janela (duplo clique, retry de rede, o front chamando duas vezes) passam as
+duas pela leitura antes de qualquer uma escrever, e as duas seguem para emitir.
+
+O estrago tem duas metades, e as duas foram confirmadas na leitura do código, não
+supostas:
+
+1. **O provedor simulado não protege nada entre requisições.** `handleEmit`
+   constrói uma instância nova a cada chamada (`createProvider` →
+   `createFiscalProvider`), então o `Map` de `documents` que faz a idempotência
+   por `ref` dentro do `emit()` dele **nasce vazio nas duas**. A proteção que o
+   cabeçalho de `simulatedFiscalProvider.ts` descreve vale dentro de uma
+   instância, e nunca há duas chamadas na mesma instância. As duas emitem: com o
+   **mesmo `numero`** (as duas leram o mesmo `readLastNumero`) e **chaves de
+   acesso diferentes**, porque o `cNF` da chave e o protocolo são sorteados.
+2. **`persistEmission` sobrescreve em vez de falhar.** O
+   `upsert(..., { onConflict: "ref" })` não levanta violação de unicidade — ele
+   substitui a linha. A segunda escrita apaga `chave`, `numero`, `protocolo` e o
+   XML da primeira. Se a primeira já tivesse sido autorizada de verdade, a nota
+   existe para a SEFAZ e a chave dela some do nosso lado. Só
+   `fiscal_document_events` guarda as duas (não tem unicidade nenhuma) — e é por
+   isso que ele virou a asserção mais forte do teste de concorrência.
+
+A prova está em dois lugares, de propósito:
+
+- **Sem rede**, em `tests/unit/fiscalEmitReservation.test.ts`: duas instâncias do
+  simulado como `handleEmit` as constrói, semeadas com o mesmo `readLastNumero`,
+  emitindo a mesma `ref` — mesmo `numero`, chaves diferentes. `randomInt` é
+  injetado com sementes diferentes nas duas porque é assim que dois processos
+  independentes se comportam; sem injetar, o teste dependeria de dois
+  `Math.random` não colidirem.
+- **Contra o banco real**, em `tests/concurrency/fiscalEmitConcurrency.test.ts`:
+  duas emissões simultâneas da mesma venda contra a Edge Function implantada.
+
+#### A correção: reserva atômica antes de falar com o provedor
+
+Mesmo princípio do `select ... for update` de C4 — quem decide o efeito é o
+banco, não a ordem em que dois processos leram. A primeira escrita deixa de ser a
+que o provedor gera e passa a ser uma **reserva**:
+`insert into fiscal_documents (..., status) values (..., 'processando_autorizacao')`.
+Quem grava emite; quem esbarra na unicidade perdeu a corrida, **não chama o
+provedor**, relê a linha e devolve o desfecho do vencedor (a chave, se já saiu; a
+recusa da SEFAZ, se recusou; "esta emissão já está em andamento", se ainda está
+emitindo).
+
+Três decisões dentro dessa, cada uma com um motivo que não é óbvio:
+
+- **`insert` + código de erro `23505`, e não `on conflict (ref) do nothing`.** As
+  duas são igualmente atômicas. A diferença é o que acontece quando o conflito
+  **não** é na `ref`: `fiscal_documents` tem mais dois índices únicos parciais,
+  `(sale_id, model)` e `(sale_return_id, model)` — confirmados no catálogo do
+  Postgres do projeto, não só nas migrations —, e um `on conflict (ref)` não os
+  cobre; um conflito ali voltaria como erro não tratado em vez de "perdi a
+  corrida". Detectar pelo `code` trata os três de uma vez, e não passa a depender
+  de o PostgREST devolver lista vazia num `DO NOTHING` (comportamento correto
+  hoje, mas que viraria dependência de versão de biblioteca).
+- **A reemissão de nota recusada usa compare-and-swap, não insert.**
+  `erro_autorizacao` e `denegado` já podiam ser reemitidos antes de A5, e a linha
+  já existe — não há insert para colidir. A trava ali é
+  `update ... where id = ? and status = ?` com o status que acabou de ser lido:
+  sob `read committed` a segunda requisição espera o lock da primeira e
+  **reavalia** o `where` depois dela, encontra `processando_autorizacao` e não
+  afeta linha nenhuma. É a mesma garantia do `for update` escrita como CAS,
+  porque aqui não há transação para segurar o lock entre dois statements (o
+  PostgREST não oferece uma).
+- **A reserva vem depois de `buildPayload`, não antes.** É `readSaleForInvoice`,
+  dentro dele, que confere que a venda pertence mesmo à filial pedida — o
+  chamador escolhe `saleId` e `branchId` separadamente. Reservar antes gravaria
+  uma linha de `fiscal_documents` com a filial que o chamador *disse*, para uma
+  venda que pode ser de outra: uma corrupção pior que a corrida. A janela que a
+  reserva precisa cobrir é a que vai daí até a escrita do desfecho — a chamada ao
+  provedor —, e essa ela cobre inteira. O custo é `buildPayload` rodar duas vezes
+  no caso concorrente; são leituras puras, e o perdedor não emite.
+
+E uma quarta, sobre **quem** decide se a reserva é desfeita. O `try` cobre a
+chamada ao provedor **e** o `persistEmission`, e quem distingue os casos é o
+guarda de `releaseEmission`, que só toca a linha enquanto ela ainda está em
+`processando_autorizacao`:
+
+- falhou antes ou durante `provider.emit()` (transporte,
+  `FiscalNotConfiguredError`): nada foi emitido, a linha ainda é a reserva, e ela
+  é desfeita. Sem isso a venda ficaria presa para sempre — `decideEmissao` recusa
+  reemitir por cima de uma reserva, e nada a limparia até A6 existir;
+- falhou dentro de `persistEmission`: se o **cabeçalho** não entrou (violação de
+  CHECK numa coluna de cabeçalho, estouro de `numeric(14,2)`, banco fora),
+  nenhuma escrita aconteceu e vale o mesmo raciocínio — e é justamente o caminho
+  que, antes desta correção, não deixava linha nenhuma e permitia tentar de novo;
+  se o cabeçalho entrou e o que falhou foi o **detalhe** (itens/evento — ver o
+  cabeçalho de `persist.ts`), o status já é o desfecho e as duas escritas de
+  `releaseEmission` não afetam linha nenhuma. Apagar a chave de uma nota
+  autorizada seria exatamente a perda que esta tarefa existe para impedir, e o
+  guarda impede.
+
+`releaseEmission` também nunca lança: ela roda no caminho de erro e não pode
+substituir a exceção original, que é a que diz o que deu errado.
+
+#### O corte com A6, e por que ele fecha
+
+A6 é "máquina de estados: hoje `processando_autorizacao` e `denegado` existem no
+enum e nunca são escritos. Transição controlada + reprocessamento do que falhou".
+A5 passa a escrever `processando_autorizacao`. A hipótese de trabalho do
+enunciado era que dava para separar; a conferência confirmou, e o que a fecha é um
+invariante estreito:
+
+> **`processando_autorizacao` não sobrevive à requisição HTTP que o escreveu.**
+
+Todo caminho de saída de `handleEmit` depois da reserva ou sobrescreve o status
+com o desfecho (`persistEmission`, que roda tanto para `autorizado` quanto para
+`erro_autorizacao`) ou desfaz a reserva (`releaseEmission`). Não há caminho que
+retorne com a linha ainda reservada. Isso vale porque **os dois provedores de hoje
+respondem de forma síncrona** — e isso foi conferido, não presumido:
+`simulatedFiscalProvider.emit()` devolve o documento pronto, e `focusProvider` é
+esqueleto que lança `FiscalNotConfiguredError` nas sete operações até A12.
+
+Fica para A6, explicitamente:
+
+- **A nota que fica pendurada em `processando_autorizacao` entre requisições.** É
+  o estado normal do provedor real (a Focus responde 202 e autoriza depois), e é
+  onde a máquina de estados de verdade precisa existir: quem consulta, quando, e o
+  que fazer com uma reserva órfã de um isolate que morreu. Hoje `handleEmit`
+  recusa reemitir por cima de uma reserva ("já está em andamento") e não tem como
+  saber que o outro lado morreu — com os provedores síncronos de hoje isso não
+  acontece; com a Focus, acontecerá por construção.
+- **A transição para `denegado`.** Continua nunca sendo escrita. A5 apenas a trata
+  como reemitível no caminho de reserva, que é o que `handleEmit` já fazia.
+- **`handleCancel` e `handleQuery` sobre uma nota reservada.** Conferido que nada
+  quebra hoje: o simulado responde `erro_cancelamento` 501 ("cancelamento só é
+  possível para documento autorizado") e não grava nada. Mas quem *decide* isso é
+  o provedor, não uma máquina de estados nossa — e essa inversão é de A6.
+
+Fora de escopo por decisão do enunciado, e mantido fora: **A7** (fila de retry e
+reprocessamento agendado) e **A10** (numeração fiscal atômica — o `Map` de
+`counters` em memória e o `readLastNumero` que duas emissões concorrentes leem
+igual continuam exatamente como estavam; a reserva torna a numeração menos frágil
+para a *mesma venda* de bônus, e não faz nada por vendas diferentes, que é o caso
+de A10).
+
+#### Nenhuma migration — conferido, não presumido
+
+A reserva grava antes de ter chave, número, protocolo ou qualquer total, então a
+pergunta certa é se alguma coluna obrigatória impede isso. As colunas `NOT NULL`
+de `fiscal_documents`, lidas do catálogo do projeto (não das migrations, porque a
+de A1 ainda não foi aplicada), são oito: `id`, `created_at`, `updated_at`, `model`
+e `ambiente` têm default; sobram `branch_id`, `ref` e `status`, que a reserva
+fornece. O `CHECK fiscal_documents_one_origin_check` (`sale_id` XOR
+`sale_return_id`) também é satisfeito. **Nenhuma constraint precisou ser
+afrouxada, e nenhuma migration foi escrita.**
+
+#### Quatro arquivos, e não três
+
+`fiscal-emit/` ganhou `reservation.ts`. Ele tem a tabela de decisão da emissão
+(`decideEmissao`, `decideAposPerderCorrida`, `isViolacaoDeUnicidade`) e **nenhum
+import de runtime** — só tipos. Duas razões:
+
+1. É a lógica que erra em silêncio se alguém mexer, e é o único pedaço que dá para
+   cobrir com teste sem rede. `persist.ts`, `data.ts` e `index.ts` importam
+   `jsr:@supabase/supabase-js@2` e não são importáveis de dentro do Vitest (o
+   especificador `jsr:` não resolve no Node, e o `tsc -b` de `tsconfig.tests.json`
+   quebraria).
+2. `handleEmit` volta a ser despacho, e a tabela de estados fica legível de uma
+   vez — que é o que uma revisão de motor fiscal precisa ler.
+
+As duas escritas atômicas (`reserveEmission`, `releaseEmission`) ficaram em
+`persist.ts`, junto do resto do que fala com o Postgres.
+
+#### Testes
+
+**407 testes passando** em 13 arquivos (eram 391 em 12). O arquivo novo de
+unidade, `tests/unit/fiscalEmitReservation.test.ts`, tem 16: a prova da corrida no
+provedor e a tabela de decisão inteira, incluindo o caso em que a linha sumiu
+porque o vencedor desfez a reserva, o caso em que o vencedor autorizou **outro
+modelo** (duas abas pedindo a mesma venda, uma em NF-e e outra em NFC-e: a `ref` é
+a mesma, então a linha é a mesma, e quem perdeu não pode receber `ok: true` com a
+chave de uma nota que não é a que pediu), e o caso em que `23505` não pode ser
+confundido com `23503`/`42501` (ler uma violação de FK como "perdi a corrida"
+responderia "já está em andamento" para uma falha que ninguém veria, e o operador
+esperaria uma nota que nunca sairia).
+
+`tests/concurrency/fiscalEmitConcurrency.test.ts` é a bateria contra o banco real,
+e ela tem uma característica que C4 não tem: **ela mede a função implantada, não o
+código do repositório**. `fiscal-emit` roda no Supabase. Contra uma implantação
+anterior a A5 ela falha — duas chaves diferentes e dois eventos de autorização
+para a mesma venda —, e essa falha *é* a prova da corrida. Ela passa a ficar verde
+quando a função corrigida for implantada, o que esta tarefa não fez.
+
+**Ela não foi executada.** `.env.local` tem só `VITE_SUPABASE_URL` e
+`VITE_SUPABASE_ANON_KEY`; `FACILITE_TEST_EMAIL` / `FACILITE_TEST_PASSWORD` não
+estão lá, e a bateria falha na primeira asserção de ambiente com a mensagem
+dizendo o que falta — mesmo comportamento (e mesma condição de ambiente
+pré-existente) de `stockConcurrency.test.ts` e das duas de `tests/isolation`, que
+já falhavam antes desta tarefa pelo mesmo motivo. `npm test` fecha com **3 suítes
+falhando por credencial ausente** (eram 2) e 13 passando.
+
+`npm run build`, `npm run lint` (62 avisos pré-existentes, nenhum nos arquivos
+tocados) e `deno check supabase/functions/fiscal-emit/index.ts` limpos.

@@ -4,7 +4,11 @@
  * As três tabelas do modelo canônico (A3, 01/09/2026):
  *
  * - `fiscal_documents` — o cabeçalho da nota. Upsert por `ref`, que é a chave de
- *   idempotência da emissão.
+ *   idempotência da emissão. Desde A5 (07/09/2026) esse upsert **sempre** cai
+ *   numa linha que a própria requisição reservou (`reserveEmission`, abaixo):
+ *   `onConflict: "ref"` sobrescreve em vez de falhar, e sem a reserva duas
+ *   emissões concorrentes da mesma venda gravavam uma por cima da outra — a
+ *   segunda apagando a chave de acesso da primeira. Ver `reservation.ts`.
  * - `fiscal_document_items` — uma linha por item, com o snapshot do produto e o
  *   que foi **declarado** de imposto naquele item.
  * - `fiscal_document_events` — o que aconteceu: autorização, rejeição,
@@ -40,6 +44,8 @@ import type {
   FiscalModel,
   NfePayload,
 } from "../_shared/fiscal/types.ts";
+
+import { RESERVA_STATUS, isViolacaoDeUnicidade } from "./reservation.ts";
 
 /** `fiscal_ambiente` — o enum criado por A3. */
 export type FiscalAmbiente = "homologacao" | "producao";
@@ -88,6 +94,142 @@ export async function readDocumentByRef(
     .maybeSingle();
   if (error) throw error;
   return (data as unknown as FiscalDocumentRow | null) ?? null;
+}
+
+/* ------------------------------------------------------------------------ */
+/* A reserva atômica da emissão (A5, 07/09/2026)                             */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * O resultado da tentativa de reservar a emissão desta `ref`.
+ *
+ * `previousStatus` é o que a linha tinha **antes** da reserva: `null` quando a
+ * linha foi criada agora (não existia nota nenhuma), e o status anterior quando
+ * a reserva foi tomada de uma nota recusada que está sendo reemitida. É o que
+ * `releaseEmission` precisa para desfazer sem inventar estado.
+ */
+export type EmissionReservation =
+  | { reserved: true; documentId: string; previousStatus: string | null }
+  | { reserved: false };
+
+export type ReserveEmissionInput = {
+  ref: string;
+  branchId: string;
+  origin: FiscalDocumentOrigin;
+  model: FiscalModel;
+  ambiente: FiscalAmbiente;
+  createdBy: string;
+  /** A linha lida no início de `handleEmit`, ou `null` se ainda não havia nenhuma. */
+  existing: FiscalDocumentRow | null;
+};
+
+/**
+ * **Trava a emissão desta `ref` no banco, antes de qualquer chamada ao
+ * provedor** — ver o cabeçalho de `reservation.ts` para a corrida que isto
+ * fecha.
+ *
+ * Dois caminhos, os dois atômicos em um único statement:
+ *
+ * - **Não havia linha**: `insert`. Quem perde esbarra em `fiscal_documents_ref_key`
+ *   (ou num dos índices parciais por origem + modelo) e recebe `23505`.
+ * - **Havia linha recusada** (`erro_autorizacao` / `denegado`, o caminho de
+ *   reemissão): `update ... where id = ? and status = ?` — um compare-and-swap
+ *   sobre o status que acabou de ser lido. Sob `read committed`, a segunda
+ *   requisição espera o lock da primeira e **reavalia** o `where` depois dela:
+ *   encontra `processando_autorizacao`, não `erro_autorizacao`, e não afeta
+ *   linha nenhuma. É a mesma garantia que o `select ... for update` de C4 dá
+ *   para o estoque, escrita como CAS porque aqui não há transação para
+ *   segurar o lock entre dois statements (o PostgREST não oferece uma).
+ *
+ * Não reserva por cima de `processando_autorizacao`: essa é a reserva de outra
+ * requisição, e `decideEmissao` já responde "em andamento" antes de chegar
+ * aqui. A checagem repetida é defesa em profundidade — quem tomar a reserva de
+ * quem está emitindo produz exatamente a segunda nota que isto evita.
+ */
+export async function reserveEmission(
+  admin: SupabaseClient,
+  input: ReserveEmissionInput,
+): Promise<EmissionReservation> {
+  const { ref, branchId, origin, model, ambiente, createdBy, existing } = input;
+
+  if (existing?.status === RESERVA_STATUS) return { reserved: false };
+
+  if (!existing) {
+    const { data, error } = await admin
+      .from("fiscal_documents")
+      .insert({
+        branch_id: branchId,
+        sale_id: "saleId" in origin ? origin.saleId : null,
+        sale_return_id: "saleReturnId" in origin ? origin.saleReturnId : null,
+        model,
+        ref,
+        status: RESERVA_STATUS,
+        ambiente,
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      if (isViolacaoDeUnicidade(error)) return { reserved: false };
+      throw error;
+    }
+    return { reserved: true, documentId: (data as { id: string }).id, previousStatus: null };
+  }
+
+  const { data, error } = await admin
+    .from("fiscal_documents")
+    .update({ status: RESERVA_STATUS, updated_at: new Date().toISOString() })
+    .eq("id", existing.id)
+    .eq("status", existing.status)
+    .select("id");
+  if (error) throw error;
+  if (!data || (data as unknown[]).length === 0) return { reserved: false };
+  return { reserved: true, documentId: existing.id, previousStatus: existing.status };
+}
+
+/**
+ * Desfaz uma reserva que não virou nota — a chamada ao provedor falhou por
+ * transporte, e nenhum documento foi emitido.
+ *
+ * Sem isto, `processando_autorizacao` ficaria pendurado e a venda não poderia
+ * mais ser emitida: `decideEmissao` recusa reemitir por cima da reserva de
+ * outra requisição, e ela não teria como saber que o "outro" morreu. Manter a
+ * reserva viva além da requisição é justamente o problema que A6 vai tratar (o
+ * provedor real responde 202 e autoriza depois); enquanto A6 não existe, A5
+ * garante o invariante mais simples: **`processando_autorizacao` não
+ * sobrevive à requisição HTTP que o escreveu**.
+ *
+ * As duas escritas são condicionadas a `status = 'processando_autorizacao'`
+ * para nunca desfazerem um desfecho que outra requisição já gravou.
+ *
+ * **Nunca lança.** Ela roda no caminho de erro, e uma falha aqui não pode
+ * substituir a exceção original — que é a que diz o que de fato deu errado.
+ */
+export async function releaseEmission(
+  admin: SupabaseClient,
+  reservation: Extract<EmissionReservation, { reserved: true }>,
+): Promise<void> {
+  const { documentId, previousStatus } = reservation;
+  try {
+    if (previousStatus === null) {
+      const { error } = await admin
+        .from("fiscal_documents")
+        .delete()
+        .eq("id", documentId)
+        .eq("status", RESERVA_STATUS);
+      if (error) throw error;
+      return;
+    }
+    const { error } = await admin
+      .from("fiscal_documents")
+      .update({ status: previousStatus, updated_at: new Date().toISOString() })
+      .eq("id", documentId)
+      .eq("status", RESERVA_STATUS);
+    if (error) throw error;
+  } catch (err) {
+    const message = err instanceof Error && err.message ? err.message : String(err);
+    console.error("[fiscal-emit] falha ao desfazer a reserva de emissão", documentId, message);
+  }
 }
 
 /**

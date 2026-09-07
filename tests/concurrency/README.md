@@ -1,4 +1,22 @@
-# Bateria de concorrência na baixa de estoque (C4)
+# Baterias de concorrência
+
+Duas baterias, o mesmo princípio: o que está sendo testado é a trava do banco,
+não uma simulação dela — por isso as duas rodam contra o Supabase real, como
+`tests/isolation`.
+
+- **`stockConcurrency.test.ts`** (C4) — a baixa de estoque.
+- **`fiscalEmitConcurrency.test.ts`** (A5) — a emissão fiscal.
+
+As duas precisam da conta de teste em `.env.local`:
+
+```
+FACILITE_TEST_EMAIL=...
+FACILITE_TEST_PASSWORD=...
+```
+
+---
+
+## Baixa de estoque (C4)
 
 Cria (ou reaproveita) um produto de teste com estoque em exatamente 1 e
 dispara duas `create_sale` simultâneas comprando 1 unidade cada. **Só uma
@@ -11,16 +29,9 @@ saldo), não uma simulação dela. A trava já existia nas seis funções que
 escrevem em `products.stock` (auditoria direta no catálogo do Postgres, ver
 AGENTS.md); esta bateria é o que impede a regressão.
 
-## Preparo
+### Preparo
 
 Usa a conta de teste (a mesma de `scripts/`, não a bateria de isolamento).
-Preencher em `.env.local`:
-
-```
-FACILITE_TEST_EMAIL=...
-FACILITE_TEST_PASSWORD=...
-```
-
 A conta precisa ter, na filial em que está vinculada (`user_branches`),
 permissão de `view`/`create`/`edit` em Produtos e de `create` em Realizar
 venda. Sem essas variáveis, ou sem essas permissões, `npm test` falha aqui
@@ -28,7 +39,7 @@ com a mensagem dizendo o que falta — de propósito, mesmo motivo do resto de
 `tests/`: uma bateria que se auto-desliga quando não está configurada dá um
 verde falso.
 
-## Rastro que ela deixa no banco (e por que não dá para evitar)
+### Rastro que ela deixa no banco (e por que não dá para evitar)
 
 - **A venda vencedora é uma venda de verdade.** `create_sale` grava
   `sales`/`sale_items`/`sale_payments` e lança um `financial_entries` de
@@ -54,7 +65,7 @@ verde falso.
   produto (resetando o estoque para 1 a cada rodada) em vez de acumular um
   produto novo por execução.
 
-## O que ela NÃO cobre
+### O que ela NÃO cobre
 
 Só `create_sale`. As outras cinco funções que travam a mesma linha
 (`create_pos_sale`, `create_purchase`, `create_sale_return`,
@@ -62,7 +73,7 @@ Só `create_sale`. As outras cinco funções que travam a mesma linha
 auditoria de catálogo, mas não têm bateria de concorrência própria — replicar
 o mesmo teste para as outras cinco é trabalho pendente.
 
-## Risco aceito: duas execuções ao mesmo tempo
+### Risco aceito: duas execuções ao mesmo tempo
 
 O projeto roda várias sessões de Claude Code em paralelo contra o mesmo
 Supabase (ver AGENTS.md). Se duas execuções desta bateria caírem juntas, as
@@ -73,3 +84,77 @@ Isso não indica que a trava quebrou, só que a bateria não foi pensada para
 rodar em paralelo consigo mesma, mesma limitação que `tests/isolation` já
 aceita para as próprias fixtures. Não vale a pena resolver com lock
 distribuído só para o teste — se aparecer flakiness, rodar de novo sozinho.
+
+---
+
+## Emissão fiscal (A5)
+
+Cria uma venda nova, dispara **duas emissões simultâneas dela** contra a Edge
+Function `fiscal-emit` e afirma que só uma nota é emitida: as duas respostas
+carregam a mesma chave de acesso (ou a perdedora diz que a emissão "já está em
+andamento"), a linha de `fiscal_documents` guarda essa mesma chave, e há
+**exatamente um** `fiscal_document_events` de tipo `autorizacao`.
+
+Antes de A5 (07/09/2026), `handleEmit` lia a nota pela `ref`, montava o payload,
+chamava o provedor e só então gravava. Entre a leitura e a escrita há trabalho
+assíncrono de verdade, então as duas requisições passavam pela leitura antes de
+qualquer uma escrever e as duas emitiam — com chaves de acesso diferentes,
+porque o provedor simulado é construído por requisição e o `Map` que faz a
+idempotência dentro do `emit()` dele nasce vazio nas duas. O `upsert(...,
+{ onConflict: "ref" })` de `persistEmission` então **sobrescrevia**: a segunda
+escrita apagava a chave da primeira. A correção é a reserva atômica em
+`supabase/functions/fiscal-emit/reservation.ts`.
+
+### Ela testa a função **implantada**, não o código do repositório
+
+É a diferença que mais importa em relação a C4. `fiscal-emit` roda no Supabase,
+então esta bateria mede a versão que está lá — não a que está no `git`. Contra
+uma implantação anterior a A5 ela **falha**, e a falha é a prova da corrida:
+duas chaves diferentes e dois eventos de autorização para a mesma venda.
+
+Depois de implantar a função corrigida, ela passa. Enquanto o deploy não
+acontece, a falha é verdadeira e não deve ser silenciada.
+
+### Preparo
+
+Além de `FACILITE_TEST_EMAIL` / `FACILITE_TEST_PASSWORD`, a conta precisa de:
+
+- permissão de `view`/`create`/`edit` em Produtos, `create` em Realizar venda, e
+  **`create` e `view` em Notas emitidas** (a função checa `has_permission
+  ('notas-emitidas', 'create')` pelo cliente do chamador);
+- uma filial em `user_branches` com **cadastro fiscal suficiente para a nota ser
+  autorizada**: CNPJ de 14 dígitos, nome, UF e endereço. Sem isso o provedor
+  recusa a nota e a bateria falha dizendo o que falta — de propósito, porque com
+  a nota recusada a asserção sobre o evento de autorização não significaria
+  nada;
+- ao menos uma linha em `tax_groups` (catálogo global), para o item sair com
+  CST/CSOSN. O produto de teste é criado com NCM `19059090` e apontando para o
+  primeiro grupo encontrado.
+
+### Rastro que ela deixa no banco
+
+Maior que o de C4, e sem volta:
+
+- **Uma venda de verdade por execução**, com `sale_items`, `sale_payments` e o
+  `financial_entries` de `a_receber` que o gatilho `financial_entries_before_
+  delete` (C3) impede de apagar. Não dá para reaproveitar a venda entre
+  execuções: a `ref` da emissão é `venda-{id}` e uma venda já emitida entra pelo
+  atalho de idempotência, sem corrida nenhuma para medir.
+- **Uma nota fiscal (simulada) por execução**, em `fiscal_documents`,
+  `fiscal_document_items` e `fiscal_document_events`. Desde A1 o cliente não tem
+  policy de escrita nessas tabelas — nem para apagar. Elas ficam.
+- **O produto de teste** (`TESTE-CONCORRENCIA-FISCAL-…`) é criado uma vez e
+  reaproveitado, mesma lógica de C4 e pelo mesmo motivo: a FK de `sale_items`
+  impede o delete depois da primeira venda.
+
+Como toda nota simulada é sempre `ambiente = 'homologacao'` (a Edge Function
+força isso quando o provedor é o simulado, ver `resolveAmbiente`), nada disso
+tem valor fiscal. **Não rodar esta bateria contra um Supabase com
+`FISCAL_PROVIDER=focus-nfe` em produção**: ali as notas seriam reais.
+
+### Risco aceito: duas execuções ao mesmo tempo
+
+Menor que o de C4. Cada execução cria a própria venda, e a corrida medida é
+entre as duas emissões *daquela* venda — duas execuções paralelas não disputam
+a mesma `ref`. O que elas disputam é a numeração (`readLastNumero`), que não é
+atômica e é assunto de A10; isso não afeta nenhuma asserção desta bateria.

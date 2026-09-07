@@ -30,6 +30,17 @@
  * real é assíncrona (a API responde 202 e a autorização sai depois), e é por
  * ela que uma nota em `processando_autorizacao` vira `autorizado`.
  *
+ * ## A emissão é travada no banco (A5, 07/09/2026)
+ *
+ * A `ref` já era derivada aqui dentro desde A1; o que faltava era travá-la. Entre
+ * o `readDocumentByRef` do começo de `handleEmit` e o `persistEmission` do fim
+ * há trabalho assíncrono de verdade, e duas requisições para a mesma venda
+ * podiam passar as duas pela leitura antes de qualquer uma escrever — emitindo
+ * duas notas e gravando uma por cima da outra. Agora a primeira escrita é uma
+ * **reserva atômica** (`reserveEmission`), antes de falar com o provedor, e quem
+ * perde a corrida devolve o resultado de quem ganhou em vez de emitir de novo.
+ * O raciocínio inteiro, com o que ficou para A6 e A7, está em `reservation.ts`.
+ *
  * ## O contrato de retorno não mudou
  *
  * `{ ok: boolean, errors: string[] }`, o mesmo `EmitOutcome` de sempre. Rejeição
@@ -38,13 +49,14 @@
  * configuração ausente (`FiscalNotConfiguredError`), que é o que o front já
  * traduz em mensagem na tela.
  *
- * ## Três arquivos, e não um
+ * ## Quatro arquivos, e não um
  *
  * `admin-users` cabe em um arquivo; esta não caberia. `data.ts` é a leitura (o
- * ponto da tarefa), `persist.ts` é a escrita nas três tabelas de A3, e este
- * arquivo é a borda HTTP: CORS, autenticação, permissão e despacho. A fronteira
- * entre "o que eu li do banco" e "o que eu gravo" é justamente o que precisa
- * ficar legível numa revisão de segurança.
+ * ponto de A1), `persist.ts` é a escrita nas três tabelas de A3, `reservation.ts`
+ * é a tabela de estados da emissão (A5) — sem I/O, para caber num teste de
+ * unidade —, e este arquivo é a borda HTTP: CORS, autenticação, permissão e
+ * despacho. A fronteira entre "o que eu li do banco" e "o que eu gravo" é
+ * justamente o que precisa ficar legível numa revisão de segurança.
  *
  * ## Depende da migration de A3
  *
@@ -70,7 +82,13 @@ import {
   type FiscalProviderId,
 } from "../_shared/fiscal/registry.ts";
 import type { SimulatedFiscalProviderSeed } from "../_shared/fiscal/simulatedFiscalProvider.ts";
-import type { FiscalArtifact, FiscalModel, FiscalStatus, NfePayload } from "../_shared/fiscal/types.ts";
+import type {
+  FiscalArtifact,
+  FiscalDocument,
+  FiscalModel,
+  FiscalStatus,
+  NfePayload,
+} from "../_shared/fiscal/types.ts";
 
 import {
   FiscalDataError,
@@ -86,10 +104,13 @@ import {
   persistQueryStatus,
   readDocumentByRef,
   readLastNumero,
+  releaseEmission,
+  reserveEmission,
   type FiscalAmbiente,
   type FiscalDocumentOrigin,
   type FiscalDocumentRow,
 } from "./persist.ts";
+import { decideAposPerderCorrida, decideEmissao } from "./reservation.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -256,6 +277,7 @@ async function buildPayload(
 
 async function handleEmit(ctx: Context, origin: FiscalDocumentOrigin, model: FiscalModel): Promise<Response> {
   const ref = refFor(origin);
+  const origem = describeOrigin(origin);
   const existing = await readDocumentByRef(ctx.admin, ref);
 
   // A `ref` é derivada do id que veio na requisição, e a nota que ela encontra
@@ -265,53 +287,85 @@ async function handleEmit(ctx: Context, origin: FiscalDocumentOrigin, model: Fis
   // A checagem de filial que existe em `buildPayload` só roda depois, e portanto
   // não protege o caminho curto.
   if (existing && existing.branch_id !== ctx.branchId) {
-    return outcome([`Esta ${describeOrigin(origin)} não pertence à filial informada.`]);
+    return outcome([`Esta ${origem} não pertence à filial informada.`]);
   }
 
   // Idempotência antes de falar com o provedor: uma nota que já chegou a um
-  // estado terminal não é reemitida. É o que protege contra duplo clique, contra
-  // retry de rede — e contra sobrescrever uma nota autorizada com outra.
-  if (existing && existing.status === "autorizado") {
-    if (existing.model !== model) {
-      return outcome([
-        `Esta ${describeOrigin(origin)} já tem uma ${existing.model === "nfce" ? "NFC-e" : "NF-e"} ` +
-          `autorizada (chave ${existing.chave ?? "—"}). Cancele-a antes de emitir outro modelo.`,
-      ]);
-    }
-    return outcome([], { chave: existing.chave, status: existing.status });
-  }
-  if (existing && existing.status === "cancelado") {
-    return outcome([`A nota desta ${describeOrigin(origin)} já foi cancelada e não pode ser reemitida.`]);
-  }
+  // estado terminal não é reemitida — e, desde A5, uma que está sendo emitida
+  // agora também não. A tabela de estados mora em `reservation.ts`.
+  const decisao = decideEmissao(existing, model, origem);
+  if (decisao.kind === "responder") return outcome(decisao.errors, decisao.extra);
 
   const built = await buildPayload(ctx, origin, model);
   if (!built.ok) return outcome(built.errors);
 
-  // A numeração só precisa ser restaurada para o provedor simulado — o real
-  // numera do lado dele. Consultar o banco para os dois seria uma leitura a
-  // mais por emissão, em troca de nada.
-  const lastNumbers =
-    ctx.providerId === "simulado"
-      ? [
-          {
-            cnpj: built.payload.cnpj_emitente,
-            model,
-            ultimoNumero: await readLastNumero(ctx.admin, ctx.branchId, model),
-          },
-        ]
-      : undefined;
-
-  const provider = createProvider(ctx, { lastNumbers });
-  const document = await provider.emit({ ref, model, payload: built.payload });
-  await persistEmission(ctx.admin, {
+  // **A reserva vem depois de `buildPayload`, e é de propósito.** É
+  // `readSaleForInvoice` (dentro dele) que confere que a venda pertence mesmo à
+  // filial pedida; reservar antes gravaria uma linha de `fiscal_documents` com
+  // a filial que o chamador *disse*, para uma venda que pode ser de outra.
+  // A janela que a reserva precisa cobrir é a que vai daqui até a escrita do
+  // desfecho — a chamada ao provedor —, e essa ela cobre inteira.
+  const reservation = await reserveEmission(ctx.admin, {
+    ref,
     branchId: ctx.branchId,
     origin,
     model,
     ambiente: ctx.ambiente,
-    payload: built.payload,
-    document,
     createdBy: ctx.userId,
+    existing,
   });
+  if (!reservation.reserved) {
+    const atual = await readDocumentByRef(ctx.admin, ref);
+    const resposta = decideAposPerderCorrida(atual, model, origem);
+    return outcome(resposta.errors, resposta.extra);
+  }
+
+  let document: FiscalDocument;
+  try {
+    // A numeração só precisa ser restaurada para o provedor simulado — o real
+    // numera do lado dele. Consultar o banco para os dois seria uma leitura a
+    // mais por emissão, em troca de nada.
+    const lastNumbers =
+      ctx.providerId === "simulado"
+        ? [
+            {
+              cnpj: built.payload.cnpj_emitente,
+              model,
+              ultimoNumero: await readLastNumero(ctx.admin, ctx.branchId, model),
+            },
+          ]
+        : undefined;
+
+    const provider = createProvider(ctx, { lastNumbers });
+    document = await provider.emit({ ref, model, payload: built.payload });
+
+    await persistEmission(ctx.admin, {
+      branchId: ctx.branchId,
+      origin,
+      model,
+      ambiente: ctx.ambiente,
+      payload: built.payload,
+      document,
+      createdBy: ctx.userId,
+    });
+  } catch (err) {
+    // **Desfazer aqui é seguro nos dois desfechos possíveis**, e é o guarda de
+    // `releaseEmission` que faz a distinção — ele só toca a linha enquanto ela
+    // ainda está em `processando_autorizacao`:
+    //
+    // - falhou antes ou durante `provider.emit()` (transporte, provedor não
+    //   configurado): nada foi emitido, a linha ainda é a reserva, e ela é
+    //   desfeita. Sem isso a venda ficaria presa — `decideEmissao` recusa
+    //   reemitir por cima de uma reserva, e nada a limparia até A6 existir;
+    // - falhou no `persistEmission`: se o cabeçalho **não** entrou, a linha
+    //   ainda é a reserva e vale o mesmo raciocínio; se entrou e o que falhou
+    //   foi o detalhe (itens/evento — ver o cabeçalho de `persist.ts`), o
+    //   status já é o desfecho e as duas escritas de `releaseEmission` não
+    //   afetam linha nenhuma. Apagar a chave de uma nota autorizada seria
+    //   exatamente a perda que A5 existe para impedir, e o guarda impede.
+    await releaseEmission(ctx.admin, reservation);
+    throw err;
+  }
 
   if (document.status !== "autorizado") {
     return outcome([document.mensagemSefaz ?? "A SEFAZ recusou a emissão."], { status: document.status });
