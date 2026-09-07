@@ -286,7 +286,7 @@ function itemsFromPayload(fiscalDocumentId: string, payload: NfePayload): Record
     codigo_produto: item.codigo_produto,
     descricao: item.descricao,
     ncm: item.codigo_ncm,
-    cest: item.codigo_cest ?? null,
+    cest: item.cest ?? null,
     cfop: item.cfop,
     origem_mercadoria: item.icms_origem || null,
     unidade_comercial: item.unidade_comercial ?? null,

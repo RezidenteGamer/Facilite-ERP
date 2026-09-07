@@ -61,7 +61,7 @@ export function buildSimulatedXml(issue: SimulatedIssue): FiscalArtifact {
           ${tag("cProd", item.codigo_produto)}
           ${tag("xProd", item.descricao)}
           ${tag("NCM", item.codigo_ncm)}
-          ${tag("CEST", item.codigo_cest)}
+          ${tag("CEST", item.cest)}
           ${tag("CFOP", item.cfop)}
           ${tag("uCom", item.unidade_comercial)}
           <qCom>${item.quantidade_comercial}</qCom>

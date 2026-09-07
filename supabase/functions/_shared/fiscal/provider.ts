@@ -61,6 +61,23 @@ import type {
  * caminho. O que eles resolvem é o caso em que o artefato precisa ser buscado
  * depois (nota emitida numa sessão anterior, ou `path` que expirou), sem que a
  * tela precise saber qual dos dois transportes está ativo.
+ *
+ * ## Como A12 os implementa: não há endpoint próprio
+ *
+ * Conferido em A4 (06/09/2026) contra o índice inteiro da documentação
+ * (doc.focusnfe.com.br/llms.txt) e as páginas de consulta: **a Focus não tem
+ * "baixar XML da nota que eu emiti" nem "baixar DANFE" como operação própria**.
+ * O que existe com esse nome (`consultar_nfe_recebida_individual_xml` e
+ * `..._pdf`) é de NF-e **recebida** de terceiro, buscada por chave de acesso —
+ * outro produto, não o artefato da emissão.
+ *
+ * O caminho da emissão é de dois passos, e é o que estes dois métodos escondem:
+ * consultar a `ref` (`GET /v2/nfe/<ref>`), ler `caminho_xml_nota_fiscal` /
+ * `caminho_danfe` da resposta e baixar esse caminho no host da API. Ver
+ * `FiscalArtifact` para o formato do caminho e o redirecionamento 302. É por
+ * isso que os dois devolvem `null` sem drama quando a nota ainda está em
+ * `processando_autorizacao`: a consulta responde, e simplesmente não traz
+ * caminho nenhum.
  */
 export type FiscalProvider = {
   /** Identifica a implementação ativa nos logs e na tela de configurações. */

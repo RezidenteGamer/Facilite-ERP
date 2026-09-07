@@ -28,14 +28,48 @@
  * - Rejeição da SEFAZ continua sendo **resultado**, não exceção. Só o
  *   transporte lança.
  *
- * **Os dois métodos de evento ainda precisam de conferência de grafia.** Os
- * campos de emissão foram checados linha a linha contra a tabela completa de
- * campos da Focus na etapa F1; `correctionLetter` e `invalidateRange` foram
- * modelados no formato dos endpoints de evento (`POST /v2/nfe/<ref>/carta_correcao`
- * com `correcao`, e `POST /v2/nfe/inutilizacao` com `cnpj`/`serie`/
- * `numero_inicial`/`numero_final`/`justificativa`) **sem** a mesma conferência.
- * Quem fizer A12 precisa reconferir na documentação antes de mandar o corpo —
- * não assumir que o mapa de nomes daqui está fechado.
+ * ## O mapa de nomes está fechado (A4, 06/09/2026)
+ *
+ * O aviso que ficava aqui — "os dois métodos de evento ainda precisam de
+ * conferência de grafia" — foi cumprido. A4 conferiu as sete operações contra
+ * `doc.focusnfe.com.br` (páginas com `updatedAt` 12/08/2026) e a tabela
+ * completa de campos (`campos.focusnfe.com.br/nfe/NotaFiscalXML.html`,
+ * `Last-Modified` 22/08/2026), acesso em 06/09/2026. O resumo do que A12 vai
+ * usar, já corrigido:
+ *
+ * | operação           | requisição                                                        |
+ * | ------------------ | ----------------------------------------------------------------- |
+ * | `emit`             | `POST /v2/nfe?ref=<ref>` (ou `/v2/nfce`), `JSON.stringify(payload)` |
+ * | `query`            | `GET /v2/nfe/<ref>` — com `?completa=1` se quiser `protocolo`      |
+ * | `cancel`           | `DELETE /v2/nfe/<ref>`, `{ justificativa }` (15 a 255)             |
+ * | `correctionLetter` | `POST /v2/nfe/<ref>/carta_correcao`, `{ correcao }` (15 a 1000)    |
+ * | `invalidateRange`  | `POST /v2/nfe/inutilizacao`, `{ cnpj, serie, numero_inicial, numero_final, justificativa }` |
+ * | `getXml`/`getDanfe`| não têm endpoint próprio — consultar a `ref` e baixar o `caminho_*` |
+ *
+ * As armadilhas que a conferência achou, cada uma documentada no tipo que a
+ * carrega:
+ *
+ * - **`chave_nfe` vem com o literal `NFe` na frente** (3 letras + 44 dígitos).
+ *   O adaptador tira antes de preencher `FiscalDocument.chave`.
+ * - **`protocolo` não vem na consulta padrão de NF-e** — só com `?completa=1`.
+ *   Na NFC-e o campo existe, mas se chama `numero_protocolo`.
+ * - **A carta de correção não devolve protocolo nenhum**, e devolve um PDF
+ *   (`caminho_pdf_carta_correcao`) além do XML. A inutilização devolve
+ *   `protocolo_sefaz` (não `protocolo`) e `caminho_xml` (não
+ *   `caminho_xml_carta_correcao`).
+ * - **`status` de evento é `autorizado`/`erro_autorizacao`**, o mesmo par da
+ *   emissão. Traduzir para `registrado`/`erro_evento`.
+ * - **A inutilização não tem `ref` na Focus.** `FiscalInvalidateRequest.ref` é
+ *   identificador nosso e não deduplica nada do lado de lá; os três números
+ *   (`serie`, `numero_inicial`, `numero_final`) vão como **string** no corpo.
+ * - **NFC-e não tem carta de correção** — não existe endpoint, e o pedido deve
+ *   ser recusado antes de sair para a rede. NFC-e também tem prazo de
+ *   cancelamento de 30 minutos (NF-e: 24 horas).
+ *
+ * O que sobrou em aberto — a grafia `items` vs. `itens` da lista de itens, que
+ * as duas páginas da Focus escrevem de jeitos diferentes — está anotado em
+ * `NfePayload.items` e na entrada de A4 do AGENTS.md, para ser confirmado por
+ * tentativa quando A12 tiver conta de teste.
  */
 
 import { FiscalNotConfiguredError, type FiscalProvider } from "./provider.ts";

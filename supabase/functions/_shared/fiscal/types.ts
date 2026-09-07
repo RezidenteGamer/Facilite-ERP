@@ -77,6 +77,15 @@ export type FiscalCancelStatus = "cancelado" | "erro_cancelamento" | "nao_encont
  * cancela nada, e uma faixa inutilizada tampouco. `registrado` é o termo que a
  * própria SEFAZ usa no retorno dos dois eventos ("Evento registrado e vinculado
  * a NF-e" / "Inutilização de número homologada").
+ *
+ * **Não é o vocabulário da Focus, e A12 precisa traduzir** (conferido em A4,
+ * 06/09/2026). Nos dois endpoints de evento o `status` da resposta é
+ * `"autorizado"` ou `"erro_autorizacao"` — o mesmo par da emissão, sem termo
+ * próprio de evento (`CartaCorrecaoResponse` e `InutilizacaoResponse`, ambos em
+ * doc.focusnfe.com.br, `updatedAt` 12/08/2026). O que a Focus chama de
+ * `"autorizado"` aqui vira `registrado`; `"erro_autorizacao"` vira
+ * `erro_evento`; `nao_encontrado` é nosso, e sai do HTTP 404 (`{"codigo":
+ * "nao_encontrado"}`).
  */
 export type FiscalEventStatus = "registrado" | "erro_evento" | "nao_encontrado";
 
@@ -89,6 +98,14 @@ export type FiscalEventStatus = "registrado" | "erro_evento" | "nao_encontrado";
  * a Focus **guarda o arquivo no servidor dela** e devolve o caminho de download
  * (`path` preenchido — `caminho_xml_nota_fiscal` / `caminho_danfe` —, `content`
  * nulo até alguém baixar). Quem exibe escreve um helper só, que serve os dois.
+ *
+ * **O `path` da Focus é relativo ao host da API**, no formato
+ * `/arquivos/<cnpj>_<id>/<AAAAMM>/XMLs/<chave>-nfe.xml` (exemplos da própria
+ * documentação, acesso em 06/09/2026). Baixar é `GET https://api.focusnfe.com.br<path>`
+ * com o mesmo Basic Auth, e a API responde **302** com a URL pré-assinada no
+ * `Location` — que já autoriza sozinha e **não** deve levar o header de
+ * `Authorization` junto. Guardar o `path` (e não a URL do `Location`) é o certo:
+ * a pré-assinada expira, o caminho não.
  */
 export type FiscalArtifact = {
   content: string | null;
@@ -105,13 +122,35 @@ export type FiscalDocument = {
   ref: string;
   model: FiscalModel;
   status: FiscalStatus;
-  /** Chave de acesso de 44 dígitos (Focus: `chave_nfe`). Nula enquanto não autorizada. */
+  /**
+   * Chave de acesso de **44 dígitos**, sem prefixo (Focus: `chave_nfe`). Nula
+   * enquanto não autorizada.
+   *
+   * **A Focus devolve com o literal `NFe` na frente** — 3 letras seguidas dos
+   * 44 dígitos, como em `"NFe41190612345678000123550010000000221923094166"` —
+   * em `chave_nfe` de emissão e de consulta, nos dois modelos (exemplos de `emitir_nfe`, `emitir_nfce`, `consultar_nfe` e
+   * `consultar_nfce`, acesso em 06/09/2026; a forma nua de 44 dígitos só
+   * aparece dentro do objeto `protocolo_nota_fiscal` do `completa=1`). O
+   * adaptador de A12 **tem que tirar o prefixo** antes de preencher este campo:
+   * é ele que `accessKey.ts` valida e que a coluna `fiscal_documents.chave`
+   * guarda, e 47 caracteres quebrariam as duas pontas.
+   */
   chave: string | null;
   /** Número sequencial da nota (Focus: `numero`). */
   numero: string | null;
   /** Série (Focus: `serie`). */
   serie: string | null;
-  /** Protocolo de autorização da SEFAZ (Focus: `protocolo`). */
+  /**
+   * Protocolo de autorização da SEFAZ.
+   *
+   * **Não vem de graça na resposta padrão** (conferido em A4, 06/09/2026). Na
+   * NF-e o campo `protocolo` aparece **só** no exemplo `NFeAutorizadaCompleta`,
+   * isto é, na consulta feita com `?completa=1`; o `NFeAutorizadaResponse`
+   * comum não o declara. Na NFC-e o nome é outro — `numero_protocolo` — e esse
+   * vem na consulta simples. A12 precisa, portanto, consultar NF-e com
+   * `GET /v2/nfe/<ref>?completa=1` se quiser este campo preenchido, e ler
+   * `numero_protocolo` na NFC-e.
+   */
   protocolo: string | null;
   /** Código de retorno da SEFAZ, ex.: "100" (Focus: `status_sefaz`). */
   statusSefaz: string | null;
@@ -130,6 +169,11 @@ export type FiscalDocument = {
    * real ele é configurado por fora, por CNPJ+UF, direto no painel da Focus —
    * não viaja em `NfePayload` nem em `FiscalDocument` (confirmado contra a
    * documentação pública da Focus antes de desenhar este campo).
+   *
+   * A consulta de NFC-e devolve, ao lado de `qrcode_url`, um `url_consulta_nf`
+   * (a URL de consulta pública da nota no portal da SEFAZ) que este contrato
+   * **não** modela — nenhuma tela pede, e o QR Code já a carrega dentro. Fica
+   * registrado para A12 não achar que sumiu por engano.
    */
   qrCodeUrl: string | null;
 };
@@ -138,6 +182,15 @@ export type FiscalDocument = {
  * Resultado de um cancelamento. Mais estreito que `FiscalDocument` de propósito:
  * é o que a Focus devolve no DELETE (status + retorno da SEFAZ + XML do evento),
  * sem repetir chave/número/protocolo que quem cancelou já tem em mãos.
+ *
+ * Conferido campo a campo em A4 (06/09/2026) contra `cancelar_nfe` e
+ * `cancelar_nfce` (doc.focusnfe.com.br, `updatedAt` 12/08/2026): os quatro
+ * campos da resposta de NF-e são exatamente `status` (`"cancelado"` /
+ * `"erro_cancelamento"`), `status_sefaz`, `mensagem_sefaz` e
+ * `caminho_xml_cancelamento` — os mesmos quatro que este tipo carrega. A
+ * resposta de **NFC-e** traz um quinto, `numero_protocolo` (o protocolo do
+ * evento de cancelamento), que este tipo não modela; ver a pendência de A12 no
+ * AGENTS.md.
  */
 export type FiscalCancelResult = {
   ref: string;
@@ -167,7 +220,21 @@ export type FiscalEmitRequest = {
 
 export type FiscalCancelRequest = {
   ref: string;
-  /** Focus: `justificativa`, obrigatória, de 15 a 255 caracteres (regra da SEFAZ). */
+  /**
+   * Focus: `justificativa`, obrigatória, de 15 a 255 caracteres.
+   *
+   * Confirmado em A4 (06/09/2026) na própria Focus, e não só na regra da SEFAZ:
+   * `cancelar_nfe` e `cancelar_nfce` documentam "deve ter entre 15 e 255
+   * caracteres" e devolvem HTTP 400 (`{"codigo": "requisicao_invalida"}`) fora
+   * da faixa. O corpo é `{ "justificativa": "..." }` e vai no **DELETE**
+   * (`DELETE /v2/nfe/<ref>`, `DELETE /v2/nfce/<ref>`).
+   *
+   * **Prazo, que é regra de negócio e não de campo:** a Focus documenta 24
+   * horas para a NF-e ("alguns estados permitem prazos maiores") e **30
+   * minutos** para a NFC-e. Não é "cancelamento simples e sem prazo" — o
+   * cliente que precisar cancelar cupom tem meia hora, e passado isso o caminho
+   * é nota de devolução.
+   */
   justificativa: string;
 };
 
@@ -180,6 +247,25 @@ export type FiscalCancelRequest = {
  * protocolo do evento, o número sequencial (quando o evento tem um) e o XML
  * do próprio evento. O que diferencia CC-e de inutilização está na
  * **requisição**, não na resposta — e é lá que os tipos divergem.
+ *
+ * ## O mapa de nomes das duas respostas da Focus (conferido em A4, 06/09/2026)
+ *
+ * As duas respostas **não** usam os mesmos nomes, e é por isso que este tipo é
+ * a normalização e não um espelho. Fontes: `emitir_carta_correcao` e
+ * `inutilizar_numeracao` (doc.focusnfe.com.br, `updatedAt` 12/08/2026):
+ *
+ * | este tipo         | CC-e                           | inutilização      |
+ * | ----------------- | ------------------------------ | ----------------- |
+ * | `status`          | `status` (`autorizado`/`erro_autorizacao`) | idem  |
+ * | `statusSefaz`     | `status_sefaz`                 | `status_sefaz`    |
+ * | `mensagemSefaz`   | `mensagem_sefaz`               | `mensagem_sefaz`  |
+ * | `protocolo`       | **não existe**                 | `protocolo_sefaz` |
+ * | `numeroSequencial`| `numero_carta_correcao` (int)  | não existe        |
+ * | `xml`             | `caminho_xml_carta_correcao`   | `caminho_xml`     |
+ * | `pdf`             | `caminho_pdf_carta_correcao`   | não existe        |
+ *
+ * A inutilização devolve ainda `cnpj`, `serie`, `numero_inicial`,
+ * `numero_final` e `modelo` — eco do que foi pedido, que quem pediu já tem.
  */
 export type FiscalEventResult = {
   /** A mesma `ref` da requisição — identifica o evento, não o documento. */
@@ -188,17 +274,43 @@ export type FiscalEventResult = {
   /** Código de retorno da SEFAZ, ex.: "135" (Focus: `status_sefaz`). */
   statusSefaz: string | null;
   mensagemSefaz: string | null;
-  /** Protocolo do evento (Focus: `protocolo`). Nulo quando o evento foi recusado. */
+  /**
+   * Protocolo do evento. Nulo quando o evento foi recusado — **e também na
+   * carta de correção do provedor real**.
+   *
+   * Dizia "(Focus: `protocolo`)" até A4, e estava errado nos dois eventos: o
+   * `CartaCorrecaoResponse` **não tem campo de protocolo nenhum** (só `status`,
+   * `status_sefaz`, `mensagem_sefaz`, os dois `caminho_*` e
+   * `numero_carta_correcao`), e o `InutilizacaoResponse` chama o dele de
+   * `protocolo_sefaz`. Quem implementar A12 preenche este campo a partir de
+   * `protocolo_sefaz` na inutilização e deixa `null` na CC-e — o protocolo da
+   * CC-e existe, mas só dentro do XML do evento, que volta em `xml`.
+   */
   protocolo: string | null;
   /**
    * Número sequencial do evento — a CC-e é numerada de 1 a 20 por NF-e (regra
    * da SEFAZ), e é isso que distingue a terceira correção da primeira.
    * `null` na inutilização, que não é um evento *de um documento* e por isso
    * não tem sequência.
+   *
+   * Focus: `numero_carta_correcao`, `integer` (confirmado em A4). A própria
+   * Focus incrementa a sequência a cada chamada, então A12 não precisa
+   * calculá-la — só lê a que voltou.
    */
   numeroSequencial: number | null;
   /** XML do evento (Focus: `caminho_xml_carta_correcao` / `caminho_xml`). */
   xml: FiscalArtifact | null;
+  /**
+   * PDF do evento (Focus: `caminho_pdf_carta_correcao`) — **só a carta de
+   * correção tem um**; `null` na inutilização e em todo evento recusado.
+   *
+   * Campo criado em A4 (06/09/2026): a Focus devolve o PDF da CC-e ao lado do
+   * XML e este contrato não tinha onde guardá-lo, de modo que o provedor real
+   * teria de jogá-lo fora ou baixá-lo de novo depois. O simulado devolve sempre
+   * `null` — ele não gera PDF de evento, e fingir que gera seria pior que a
+   * ausência.
+   */
+  pdf: FiscalArtifact | null;
 };
 
 /**
@@ -208,11 +320,32 @@ export type FiscalEventResult = {
  * isso o caminho é cancelar ou emitir nota de devolução, não corrigir. A SEFAZ
  * exige texto de 15 a 1000 caracteres, e cada NF-e aceita no máximo 20 cartas;
  * a última substitui as anteriores.
+ *
+ * **Conferido em A4 (06/09/2026)** contra `emitir_carta_correcao`
+ * (doc.focusnfe.com.br, `updatedAt` 12/08/2026): endpoint
+ * `POST /v2/nfe/{referencia}/carta_correcao`, corpo `{ "correcao": "..." }`,
+ * `minLength` 15 e `maxLength` 1000, síncrono. As três restrições que a página
+ * lista batem com o que este tipo já dizia (não corrige variável de imposto,
+ * nem dado cadastral que troque remetente/destinatário, nem data de emissão ou
+ * saída) e o teto de 20 correções também.
+ *
+ * **Só existe para NF-e.** O índice da documentação (`llms.txt`, acesso em
+ * 06/09/2026) tem `emitir_carta_correcao` sob NF-e e **nada** equivalente sob
+ * NFC-e — coerente com a legislação, que não prevê CC-e para modelo 65. O
+ * provedor real deve recusar o pedido de correção de NFC-e antes de sair para
+ * a rede, e não montar `/v2/nfce/<ref>/carta_correcao`.
  */
 export type FiscalCorrectionRequest = {
-  /** A `ref` do **documento** que está sendo corrigido (Focus: `{ref}` na URL). */
+  /** A `ref` do **documento** que está sendo corrigido (Focus: `{referencia}` na URL). */
   ref: string;
-  /** Focus: `correcao`. 15 a 1000 caracteres (regra da SEFAZ). */
+  /**
+   * Focus: `correcao`. 15 a 1000 caracteres (regra da SEFAZ, e `minLength`/
+   * `maxLength` no schema da Focus).
+   *
+   * O corpo da Focus aceita ainda um `data_evento` opcional (ISO 8601; "se não
+   * informado será usado a data atual"), que este tipo não modela — nenhuma
+   * tela precisa datar a correção no passado, e a data atual é a certa.
+   */
   correcao: string;
 };
 
@@ -224,23 +357,63 @@ export type FiscalCorrectionRequest = {
  * dizer sozinho: ela declara à SEFAZ que uma faixa de números de uma série
  * nunca foi (e nunca será) usada — tipicamente porque a emissão falhou e o
  * número ficou pelo caminho. Por isso identifica CNPJ + modelo + série + faixa,
- * e não uma `ref` de nota; a `ref` daqui é do **pedido**, gerada por nós, e é o
- * que torna o pedido idempotente igual à emissão.
+ * e não uma `ref` de nota.
+ *
+ * **Conferido em A4 (06/09/2026)** contra `inutilizar_numeracao` e
+ * `inutilizar_numeracao_nfce` (doc.focusnfe.com.br, `updatedAt` 12/08/2026):
+ * `POST /v2/nfe/inutilizacao` e `POST /v2/nfce/inutilizacao`, síncronos, com
+ * corpo de exatamente **cinco** campos, todos obrigatórios — `cnpj`, `serie`,
+ * `numero_inicial`, `numero_final`, `justificativa`. Os cinco nomes deste tipo
+ * batem. **Não** há campo de ambiente (é o token que decide produção ou
+ * homologação) nem de modelo no corpo: o modelo sai do endpoint, e volta na
+ * resposta como `modelo` (`"55"` / `"65"`). Não faltava nada.
  */
 export type FiscalInvalidateRequest = {
-  /** Identificador do pedido, gerado por nós — idempotência, igual à emissão. */
+  /**
+   * Identificador do pedido, gerado por nós.
+   *
+   * **Não tem contrapartida na Focus, e A4 corrigiu a afirmação de que tinha.**
+   * O corpo da inutilização não aceita `ref`, a resposta não devolve nenhuma, e
+   * `GET /v2/nfe/inutilizacoes` busca por CNPJ/CPF, faixa e datas de
+   * recebimento — nunca por referência. Ou seja: no provedor real esta `ref`
+   * dá idempotência **do nosso lado** (o registro local do pedido), e nenhuma
+   * do lado da Focus; repetir a chamada manda um segundo pedido à SEFAZ, que aí
+   * responde com a rejeição dela para faixa já inutilizada. Só o simulado, que
+   * guarda as faixas em memória, consegue deduplicar por `ref`.
+   */
   ref: string;
   /** CNPJ do emitente (Focus: `cnpj`). */
   cnpj: string;
-  /** 55 (NF-e) ou 65 (NFC-e) — a faixa é por modelo. */
+  /**
+   * 55 (NF-e) ou 65 (NFC-e) — a faixa é por modelo, e é este campo que escolhe
+   * entre `/v2/nfe/inutilizacao` e `/v2/nfce/inutilizacao`. Não vai no corpo.
+   */
   model: FiscalModel;
-  /** Focus: `serie`. */
+  /** Focus: `serie` (ver a nota de tipo em `numeroFinal`). */
   serie: number;
   /** Focus: `numero_inicial`. */
   numeroInicial: number;
-  /** Focus: `numero_final`. */
+  /**
+   * Focus: `numero_final`.
+   *
+   * `number` aqui, `string` lá: o `InutilizacaoRequest` da Focus declara
+   * `serie`, `numero_inicial` e `numero_final` como `string` (exemplos `"1"`,
+   * `"7"`, `"9"`), enquanto o `GET /v2/nfe/inutilizacoes` declara os mesmos
+   * números como `integer` nos parâmetros de busca — a própria documentação não
+   * é consistente. Os três seguem `number` neste contrato, que é o que eles
+   * são; **A12 converte para string ao montar o corpo**, que é a forma
+   * documentada do endpoint que grava.
+   */
   numeroFinal: number;
-  /** Focus: `justificativa`, de 15 a 255 caracteres (mesma regra do cancelamento). */
+  /**
+   * Focus: `justificativa`. Mínimo de 15 caracteres.
+   *
+   * O schema da Focus declara só o mínimo (`minLength: 15`), sem máximo — ao
+   * contrário do cancelamento, onde ela documenta 15 a 255. O teto de 255 vem
+   * do `xJust` do leiaute da SEFAZ, que é o mesmo nos dois eventos; este motor
+   * o mantém por segurança, e a diferença fica registrada para A12 não estranhar
+   * um texto longo passar na Focus e ser recusado na SEFAZ.
+   */
   justificativa: string;
 };
 
@@ -264,8 +437,24 @@ export type NfePayloadItem = {
   cfop: string;
   /** `products.ncm`. */
   codigo_ncm: string;
-  /** `products.cest`. */
-  codigo_cest?: string;
+  /**
+   * `products.cest` — o Código Especificador da Substituição Tributária (tag
+   * XML `CEST`, `Integer[7]`), obrigatório no item sujeito a ICMS-ST.
+   *
+   * **Chamava-se `codigo_cest` até A4 (06/09/2026), e o nome estava errado.**
+   * A única página da Focus que documenta o campo é a tabela completa
+   * (https://campos.focusnfe.com.br/nfe/NotaFiscalXML.html, `Last-Modified`
+   * 22/08/2026, acesso em 06/09/2026), e lá ele se chama `cest`, sem prefixo —
+   * `codigo_cest` não aparece uma única vez na página. A referência do endpoint
+   * (`doc.focusnfe.com.br/reference/emitir_nfe`) não documenta CEST nenhum, de
+   * modo que não há segunda fonte que sustentasse a grafia antiga. Enquanto só
+   * o provedor simulado rodava, o erro era invisível; no provedor real o CEST
+   * seria silenciosamente descartado e a nota de produto com ST sairia sem ele.
+   *
+   * A coluna que o persiste (`fiscal_document_items.cest`) já usava o nome
+   * certo desde A3, então a correção não mexeu no banco.
+   */
+  cest?: string;
   quantidade_comercial: number;
   valor_unitario_comercial: number;
   valor_bruto: number;
@@ -828,6 +1017,23 @@ export type NfePayload = {
    */
   notas_referenciadas?: NfePayloadNotaReferenciada[];
 
+  /**
+   * Os itens da nota.
+   *
+   * **As duas páginas da Focus discordam do nome, e A4 (06/09/2026) manteve
+   * `items` de propósito.** A referência dos endpoints chama a chave de
+   * `items` e a lista entre os campos **obrigatórios** dos dois corpos
+   * (`NFeRequest` e `NFCeRequest`, doc.focusnfe.com.br, `updatedAt`
+   * 12/08/2026); a tabela completa de campos chama de `itens`
+   * (campos.focusnfe.com.br, `Last-Modified` 22/08/2026). Os exemplos de código
+   * oficiais usam as duas — `"items"` no exemplo de NF-e, `"itens"` no de NFC-e
+   * (focusnfe.com.br/exemplos-de-codigos/php/, acesso em 06/09/2026) —, o que
+   * indica que a API aceita as duas grafias como sinônimo.
+   *
+   * Fica `items` porque é o nome que os dois schemas OpenAPI declaram como
+   * obrigatório, e obrigatório é a afirmação mais forte das duas. Confirmar por
+   * tentativa quando A12 tiver conta de teste é barato e está anotado lá.
+   */
   items: NfePayloadItem[];
   formas_pagamento?: NfePayloadPagamento[];
 

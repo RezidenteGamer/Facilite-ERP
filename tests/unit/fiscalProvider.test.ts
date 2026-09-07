@@ -139,6 +139,11 @@ describe("SimulatedFiscalProvider — carta de correção (A2)", () => {
     expect(primeira.status).toBe("registrado");
     expect(primeira.numeroSequencial).toBe(1);
     expect(primeira.xml?.content).toContain("<tpEvento>110110</tpEvento>");
+    // `pdf` entrou no contrato em A4 (06/09/2026) porque a Focus devolve um
+    // `caminho_pdf_carta_correcao` que não tinha onde caber. O simulado não
+    // gera PDF de evento — a asserção existe para que continuar `null` seja
+    // uma decisão registrada, e não um esquecimento que passe despercebido.
+    expect(primeira.pdf).toBeNull();
 
     const segunda = await fiscal.correctionLetter({ ref: "venda-1", correcao: CORRECAO });
     expect(segunda.numeroSequencial).toBe(2);

@@ -986,12 +986,29 @@ function resolveItemsForSale(
       descricao: item.product.description,
       cfop,
       codigo_ncm: item.product.ncm!,
-      codigo_cest: item.product.cest ?? undefined,
+      cest: item.product.cest ?? undefined,
       quantidade_comercial: item.quantity,
       valor_unitario_comercial: item.unitPrice,
       valor_bruto: item.totalAmount,
       unidade_comercial: item.product.unidadeComercial ?? undefined,
       unidade_tributavel: item.product.unidadeTributavel ?? undefined,
+      // `qTrib`/`vUnTrib` (A4, 06/09/2026). Ficavam **ausentes**, e isso era um
+      // buraco, não uma escolha: os dois estão entre os campos obrigatórios do
+      // item da NFC-e no schema `ItemNFCe` da Focus
+      // (doc.focusnfe.com.br/reference/emitir_nfce, `updatedAt` 12/08/2026,
+      // acesso em 06/09/2026), e no leiaute 4.00 da NF-e o grupo `prod` os traz
+      // com ocorrência 1-1 junto de `uTrib`.
+      //
+      // Saem **iguais aos comerciais**, pelo mesmo motivo já registrado em B5
+      // para o `qBCProd`: `products` guarda as duas unidades mas nenhum fator de
+      // conversão entre elas, e `SaleForInvoiceItem` carrega uma quantidade só.
+      // Converter sem fonte seria inventar número; repetir é o que vale
+      // enquanto as duas unidades forem iguais, que é o caso de todo cadastro
+      // de hoje. A `unidade_tributavel` continua vindo só do cadastro — não há
+      // como deduzi-la, e mandar a comercial no lugar dela seria afirmar uma
+      // equivalência que o cadastro não afirmou.
+      quantidade_tributavel: item.quantity,
+      valor_unitario_tributavel: item.unitPrice,
       valor_desconto: item.discountAmount || undefined,
       inclui_no_total: 1,
 

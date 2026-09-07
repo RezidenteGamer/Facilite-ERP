@@ -457,6 +457,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -473,6 +474,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -489,6 +491,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -501,6 +504,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -530,6 +534,10 @@ export function createSimulatedFiscalProvider(
         protocolo,
         numeroSequencial,
         xml,
+        // A Focus devolve o PDF da CC-e em `caminho_pdf_carta_correcao`; o
+        // simulado não gera PDF de evento nenhum (só o DANFE da emissão), e
+        // `null` é a resposta honesta. Ver `FiscalEventResult.pdf`.
+        pdf: null,
       };
     },
 
@@ -551,6 +559,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -574,6 +583,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -592,6 +602,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -612,6 +623,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -638,6 +650,7 @@ export function createSimulatedFiscalProvider(
           protocolo: null,
           numeroSequencial: null,
           xml: null,
+          pdf: null,
         };
       }
 
@@ -675,6 +688,7 @@ export function createSimulatedFiscalProvider(
         // `nSeqEvento` — ver `FiscalEventResult.numeroSequencial`.
         numeroSequencial: null,
         xml,
+        pdf: null,
       };
 
       invalidations.push({ ref, cnpj, model, serie: serieSolicitada, numeroInicial, numeroFinal, result });

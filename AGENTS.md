@@ -5751,3 +5751,239 @@ bruto do item, a mesma expressão de todos os outros impostos); as colunas de
 atualização automática das duas tabelas oficiais quando sair um Informe Técnico
 novo; as alíquotas de 2027 em diante; e o XML do provedor simulado, que continua
 sem declarar IBS/CBS, como já não declara ST, DIFAL nem `vTotTrib`.
+
+### Auditoria: conferência do contrato inteiro contra a documentação da Focus NFe — os quatro eventos, os dois artefatos e o payload de emissão (A4) (06/09/2026)
+
+Primeira tarefa da Etapa 3 e a única da série que **não acrescenta capacidade
+nenhuma**: ela confere. O motor tributário cresceu de B1 a B10 com cada tarefa
+conferindo **os campos que ela mesma acrescentava**; ninguém nunca leu o payload
+inteiro de uma vez, e os quatro métodos que não são emissão (`query`, `cancel`,
+`correctionLetter`, `invalidateRange`) mais os dois de artefato (`getXml`,
+`getDanfe`) nunca foram conferidos contra fonte nenhuma — o cabeçalho de
+`focusProvider.ts` dizia isso com todas as letras ("`correctionLetter` e
+`invalidateRange` foram modelados no formato dos endpoints de evento […] **sem**
+a mesma conferência").
+
+A urgência é de calendário, não de bug: enquanto só o provedor simulado roda, um
+nome de campo errado não quebra nada visível — o teste lê a mesma propriedade que
+o código escreveu, e o XML simulado é gerado pelo mesmo arquivo. Depois que A12
+plugar a Focus de verdade, o campo errado passa a ser **descartado em silêncio**;
+depois que houver nota real emitida e persistida, corrigir vira migração de dados
+em produção.
+
+**Nada foi aplicado nem implantado. Nenhuma migration foi escrita** — os dois
+renomes de campo caíram em colunas que já tinham o nome certo. `fiscal-emit` não
+foi implantada. Nenhuma regra de cálculo foi tocada.
+
+#### As fontes, com data — porque a documentação da Focus muda
+
+| Fonte | Data da fonte | Acesso | O que responde |
+| --- | --- | --- | --- |
+| `campos.focusnfe.com.br/nfe/NotaFiscalXML.html` (tabela completa de campos) | `Last-Modified: 22/08/2026` | 06/09/2026 | os 644 campos do payload (231 no cabeçalho, 350 no item), com nome JSON, tag XML, tipo e obrigatoriedade |
+| `doc.focusnfe.com.br/reference/emitir_nfe` e `emitir_nfce` | `updatedAt: 12/08/2026` | 06/09/2026 | os schemas OpenAPI `NFeRequest`/`NFCeRequest` e `ItemNFe`/`ItemNFCe`, com a lista de obrigatórios |
+| `doc.focusnfe.com.br/reference/consultar_nfe` e `consultar_nfce` | `updatedAt: 12/08/2026` | 06/09/2026 | os schemas de resposta da consulta, o parâmetro `completa` e os exemplos |
+| `doc.focusnfe.com.br/reference/cancelar_nfe` e `cancelar_nfce` | `updatedAt: 12/08/2026` | 06/09/2026 | corpo do DELETE, faixa da justificativa e prazos |
+| `doc.focusnfe.com.br/reference/emitir_carta_correcao` | `updatedAt: 12/08/2026` | 06/09/2026 | `CartaCorrecaoRequest` e `CartaCorrecaoResponse` |
+| `doc.focusnfe.com.br/reference/inutilizar_numeracao` e `inutilizar_numeracao_nfce` | `updatedAt: 12/08/2026` | 06/09/2026 | `InutilizacaoRequest` e `InutilizacaoResponse` |
+| `doc.focusnfe.com.br/reference/consultar_inutilizacoes` | `updatedAt: 12/08/2026` | 06/09/2026 | como uma inutilização é identificada depois (e por que não é por `ref`) |
+| `doc.focusnfe.com.br/llms.txt` (índice completo) | — | 06/09/2026 | quais operações existem — e quais **não** existem |
+| `focusnfe.com.br/exemplos-de-codigos/php/` (exemplos oficiais) | — | 06/09/2026 | a grafia da lista de itens em código que a própria Focus publica |
+
+**Nenhuma chamada à API da Focus foi feita** — nem produção, nem homologação.
+Não há credencial, e não é o momento. Toda afirmação abaixo sai de página
+pública.
+
+#### Método
+
+A tabela de campos é uma página Next.js: os 644 campos vêm do `__NEXT_DATA__`,
+com os nomes de imposto embutidos na descrição no formato `:nome_do_campo
+Descrição`. Extraídos e achatados, viraram uma lista contra a qual os 70 campos
+de `NfePayload`, os 76 de `NfePayloadItem`, o de `NfePayloadNotaReferenciada` e
+os 2 de `NfePayloadPagamento` foram comparados **mecanicamente**, não a olho —
+que é a única forma de um campo parecido com outro não passar batido.
+
+#### O que estava certo (conferido, sem mudança)
+
+De 149 nomes de campo do payload, **147 batem exatamente** com a tabela da Focus.
+
+| Grupo | Campos | Veredito |
+| --- | --- | --- |
+| `ICMSUFDest` do item (B4) | `icms_base_calculo_uf_destino`, `fcp_base_calculo_uf_destino`, `fcp_percentual_uf_destino`, `icms_aliquota_interna_uf_destino`, `icms_aliquota_interestadual`, `icms_percentual_partilha`, `fcp_valor_uf_destino`, `icms_valor_uf_destino`, `icms_valor_uf_remetente` | 9 de 9 certos |
+| `ICMSUFDest` do cabeçalho (B4) | `fcp_valor_total_uf_destino`, `icms_valor_total_uf_destino`, `icms_valor_total_uf_remetente` | 3 de 3 certos |
+| `IBSCBS` do item (B10) | `ibs_cbs_situacao_tributaria`, `ibs_cbs_classificacao_tributaria`, `ibs_cbs_base_calculo`, `ibs_uf_aliquota`, `ibs_uf_percentual_reducao_aliquota`, `ibs_uf_aliquota_efetiva`, `ibs_uf_valor`, `ibs_mun_aliquota`, `ibs_mun_percentual_reducao_aliquota`, `ibs_mun_aliquota_efetiva`, `ibs_mun_valor`, `ibs_valor_total`, `cbs_aliquota`, `cbs_percentual_reducao_aliquota`, `cbs_aliquota_efetiva`, `cbs_valor` | 16 de 16 certos |
+| `IBSCBSTot` do cabeçalho (B10) | `ibs_cbs_base_calculo`, `ibs_uf_valor_total_diferimento`, `ibs_uf_valor_total_devolucao`, `ibs_uf_valor_total`, `ibs_mun_valor_total_diferimento`, `ibs_mun_valor_total_devolucao`, `ibs_mun_valor_total`, `ibs_valor_total`, `ibs_valor_total_credito_presumido`, `ibs_valor_total_condicao_suspensiva`, `cbs_valor_total_diferimento`, `cbs_valor_total_devolucao`, `cbs_valor_total`, `cbs_valor_total_credito_presumido`, `cbs_valor_total_condicao_suspensiva` | 15 de 15 certos |
+| `vTotTrib` (B9) | `valor_total_tributos` no item **e** no cabeçalho | os 2 certos; a homonímia entre os níveis é da própria tabela, como o comentário de B9 já dizia. A frase sobre o cálculo automático da Focus foi reconferida palavra por palavra e continua exata |
+| ICMS-ST e FCP-ST (B2) | `icms_modalidade_base_calculo_st`, `icms_margem_valor_adicionado_st`, `icms_reducao_base_calculo_st`, `icms_base_calculo_st`, `icms_aliquota_st`, `icms_valor_st`, `fcp_base_calculo_st`, `fcp_percentual_st`, `fcp_valor_st` | 9 de 9 certos |
+| Crédito do Simples (B8) | `icms_aliquota_credito_simples`, `icms_valor_credito_simples` | os 2 certos (mas ver a pendência de precisão abaixo) |
+| Cancelamento | `DELETE /v2/nfe/<ref>` e `/v2/nfce/<ref>`, corpo `{ justificativa }` de 15 a 255 | certo, incluindo a faixa — a Focus documenta "deve ter entre 15 e 255 caracteres" |
+| Inutilização | `POST /v2/nfe/inutilizacao`, corpo `cnpj` + `serie` + `numero_inicial` + `numero_final` + `justificativa` | os 5 nomes certos, e **não falta nenhum campo obrigatório** — não há `ambiente` (é o token que decide) nem `modelo` no corpo (sai do endpoint, e volta na resposta) |
+| Carta de correção | `POST /v2/nfe/<ref>/carta_correcao`, corpo `{ correcao }`, 15 a 1000 caracteres, até 20 por NF-e | certo, incluindo os dois limites e o teto |
+| Consulta | `GET /v2/nfe/<ref>` / `GET /v2/nfce/<ref>` | certo (mas ver `protocolo` abaixo) |
+| Nota referenciada e pagamento | `notas_referenciadas.chave_nfe`; `formas_pagamento.forma_pagamento`/`valor_pagamento` | certos, e os códigos `01`/`03`/`04`/`15`/`17`/`99` que o mapeamento emite existem todos no enum `tPag` da Focus |
+| Cabeçalho obrigatório | `local_destino`, `consumidor_final`, `presenca_comprador`, `modalidade_frete` | marcados obrigatórios na tabela e preenchidos pelos três mapeadores (venda, NFC-e, devolução) — sem lacuna |
+| Totais que não enviamos | `fcp_valor_total` (`vFCP`), `fcp_valor_total_retido_st`, `valor_total_ii`, `valor_ipi_devolvido` | **não é lacuna**: a tabela diz de cada um "Calculado automaticamente se omitido" |
+
+Também confirmado, respondendo à pergunta que B10 deixou em aberto: **a tabela de
+campos da Focus já suporta o leiaute da Reforma Tributária** — além do `IBSCBS`
+que este motor usa, ela traz o Imposto Seletivo (`is_*`), o regime monofásico
+(`mono_*`), a Tributação Regular (`*_regular`), a ZFM (`alczfm_*` e
+`credito_presumido_zfm_*`) e o `vNFTot`. Nada disso está implementado, e a lista
+continua no "fora de escopo" de B10.
+
+#### O que foi corrigido
+
+**1. `codigo_cest` → `cest` (o item nunca teria mandado o CEST).** A única página
+da Focus que documenta o campo é a tabela completa, e lá ele se chama `cest`
+(tag XML `CEST`, `Integer[7]`); a string `codigo_cest` **não aparece uma única
+vez** na página, e a referência do endpoint não documenta CEST nenhum — não havia
+segunda fonte que sustentasse a grafia antiga. No provedor real o CEST seria
+descartado em silêncio, e toda nota de produto com substituição tributária sairia
+sem ele. Corrigido em `types.ts`, `invoiceMapping.ts`, `persist.ts` e
+`simulatedArtifacts.ts`. **Sem migration**: a coluna que o persiste
+(`fiscal_document_items.cest`) já tinha o nome certo desde A3.
+
+**2. `quantidade_tributavel` e `valor_unitario_tributavel` passaram a sair.**
+Estavam declarados em `NfePayloadItem` desde sempre e **nunca eram preenchidos**.
+Os dois são obrigatórios no `ItemNFCe` da Focus (ao lado de `unidade_comercial` e
+`unidade_tributavel`), e no leiaute 4.00 da NF-e o grupo `prod` os traz com
+ocorrência 1-1 junto de `uTrib`. Saem **iguais aos comerciais**, pela mesma razão
+já registrada em B5 para o `qBCProd`: `products` guarda as duas unidades mas
+nenhum fator de conversão entre elas, e `SaleForInvoiceItem` carrega uma
+quantidade só — converter sem fonte seria inventar número. As colunas
+`fiscal_document_items.quantidade_tributavel` e `.valor_unitario_tributavel`
+existem desde A3 e deixam de nascer nulas; nenhuma migration foi necessária.
+
+**3. `FiscalEventResult.pdf`, campo novo.** A resposta da carta de correção
+devolve `caminho_pdf_carta_correcao` ao lado do XML, e o contrato não tinha onde
+guardá-lo — o provedor real teria de jogá-lo fora ou baixá-lo de novo depois. O
+simulado devolve `null` (ele não gera PDF de evento), e isso virou asserção no
+teste para ser decisão registrada e não esquecimento.
+
+**4. Seis afirmações erradas ou incompletas nos comentários do contrato**, que
+são justamente o que A12 vai ler antes de escrever a chamada HTTP:
+
+| Onde | Dizia | Diz agora, com fonte |
+| --- | --- | --- |
+| `FiscalEventResult.protocolo` | "(Focus: `protocolo`)" | o `CartaCorrecaoResponse` **não tem campo de protocolo nenhum**; o `InutilizacaoResponse` chama o dele de `protocolo_sefaz` |
+| `FiscalDocument.protocolo` | "(Focus: `protocolo`)" | na NF-e só vem com `?completa=1` (o `NFeAutorizadaResponse` comum não o declara); na NFC-e chama-se `numero_protocolo` e vem na consulta simples |
+| `FiscalDocument.chave` | "44 dígitos (Focus: `chave_nfe`)" | a Focus devolve **com o literal `NFe` na frente** (3 letras + 44 dígitos) em emissão e consulta, nos dois modelos; A12 tem que tirar o prefixo antes de gravar, ou `accessKey.ts` e a coluna quebram |
+| `FiscalInvalidateRequest.ref` | "é o que torna o pedido idempotente igual à emissão" | a inutilização da Focus **não tem `ref`** — nem no corpo, nem na resposta, nem na busca (`GET /v2/nfe/inutilizacoes` é por CNPJ/CPF, faixa e datas de recebimento). A `ref` só deduplica do nosso lado |
+| `FiscalEventStatus` | implícito que "registrado" seria o termo da resposta | o `status` dos dois eventos é `"autorizado"`/`"erro_autorizacao"`, o mesmo par da emissão — A12 traduz. "Registrado" é o texto da **mensagem** da SEFAZ, não o do campo |
+| `FiscalCorrectionRequest` | nada sobre NFC-e | **não existe carta de correção de NFC-e** (o índice da documentação não tem o endpoint), e o pedido deve ser recusado antes de sair para a rede |
+
+Ainda em comentário: `FiscalInvalidateRequest` ganhou a nota de que a Focus
+tipa `serie`, `numero_inicial` e `numero_final` como **string** no corpo (e como
+`integer` nos parâmetros de busca da consulta — a própria documentação é
+inconsistente), de modo que A12 converte na hora de montar o corpo; e a de que o
+schema da inutilização declara só `minLength: 15` na justificativa, sem máximo,
+ao contrário dos 15 a 255 do cancelamento.
+
+**5. O cabeçalho de `focusProvider.ts`** trocou o aviso de "ainda precisa de
+conferência" pela tabela das sete operações e a lista das armadilhas. O de
+`provider.ts` ganhou o que faltava sobre `getXml`/`getDanfe`.
+
+#### Os dois métodos de artefato: não há endpoint
+
+`getXml` e `getDanfe` **não têm operação própria na Focus** — conferido contra o
+índice inteiro. O que existe com nome parecido
+(`consultar_nfe_recebida_individual_xml` e `..._pdf`) é de NF-e **recebida** de
+terceiro, buscada por chave de acesso: outro produto. O caminho da emissão é de
+dois passos, e é isso que os dois métodos escondem: consultar a `ref`, ler
+`caminho_xml_nota_fiscal`/`caminho_danfe` da resposta e baixar esse caminho.
+
+O `caminho_*` é **relativo ao host da API**
+(`/arquivos/<cnpj>_<id>/<AAAAMM>/XMLs/<chave>-nfe.xml`); o `GET` nele responde
+**302** com a URL pré-assinada no `Location`, que já autoriza sozinha e **não**
+deve levar o header `Authorization` junto. Guardar o caminho (e não a URL do
+`Location`) é o certo: a pré-assinada expira, o caminho não. É também por isso
+que devolver `null` para nota em `processando_autorizacao` está certo — a
+consulta responde e simplesmente não traz caminho.
+
+#### O que ficou como pendência para A12
+
+Nenhuma destas é resolvível na documentação pública. Todas se resolvem numa
+tentativa com conta de teste.
+
+1. **`items` ou `itens`?** As duas páginas da Focus discordam: a referência dos
+   endpoints chama de `items` e a lista entre os **obrigatórios** dos dois corpos;
+   a tabela completa de campos chama de `itens`. Os exemplos de código oficiais
+   usam as duas — `"items"` no de NF-e, `"itens"` no de NFC-e —, o que sugere
+   sinônimo aceito. Ficou `items`, porque é o nome que os dois schemas declaram
+   como obrigatório, e obrigatório é a afirmação mais forte das duas.
+   **Confirmar por tentativa.**
+2. **`unidade_comercial`/`unidade_tributavel` ausentes.** São obrigatórias no
+   `ItemNFCe` e o mapeamento as omite quando o cadastro do produto não as tem.
+   Deduzir uma da outra seria afirmar uma equivalência que o cadastro não afirmou;
+   o certo é o cadastro exigi-las, e isso é tarefa de tela, não de contrato.
+3. **Precisão do `pCredSN`.** A tabela da Focus declara
+   `icms_aliquota_credito_simples` como `Decimal[13.2]` — duas casas —, enquanto
+   `branches.aliquota_credito_icms_simples` é `numeric(7,4)` e o MOC trata
+   `pCredSN` como percentual de 2 a 4 casas. Parece erro de digitação da tabela
+   (é um percentual declarado com a máscara de um valor), mas se não for, uma
+   alíquota como `1,3612` seria truncada e o `vCredICMSSN` deixaria de bater com
+   a conta que a nota declara. **Conferir na emissão de teste.**
+4. **`numero_protocolo` do cancelamento de NFC-e.** A resposta do
+   `DELETE /v2/nfce/<ref>` traz um quinto campo que `FiscalCancelResult` não
+   modela. Só vale acrescentar quando houver tela que o mostre.
+5. **`url_consulta_nf` da NFC-e.** A consulta devolve, ao lado de `qrcode_url`, a
+   URL de consulta pública da nota no portal da SEFAZ. Não modelada de propósito
+   — o QR Code já a carrega dentro —, registrada para não parecer esquecimento.
+6. **`data_evento` da carta de correção.** Campo opcional do corpo ("se não
+   informado será usado a data atual"). Não modelado: nenhuma tela precisa datar
+   uma correção no passado.
+7. **IBS/CBS ausente para emitente do Simples.** A tabela de campos marca
+   `ibs_cbs_situacao_tributaria` e `ibs_cbs_classificacao_tributaria` como
+   **obrigatórios**, sem condicional visível, e este motor omite o grupo inteiro
+   quando o emitente é optante pelo Simples ou o ano está fora da transição (ver
+   B10). A obrigatoriedade da tabela é quase certamente a do grupo, não a do
+   documento — mas é validação do lado deles, e só a tentativa mostra.
+8. **O `pdf` da carta de correção não tem quem o mostre.** O campo existe no
+   contrato desde esta tarefa e o simulado devolve `null`; a tela de eventos que o
+   exibirá é trabalho de quem ligar a ação "Carta de correção" (hoje
+   `disabled: true` em `InvoicesPage.tsx`).
+
+#### Prazos de cancelamento — a alegação que a conferência derrubou
+
+Vale registrar porque contraria o senso comum de que NFC-e "cancela simples, sem
+prazo": a Focus documenta **24 horas** para a NF-e ("alguns estados permitem
+prazos maiores") e **30 minutos** para a NFC-e. Passada a meia hora, o caminho do
+cupom é nota de devolução. Está anotado em `FiscalCancelRequest.justificativa`,
+que é onde quem for implementar a tela vai olhar.
+
+#### Achados de cálculo
+
+**Nenhum.** A auditoria não encontrou erro de conta — o que ela mediu foi nome e
+forma de campo, e as duas divergências achadas não mudam valor nenhum: `cest` é
+uma chave de identificação do produto, e `qTrib`/`vUnTrib` repetem números que já
+saíam nos campos comerciais. Os itens 3 e 7 da lista de pendências são riscos de
+**precisão** e de **validação do lado do provedor**, não contas erradas deste
+motor.
+
+#### Testes
+
+`tests/unit/invoicePayloadFieldNames.test.ts` (novo, 5 casos): o CEST sai na
+chave `cest`, a chave antiga não reaparece nem como sinônimo, o campo é
+**omitido** (e não `null`) quando o produto não tem CEST, e as duas quantidades
+tributáveis saem repetindo as comerciais. É a única bateria do projeto que mede
+**grafia** — as dez de B1 a B10 medem valor, e por construção não conseguem pegar
+um nome errado, porque leem a mesma propriedade que o código escreveu. Foi
+exatamente por isso que `codigo_cest` atravessou de A3 até aqui sem ninguém notar.
+
+Mais uma asserção em `fiscalProvider.test.ts` (o `pdf` da CC-e). Bateria inteira
+rodada a cada correção, não só no fim: **391 testes passando** em 12 arquivos
+(eram 386 em 11). `npm run build`, `npm run lint` (62 avisos pré-existentes,
+nenhum nos arquivos tocados) e `deno check supabase/functions/fiscal-emit/index.ts`
+limpos. As duas baterias de `tests/isolation/` continuam falhando por falta de
+`FACILITE_ISOLATION_A_EMAIL` em `.env.local` — condição de ambiente anterior a
+esta tarefa, não regressão.
+
+#### Fora de escopo
+
+A chamada HTTP de verdade, que é A12 e só acontece com cliente pagante —
+`focusProvider.ts` continua lançando `FiscalNotConfiguredError` nas sete
+operações. Os campos da Focus que este motor não usa (Imposto Seletivo,
+monofásico, ZFM, Tributação Regular, compras governamentais, veículos,
+combustíveis, medicamentos, armamentos, cana, transporte, duplicatas, volumes,
+ISSQN, retenções). E o XML do provedor simulado, que continua parcial de
+propósito — não declara ST, DIFAL, `vTotTrib` nem IBS/CBS, e nada disso mudou
+aqui.
