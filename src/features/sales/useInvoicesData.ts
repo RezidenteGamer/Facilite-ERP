@@ -6,7 +6,11 @@ import {
   type EmitOutcome,
   type InvoiceSaleRow,
 } from "../../lib/repositories/fiscalDocumentsRepository";
-import { requestFiscalCancel } from "../../lib/repositories/fiscalEmitApi";
+import {
+  requestFiscalCancel,
+  requestFiscalQuery,
+  type FiscalActionOutcome,
+} from "../../lib/repositories/fiscalEmitApi";
 
 /**
  * Reexportado de `src/lib/errorMessage.ts`, onde a função passou a morar em A1
@@ -14,7 +18,7 @@ import { requestFiscalCancel } from "../../lib/repositories/fiscalEmitApi";
  */
 export { extractErrorMessage };
 
-export type { EmitOutcome };
+export type { EmitOutcome, FiscalActionOutcome };
 
 /** Carrega as vendas confirmadas da filial + documento fiscal associado, e expõe emitir/cancelar. */
 export function useInvoicesData(branchId: string | null) {
@@ -73,5 +77,26 @@ export function useInvoicesData(branchId: string | null) {
     if (!outcome.ok) throw new Error(outcome.errors.join(" "));
   }
 
-  return { sales, loading, error, reload, emitInvoice, cancelInvoice };
+  /**
+   * Consulta o provedor sobre a nota da venda e reconcilia o banco com a
+   * resposta (A6, 09/09/2026).
+   *
+   * É o único caminho de saída de uma nota presa em `processando_autorizacao`:
+   * a Edge Function pergunta ao provedor pela `ref` e, só se ele não conhecer a
+   * nota, libera a reserva para nova emissão. Liberar sem perguntar poderia
+   * criar uma segunda nota real para a mesma venda — ver `reservation.ts`.
+   *
+   * **Não lança**, ao contrário de `cancelInvoice`: aqui não há modal para
+   * segurar a mensagem, e os três desfechos normais (autorizada, ainda
+   * processando, liberada) não são erro. Quem chama exibe `mensagem` ou
+   * `errors` na própria tela.
+   */
+  async function queryInvoice(saleId: string): Promise<FiscalActionOutcome> {
+    if (!branchId) return { ok: false, errors: ["Selecione uma filial."] };
+    const outcome = await requestFiscalQuery(branchId, { saleId });
+    await reload();
+    return outcome;
+  }
+
+  return { sales, loading, error, reload, emitInvoice, cancelInvoice, queryInvoice };
 }

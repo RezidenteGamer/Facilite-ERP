@@ -26,9 +26,12 @@
  * `disabled: true` em `InvoicesPage.tsx`. Ligá-los é tarefa futura, e o lugar
  * será aqui.
  *
- * `query` também ainda não tem tela: ela existe porque a emissão do provedor
- * real é assíncrona (a API responde 202 e a autorização sai depois), e é por
- * ela que uma nota em `processando_autorizacao` vira `autorizado`.
+ * `query` **passou a ter tela em A6** (09/09/2026): o botão "Consultar status"
+ * de `InvoicesPage.tsx`. Entre A1 e A6 ela existiu sem chamador nenhum — viva no
+ * código, morta no produto. Ela existe porque a emissão do provedor real é
+ * assíncrona (a API responde 202 e a autorização sai depois), e é por ela que
+ * uma nota em `processando_autorizacao` vira `autorizado`; A6 acrescentou o
+ * outro desfecho, o de uma reserva que ficou órfã porque o isolate morreu.
  *
  * ## A emissão é travada no banco (A5, 07/09/2026)
  *
@@ -40,6 +43,16 @@
  * **reserva atômica** (`reserveEmission`), antes de falar com o provedor, e quem
  * perde a corrida devolve o resultado de quem ganhou em vez de emitir de novo.
  * O raciocínio inteiro, com o que ficou para A6 e A7, está em `reservation.ts`.
+ *
+ * ## E a reserva que fica órfã tem saída (A6, 09/09/2026)
+ *
+ * A5 garantia que `processando_autorizacao` não sobrevive à requisição que o
+ * escreveu — garantia que vale para o código, não para a execução: um isolate
+ * morto por limite de CPU, de memória ou por uma implantação não roda o `catch`
+ * de `handleEmit`, e a reserva fica pendurada. `handleQuery` passa a ser o
+ * caminho de resolução, sempre pela mesma regra: **consultar o provedor pela
+ * `ref` antes de decidir**, porque liberar sem perguntar criaria a segunda nota
+ * real que A5 existe para impedir. Ver `decideConsulta` em `reservation.ts`.
  *
  * ## O contrato de retorno não mudou
  *
@@ -105,12 +118,18 @@ import {
   readDocumentByRef,
   readLastNumero,
   releaseEmission,
+  releaseStuckReservation,
   reserveEmission,
   type FiscalAmbiente,
   type FiscalDocumentOrigin,
   type FiscalDocumentRow,
 } from "./persist.ts";
-import { decideAposPerderCorrida, decideEmissao } from "./reservation.ts";
+import {
+  RESERVA_STATUS,
+  decideAposPerderCorrida,
+  decideConsulta,
+  decideEmissao,
+} from "./reservation.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -199,8 +218,28 @@ function toArtifact(content: string | null, path: string | null, contentType: st
  * função pode cair num isolate novo: sem isto, cancelar uma nota emitida
  * ontem responderia `nao_encontrado` para um documento que está `autorizado`
  * no banco. Ver `seed` em `simulatedFiscalProvider.ts`.
+ *
+ * ## Uma reserva não é documento do provedor (A6, 09/09/2026)
+ *
+ * Uma linha em `processando_autorizacao` é **escrituração nossa**, feita antes
+ * de o provedor ver a `ref`: ela não tem chave, número, protocolo nem XML.
+ * Devolvê-la ao simulado o faria afirmar que se lembra de um documento que ele
+ * nunca produziu — e, pior, a consulta de A6 responderia `processando_autorizacao`
+ * para sempre, tornando a resolução de uma reserva órfã inalcançável justamente
+ * no único provedor testável hoje.
+ *
+ * Sem semear, o simulado responde `nao_encontrado`, que é a verdade: o isolate
+ * que emitiu morreu, e a memória dele morreu junto. É também o que um provedor
+ * real responde para uma `ref` que nunca chegou a ele.
+ *
+ * O efeito colateral em `handleCancel` é benigno e foi conferido: cancelar uma
+ * reserva passa a receber `nao_encontrado` em vez do 501 "cancelamento só é
+ * possível para documento autorizado". As duas são recusas, as duas não gravam
+ * nada, e nenhuma tela oferece o botão nesse estado (`canCancel` exige
+ * `autorizado`).
  */
 function seedFromRow(row: FiscalDocumentRow): SimulatedFiscalProviderSeed["documents"] {
+  if (row.status === RESERVA_STATUS) return [];
   return [
     {
       ref: row.ref,
@@ -406,11 +445,28 @@ async function handleCancel(
   return outcome([], { status: "cancelado" });
 }
 
+/**
+ * **Consultar o provedor pela `ref` e reconciliar a linha com o que ele
+ * responder.**
+ *
+ * Existe desde A1, mas até A6 (09/09/2026) nenhuma tela a chamava — ela estava
+ * viva no código e morta no produto. A6 liga o botão "Consultar status" em
+ * `InvoicesPage.tsx` e transforma esta função no **único caminho de resolução**
+ * de uma nota que ficou presa em `processando_autorizacao`.
+ *
+ * A regra que a governa não é "libere o que está velho", e sim **"pergunte
+ * antes de decidir"**: só o provedor sabe distinguir uma emissão que nunca
+ * chegou a ele de uma que ele autorizou e cuja resposta não chegou a ser
+ * gravada. Liberar sem perguntar produziria a segunda nota real para a mesma
+ * venda que A5 existe para impedir. A tabela inteira mora em `decideConsulta`
+ * (`reservation.ts`); aqui fica só o despacho e as duas escritas.
+ */
 async function handleQuery(ctx: Context, origin: FiscalDocumentOrigin): Promise<Response> {
   const ref = refFor(origin);
+  const origem = describeOrigin(origin);
   const existing = await readDocumentByRef(ctx.admin, ref);
   if (!existing) {
-    return outcome([`Esta ${describeOrigin(origin)} não tem nota emitida.`]);
+    return outcome([`Esta ${origem} não tem nota emitida.`]);
   }
   if (existing.branch_id !== ctx.branchId) {
     return outcome(["A nota não pertence à filial informada."]);
@@ -419,14 +475,48 @@ async function handleQuery(ctx: Context, origin: FiscalDocumentOrigin): Promise<
   const provider = createProvider(ctx, { documents: seedFromRow(existing) });
   const document = await provider.query(ref);
 
-  // `nao_encontrado` não existe em `fiscal_document_status` — e não deveria
-  // sobrescrever o que o banco sabe sobre a nota. Volta como resultado.
-  if (document.status === "nao_encontrado") {
-    return outcome(["O provedor não conhece esta nota."], { status: existing.status });
+  const decisao = decideConsulta(existing, document, origem);
+
+  if (decisao.kind === "gravar") {
+    await persistQueryStatus(ctx.admin, {
+      documentId: existing.id,
+      branchId: existing.branch_id,
+      ambiente: ctx.ambiente,
+      document,
+      previousStatus: existing.status,
+      createdBy: ctx.userId,
+    });
+    return outcome(decisao.errors, decisao.extra);
   }
 
-  await persistQueryStatus(ctx.admin, existing.id, document);
-  return outcome([], { status: document.status, chave: document.chave });
+  if (decisao.kind === "liberar") {
+    const liberou = await releaseStuckReservation(ctx.admin, {
+      documentId: existing.id,
+      branchId: existing.branch_id,
+      ambiente: ctx.ambiente,
+      mensagem: decisao.mensagemSefaz,
+      createdBy: ctx.userId,
+    });
+    if (!liberou) {
+      // A emissão original não estava morta, só lenta: ela saiu de
+      // `processando_autorizacao` entre a consulta ao provedor e esta escrita, e
+      // o desfecho dela é o que vale. Qual desfecho, porém, muda a resposta —
+      // dizer "concluída" para os três seria mentira em dois deles. Relê a linha
+      // e reaproveita a mesma tabela de `handleEmit`, que já sabe traduzir cada
+      // estado (inclusive a linha que sumiu porque `releaseEmission` a apagou
+      // depois de o `emit()` falhar por transporte).
+      const atual = await readDocumentByRef(ctx.admin, ref);
+      const resposta = decideAposPerderCorrida(atual, existing.model, origem);
+      return outcome(resposta.errors, resposta.extra);
+    }
+    return outcome(decisao.errors, decisao.extra);
+  }
+
+  // `manter`: nada é escrito. É o caso da consulta que só confirma o que já
+  // sabíamos, e o das duas divergências que não podem virar escrita — o
+  // provedor que não conhece uma nota autorizada, e o que contradiz um
+  // cancelamento nosso.
+  return outcome(decisao.errors, decisao.extra);
 }
 
 function createProvider(ctx: Context, seed: SimulatedFiscalProviderSeed): FiscalProvider {

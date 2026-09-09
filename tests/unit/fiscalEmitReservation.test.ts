@@ -4,10 +4,14 @@ import { createSimulatedFiscalProvider } from "@fiscal-core/simulatedFiscalProvi
 import type { NfePayload } from "@fiscal-core/types.ts";
 
 import {
+  MENSAGEM_RESERVA_LIBERADA,
   RESERVA_STATUS,
+  STATUS_APOS_LIBERAR,
   decideAposPerderCorrida,
+  decideConsulta,
   decideEmissao,
   isViolacaoDeUnicidade,
+  type ConsultaSnapshot,
   type EmissaoSnapshot,
 } from "../../supabase/functions/fiscal-emit/reservation.ts";
 
@@ -257,5 +261,158 @@ describe("isViolacaoDeUnicidade — 'outra requisição chegou primeiro'", () =>
     expect(isViolacaoDeUnicidade(new Error("duplicate key value"))).toBe(false);
     expect(isViolacaoDeUnicidade(null)).toBe(false);
     expect(isViolacaoDeUnicidade(undefined)).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/* 3. A resolução de uma reserva presa (A6, 09/09/2026)                      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * `decideConsulta` é a metade de A6 que cabe num teste sem rede: dado o que o
+ * banco diz e o que o provedor respondeu, o que escrever.
+ *
+ * O que **não** cabe aqui é a atomicidade do compare-and-swap de
+ * `releaseStuckReservation` — ela é do Postgres, pelo mesmo motivo que a
+ * reserva de A5 não é testada aqui.
+ *
+ * A regra que estes testes existem para proteger é uma só, e é a mais cara de
+ * errar no sistema inteiro: **nunca liberar uma reserva sem o provedor ter dito
+ * que não conhece a `ref`**. Liberar por idade, ou liberar quando o provedor
+ * respondeu qualquer outra coisa, produziria uma segunda nota fiscal real para
+ * a mesma venda.
+ */
+function consulta(over: Partial<ConsultaSnapshot> = {}): ConsultaSnapshot {
+  return { status: "autorizado", chave: "3526".padEnd(44, "0"), mensagemSefaz: null, ...over };
+}
+
+describe("decideConsulta — o provedor decide, não o relógio", () => {
+  const reserva = (): EmissaoSnapshot => snapshot({ status: RESERVA_STATUS, chave: null });
+
+  it("reserva + o provedor não conhece a ref: libera para nova emissão", () => {
+    const decisao = decideConsulta(reserva(), consulta({ status: "nao_encontrado", chave: null }), "venda");
+    expect(decisao.kind).toBe("liberar");
+    expect(decisao.errors).toEqual([]);
+    expect(decisao.extra.status).toBe(STATUS_APOS_LIBERAR);
+    // A mensagem gravada precisa dizer que não é recusa da SEFAZ — ela vai para
+    // a coluna `mensagem_sefaz`, que a tela rotula como "Mensagem da SEFAZ".
+    expect(MENSAGEM_RESERVA_LIBERADA).toContain("não é recusa da SEFAZ");
+  });
+
+  it("reserva + o provedor já autorizou: grava a nota em vez de liberar", () => {
+    // O caso caro: o `emit()` terminou do lado do provedor e o isolate morreu
+    // antes de `persistEmission` gravar. A nota existe para a SEFAZ. Liberar
+    // aqui faria a próxima emissão criar uma segunda nota real para a mesma
+    // venda — exatamente o estrago que A5 existe para impedir.
+    const decisao = decideConsulta(reserva(), consulta({ chave: "35260000000001" }), "venda");
+    expect(decisao.kind).toBe("gravar");
+    expect(decisao.errors).toEqual([]);
+    expect(decisao.extra).toMatchObject({ status: "autorizado", chave: "35260000000001" });
+  });
+
+  it("reserva + o provedor recusou: grava a recusa e devolve a mensagem dele", () => {
+    const decisao = decideConsulta(
+      reserva(),
+      consulta({ status: "erro_autorizacao", chave: null, mensagemSefaz: "Rejeição 539: duplicidade" }),
+      "venda",
+    );
+    expect(decisao.kind).toBe("gravar");
+    expect(decisao.errors).toEqual(["Rejeição 539: duplicidade"]);
+    expect(decisao.extra).toEqual({ status: "erro_autorizacao" });
+  });
+
+  it("reserva + denegado: grava — é por aqui que o estado deixa de ser inalcançável", () => {
+    // `denegado` está no enum desde A3 e nunca foi escrito por caminho nenhum.
+    // A consulta é o primeiro que o escreve.
+    const decisao = decideConsulta(
+      reserva(),
+      consulta({ status: "denegado", chave: null, mensagemSefaz: "Rejeição 302: IE do destinatário irregular" }),
+      "venda",
+    );
+    expect(decisao.kind).toBe("gravar");
+    expect(decisao.extra).toEqual({ status: "denegado" });
+  });
+
+  it("reserva + o provedor ainda está processando: não escreve nada e pede paciência", () => {
+    // O estado normal da emissão assíncrona (A12). Gravar aqui não teria o que
+    // atualizar, e `persistQueryStatus` zeraria chave, número e protocolo com
+    // os nulos da consulta.
+    const decisao = decideConsulta(
+      reserva(),
+      consulta({ status: RESERVA_STATUS, chave: null }),
+      "venda",
+    );
+    expect(decisao.kind).toBe("manter");
+    expect(decisao.errors).toEqual([]);
+    expect(decisao.extra.status).toBe(RESERVA_STATUS);
+    expect(String(decisao.extra.mensagem)).toContain("ainda está em processamento");
+  });
+
+  it("nota autorizada + o provedor não a conhece: divergência, e nada é apagado", () => {
+    // Sobrescrever aqui apagaria a chave de acesso de uma nota que existe. É a
+    // perda que A5 inteira existe para impedir, por um caminho novo.
+    const decisao = decideConsulta(
+      snapshot({ status: "autorizado" }),
+      consulta({ status: "nao_encontrado", chave: null }),
+      "venda",
+    );
+    expect(decisao.kind).toBe("manter");
+    expect(decisao.errors).toEqual(["O provedor não conhece esta nota."]);
+    expect(decisao.extra).toEqual({ status: "autorizado" });
+  });
+
+  it("nota recusada + o provedor não a conhece: também não libera", () => {
+    // `erro_autorizacao` já é reemitível por `decideEmissao` — não há reserva
+    // presa para soltar, e mexer na linha só apagaria a mensagem da recusa.
+    const decisao = decideConsulta(
+      snapshot({ status: "erro_autorizacao", chave: null }),
+      consulta({ status: "nao_encontrado", chave: null }),
+      "venda",
+    );
+    expect(decisao.kind).toBe("manter");
+    expect(decisao.extra).toEqual({ status: "erro_autorizacao" });
+  });
+
+  it("nota cancelada + o provedor diz autorizado: o cancelamento não é desfeito", () => {
+    // A única transição que A6 fecha de propósito. Antes desta tarefa,
+    // `persistQueryStatus` escrevia o que viesse — um provedor atrasado
+    // ressuscitaria uma nota que a empresa já cancelou.
+    const decisao = decideConsulta(snapshot({ status: "cancelado" }), consulta(), "venda");
+    expect(decisao.kind).toBe("manter");
+    expect(decisao.extra).toEqual({ status: "cancelado" });
+    expect(decisao.errors[0]).toContain("está cancelada aqui");
+    expect(decisao.errors[0]).toContain("autorizado");
+  });
+
+  it("nota cancelada + o provedor concorda: grava, porque não há divergência", () => {
+    const decisao = decideConsulta(
+      snapshot({ status: "cancelado" }),
+      consulta({ status: "cancelado" }),
+      "venda",
+    );
+    expect(decisao.kind).toBe("gravar");
+    expect(decisao.errors).toEqual([]);
+  });
+
+  it("nenhum estado do provedor libera a reserva, exceto nao_encontrado", () => {
+    // A asserção que resume a tarefa: varrer o vocabulário inteiro de
+    // `FiscalStatus` e conferir que só um valor produz `liberar`.
+    const todos = [
+      "autorizado",
+      "cancelado",
+      "erro_autorizacao",
+      "denegado",
+      RESERVA_STATUS,
+      "nao_encontrado",
+    ];
+    const liberam = todos.filter(
+      (status) => decideConsulta(reserva(), consulta({ status, chave: null }), "venda").kind === "liberar",
+    );
+    expect(liberam).toEqual(["nao_encontrado"]);
+  });
+
+  it("a origem entra na mensagem da divergência de cancelamento", () => {
+    const decisao = decideConsulta(snapshot({ status: "cancelado" }), consulta(), "devolução");
+    expect(decisao.errors[0]).toContain("devolução");
   });
 });

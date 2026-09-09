@@ -45,7 +45,7 @@ import type {
   NfePayload,
 } from "../_shared/fiscal/types.ts";
 
-import { RESERVA_STATUS, isViolacaoDeUnicidade } from "./reservation.ts";
+import { RESERVA_STATUS, STATUS_APOS_LIBERAR, isViolacaoDeUnicidade } from "./reservation.ts";
 
 /** `fiscal_ambiente` — o enum criado por A3. */
 export type FiscalAmbiente = "homologacao" | "producao";
@@ -767,24 +767,183 @@ export async function persistCancel(admin: SupabaseClient, input: PersistCancelI
   }
 }
 
-/** Atualiza o status de um documento a partir de uma consulta ao provedor. */
+export type PersistQueryStatusInput = {
+  documentId: string;
+  branchId: string;
+  ambiente: FiscalAmbiente;
+  document: FiscalDocument;
+  /** O status que a linha tinha antes desta escrita — decide se há evento a registrar. */
+  previousStatus: string;
+  createdBy: string;
+};
+
+/**
+ * Atualiza um documento a partir de uma consulta ao provedor.
+ *
+ * ## Os artefatos entram, mas nunca apagam (A6, 09/09/2026)
+ *
+ * Até A6 esta função gravava só as sete colunas de estado, e isso bastava
+ * enquanto o único caso era reperguntar por uma nota que `persistEmission` já
+ * tinha gravado inteira. A6 criou o caso em que **a consulta é a primeira
+ * escrita do desfecho**: o isolate morreu depois de `provider.emit()` e antes de
+ * `persistEmission`, e a linha era só a reserva. Sem os artefatos, a
+ * recuperação produzia uma nota "Autorizado" com chave e com "Visualizar" e
+ * "Gerar XML" desabilitados para sempre — apesar de a resposta da consulta
+ * trazer os dois (`toDocument` no simulado, `caminho_xml_nota_fiscal` /
+ * `caminho_danfe` na Focus).
+ *
+ * Eles entram **coalescidos**: uma consulta que não traz artefato não zera o que
+ * já está gravado. Uma nota autorizada cuja consulta seguinte venha sem XML
+ * perderia o artefato se a escrita fosse incondicional — e o XML autorizado é
+ * justamente o que não pode sumir.
+ *
+ * ## O que continua faltando, e é de propósito
+ *
+ * `fiscal_document_items` **não** é reconstruído. Reconstruí-lo exigiria montar
+ * o `NfePayload` de novo (`buildPayload`), e o payload de agora pode não ser o
+ * que foi declarado à SEFAZ na hora — cadastro de cliente, preço e alíquota
+ * mudam. Gravar itens que divergem do XML autorizado seria pior que não gravar
+ * nenhum: o XML fica no cabeçalho e é a prova do que foi declarado. Fechar essa
+ * lacuna direito é reprocessamento, ou seja, A7.
+ */
 export async function persistQueryStatus(
   admin: SupabaseClient,
-  documentId: string,
-  document: FiscalDocument,
+  input: PersistQueryStatusInput,
 ): Promise<void> {
-  const { error } = await admin
+  const { documentId, branchId, ambiente, document, previousStatus, createdBy } = input;
+
+  const patch: Record<string, unknown> = {
+    status: document.status,
+    chave: document.chave,
+    numero: document.numero,
+    serie: document.serie,
+    protocolo: document.protocolo,
+    status_sefaz: document.statusSefaz,
+    mensagem_sefaz: document.mensagemSefaz,
+    updated_at: new Date().toISOString(),
+  };
+  if (document.xml?.content) patch.xml_content = document.xml.content;
+  if (document.xml?.path) patch.xml_path = document.xml.path;
+  if (document.pdf?.content) patch.pdf_content = document.pdf.content;
+  if (document.pdf?.path) patch.pdf_path = document.pdf.path;
+  if (document.qrCodeUrl) patch.qr_code_url = document.qrCodeUrl;
+
+  const { error } = await admin.from("fiscal_documents").update(patch).eq("id", documentId);
+  if (error) throw error;
+
+  // Só a consulta que **resolve uma reserva** tem evento a registrar: a nota
+  // saiu, e `persistEmission` não chegou a gravar o `autorizacao`/`rejeicao` da
+  // primeira tentativa. Reperguntar por uma nota já gravada não é fato novo, e
+  // um evento por consulta encheria a auditoria de ruído.
+  if (previousStatus !== RESERVA_STATUS) return;
+
+  const { error: eventError } = await admin.from("fiscal_document_events").insert({
+    branch_id: branchId,
+    fiscal_document_id: documentId,
+    tipo: document.status === "autorizado" ? "autorizacao" : "rejeicao",
+    ambiente,
+    status_sefaz: document.statusSefaz,
+    mensagem_sefaz: document.mensagemSefaz,
+    request_payload: { origem: "consulta", motivo: "reserva_resolvida" },
+    response_payload: { status: document.status, chave: document.chave, protocolo: document.protocolo },
+    xml_content: null,
+    xml_path: null,
+    created_by: createdBy,
+  });
+  if (eventError) {
+    // Mesma disciplina de `releaseStuckReservation`: o desfecho já está gravado
+    // no cabeçalho, que é o registro que não pode ser perdido. Falhar aqui
+    // esconderia uma nota que existe.
+    console.error(
+      "[fiscal-emit] desfecho gravado pela consulta, mas o evento não foi",
+      documentId,
+      eventError.message,
+    );
+  }
+}
+
+export type ReleaseStuckReservationInput = {
+  documentId: string;
+  branchId: string;
+  ambiente: FiscalAmbiente;
+  /** O que vai para `mensagem_sefaz` e para o evento — ver `MENSAGEM_RESERVA_LIBERADA`. */
+  mensagem: string;
+  createdBy: string;
+};
+
+/**
+ * **Libera uma reserva órfã, depois de o provedor ter dito que não conhece a
+ * `ref`** (A6, 09/09/2026).
+ *
+ * Só é chamada por `handleQuery`, e só quando `decideConsulta` devolveu
+ * `liberar` — nunca por idade da reserva, nunca sem consultar. O raciocínio de
+ * por que a consulta é obrigatória está em `reservation.ts`.
+ *
+ * Três escolhas, cada uma pelo mesmo motivo de A5 — quem decide o efeito é o
+ * banco, não a ordem em que dois processos leram:
+ *
+ * 1. **É um compare-and-swap**, `where id = ? and status = 'processando_autorizacao'`.
+ *    Entre a consulta ao provedor e esta escrita há uma janela: a requisição
+ *    original pode não estar morta, só lenta, e voltar a gravar o desfecho dela
+ *    no meio. Se isso acontecer, o `where` não casa, nada é escrito, e quem
+ *    chamou recebe `false` — o desfecho de verdade é o que a outra gravou.
+ * 2. **Muda o status em vez de apagar a linha.** `releaseEmission` apaga quando
+ *    a reserva nasceu de um `insert`, porque ali a linha é sempre nova e não tem
+ *    filho nenhum. Aqui não há como saber: a reserva pode ter sido tomada por
+ *    cima de uma nota recusada (o CAS de `reserveEmission`), e
+ *    `fiscal_document_items`/`fiscal_document_events` apontam para ela com
+ *    `on delete cascade`. Apagar levaria junto o histórico de rejeições.
+ * 3. **Registra um evento `rejeicao`.** É o que transforma a liberação numa
+ *    transição auditável — quem liberou, quando, e sobre qual justificativa —
+ *    em vez de uma linha que mudou de status sem rastro. O `request_payload`
+ *    guarda a origem da decisão para quem for auditar depois.
+ *
+ * A falha ao gravar o evento **não** desfaz nem esconde a liberação: ela já
+ * aconteceu, e mentir sobre isso deixaria o operador esperando por uma nota que
+ * não vai sair. Vai para o log, mesma disciplina de `releaseEmission`.
+ *
+ * @returns `true` se esta requisição foi quem liberou; `false` se a linha já
+ *   não estava mais em `processando_autorizacao` quando a escrita chegou.
+ */
+export async function releaseStuckReservation(
+  admin: SupabaseClient,
+  input: ReleaseStuckReservationInput,
+): Promise<boolean> {
+  const { documentId, branchId, ambiente, mensagem, createdBy } = input;
+
+  const { data, error } = await admin
     .from("fiscal_documents")
     .update({
-      status: document.status,
-      chave: document.chave,
-      numero: document.numero,
-      serie: document.serie,
-      protocolo: document.protocolo,
-      status_sefaz: document.statusSefaz,
-      mensagem_sefaz: document.mensagemSefaz,
+      status: STATUS_APOS_LIBERAR,
+      status_sefaz: null,
+      mensagem_sefaz: mensagem,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", documentId);
+    .eq("id", documentId)
+    .eq("status", RESERVA_STATUS)
+    .select("id");
   if (error) throw error;
+  if (!data || (data as unknown[]).length === 0) return false;
+
+  const { error: eventError } = await admin.from("fiscal_document_events").insert({
+    branch_id: branchId,
+    fiscal_document_id: documentId,
+    tipo: "rejeicao",
+    ambiente,
+    status_sefaz: null,
+    mensagem_sefaz: mensagem,
+    request_payload: { origem: "consulta", motivo: "reserva_orfa" },
+    response_payload: { status: "nao_encontrado" },
+    xml_content: null,
+    xml_path: null,
+    created_by: createdBy,
+  });
+  if (eventError) {
+    console.error(
+      "[fiscal-emit] reserva liberada, mas o evento não foi gravado",
+      documentId,
+      eventError.message,
+    );
+  }
+  return true;
 }

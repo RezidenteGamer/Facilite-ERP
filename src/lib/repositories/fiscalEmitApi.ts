@@ -27,14 +27,26 @@ import { supabase, supabaseUrl } from "../supabaseClient";
 /** A origem do documento — venda ou devolução, nunca as duas. */
 export type FiscalEmitOrigin = { saleId: string } | { saleReturnId: string };
 
+/**
+ * `status` e `mensagem` entraram em A6 (09/09/2026), para a consulta de status.
+ *
+ * Emitir e cancelar não os leem — ali o próprio botão clicado já diz o que
+ * aconteceu. Consultar, não: o mesmo clique pode terminar em "o provedor
+ * confirmou a autorização", "ainda está processando" ou "a emissão anterior não
+ * foi concluída e a venda foi liberada", e quem sabe qual dos três é a Edge
+ * Function. `mensagem` é a frase que ela escolheu; `status`, o estado em que a
+ * nota ficou.
+ */
 export type FiscalActionOutcome =
-  | { ok: true; chave: string | null }
+  | { ok: true; chave: string | null; status: string | null; mensagem: string | null }
   | { ok: false; errors: string[] };
 
 type FiscalEmitResponse = {
   ok?: boolean;
   errors?: string[];
   chave?: string | null;
+  status?: string | null;
+  mensagem?: string | null;
   /** Erro de transporte/permissão/configuração — a função responde com HTTP != 200. */
   error?: string;
   /**
@@ -73,7 +85,12 @@ async function callFiscalEmit(body: Record<string, unknown>): Promise<FiscalActi
     if (!result.ok) {
       return { ok: false, errors: result.errors?.length ? result.errors : ["A emissão não foi concluída."] };
     }
-    return { ok: true, chave: result.chave ?? null };
+    return {
+      ok: true,
+      chave: result.chave ?? null,
+      status: result.status ?? null,
+      mensagem: result.mensagem ?? null,
+    };
   } catch (err) {
     return { ok: false, errors: [extractErrorMessage(err, "Erro inesperado ao falar com o serviço fiscal.")] };
   }
@@ -95,4 +112,24 @@ export function requestFiscalCancel(
   justificativa: string,
 ): Promise<FiscalActionOutcome> {
   return callFiscalEmit({ action: "cancel", branchId, justificativa, ...origin });
+}
+
+/**
+ * **Pergunta ao provedor o que ele sabe sobre a nota desta venda ou devolução,
+ * e reconcilia o banco com a resposta** (A6, 09/09/2026).
+ *
+ * A ação `query` existia na Edge Function desde A1 e **nenhuma tela a chamava**
+ * — não havia botão nenhum em `InvoicesPage.tsx` que a alcançasse. Sem ela, uma
+ * nota presa em `processando_autorizacao` (um isolate morto no meio da emissão)
+ * não tinha saída: `handleEmit` recusa reemitir por cima de uma reserva, e nada
+ * mais tocava a linha.
+ *
+ * Exige só a permissão de `view` em Notas Emitidas — ela lê do provedor e
+ * reconcilia; não emite, não cancela, não cria documento nenhum.
+ */
+export function requestFiscalQuery(
+  branchId: string,
+  origin: FiscalEmitOrigin,
+): Promise<FiscalActionOutcome> {
+  return callFiscalEmit({ action: "query", branchId, ...origin });
 }

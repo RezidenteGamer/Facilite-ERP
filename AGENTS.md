@@ -6203,3 +6203,339 @@ falhando por credencial ausente** (eram 2) e 13 passando.
 
 `npm run build`, `npm run lint` (62 avisos pré-existentes, nenhum nos arquivos
 tocados) e `deno check supabase/functions/fiscal-emit/index.ts` limpos.
+
+### Decisão arquitetural: a máquina de estados da emissão — a reserva órfã é real hoje, e a saída dela é consultar o provedor, nunca o relógio (A6) (09/09/2026)
+
+Terceira tarefa da Etapa 3. O plano mestre descrevia A6 como "máquina de estados:
+hoje `processando_autorizacao` e `denegado` existem no enum e nunca são escritos.
+Transição controlada + reprocessamento do que falhou". **Duas das três premissas
+estavam desatualizadas**, e conferi antes de escrever qualquer linha:
+
+- `processando_autorizacao` **já é escrito** desde A5 (07/09/2026), como reserva
+  atômica antes de a Edge Function falar com o provedor.
+- `denegado` de fato nunca era escrito — `persistQueryStatus` poderia escrevê-lo,
+  mas nada chamava a ação `query`.
+- E a descoberta que reorganiza a tarefa: `handleQuery` existe desde A1 e
+  **nenhuma tela a chamava**. Busca no repositório inteiro por `action: "query"`
+  fora da própria Edge Function: zero ocorrências. `InvoicesPage.tsx` tinha sete
+  ações, duas delas `disabled: true` (carta de correção e troca), e nenhuma
+  consultava status. A função estava viva no código e morta no produto.
+
+**Nada foi aplicado nem implantado. Nenhuma migration foi escrita.** `fiscal-emit`
+não foi implantada. Nenhuma regra de cálculo tributário nem a numeração fiscal
+foram tocadas. O mecanismo de reserva de A5 (`reserveEmission`, `releaseEmission`,
+`decideEmissao`) não foi alterado.
+
+#### A pergunta que decidia o desenho: uma reserva pode ficar órfã hoje?
+
+A5 fechou o invariante "`processando_autorizacao` não sobrevive à requisição HTTP
+que o escreveu", e a leitura estava correta **sobre o código**: todo caminho de
+saída de `handleEmit` depois da reserva ou grava o desfecho (`persistEmission`) ou
+desfaz a reserva (`releaseEmission`). O que ela pressupunha, sem dizer, é que o
+código sempre chega ao fim.
+
+Ele não chega. A documentação da Supabase lista **seis motivos de desligamento**
+de um worker de Edge Function — `EventLoopCompleted`, `WallClockTime`, `CPUTime`,
+`Memory`, `EarlyDrop` e `TerminationRequested` (implantações, atualizações,
+cancelamento) — e diz explicitamente sobre limpeza: *implemente código de limpeza
+gracioso, mas espere que ele possa não rodar*. Os limites são **400s de relógio**
+(150s no plano gratuito), **2s de CPU** e **256MB de memória** por worker, com um
+*request idle timeout* de 150s.
+
+Quatro desses seis motivos matam o isolate no meio da execução, e num isolate
+morto o `catch` de `handleEmit` **não roda**. A linha fica em
+`processando_autorizacao` para sempre, `decideEmissao` recusa reemitir por cima
+dela ("a emissão já está em andamento"), e a venda fica sem nota e sem saída.
+
+**A resposta é sim: a reserva pode ficar órfã hoje**, com os dois provedores
+síncronos, sem esperar por A12. Dois caminhos concretos deste código, não
+hipóteses de manual:
+
+1. **`TerminationRequested`** não depende de volume nenhum: basta implantar
+   `fiscal-emit` enquanto uma emissão está em voo. O próprio fluxo de trabalho
+   deste projeto (`supabase functions deploy fiscal-emit`) é o gatilho.
+2. **`CPUTime` / `Memory`** são alcançáveis por este código, e a razão está em
+   `data.ts`: `readIbptRates` e `readMvaRules` leem as tabelas **inteiras**, sem
+   `limit` e sem filtro — e `ibpt_rates` é o cadastro nacional do IBPT, na casa
+   das dezenas de milhares de linhas por UF quando carregado de verdade (hoje o
+   projeto tem uma amostra). `readLastNumero` lê a coluna `numero` inteira da
+   filial. O provedor simulado ainda monta XML e DANFE em string por cima disso.
+
+Fontes: [Limits | Supabase Docs](https://supabase.com/docs/guides/functions/limits)
+e [Edge Function shutdown reasons explained](https://supabase.com/docs/guides/troubleshooting/edge-function-shutdown-reasons-explained).
+
+A conferência de A5 sobre os provedores continua correta e não foi refutada: os
+dois respondem de forma síncrona, e o `try/catch` **alcança** `releaseEmission`
+sempre que a execução chega até ele. O que A5 não considerou é a execução não
+chegar.
+
+#### A regra: nunca liberar sem perguntar ao provedor
+
+Uma reserva velha **não** pode ser simplesmente devolvida para reemissão. Os dois
+desfechos possíveis são indistinguíveis olhando só o banco:
+
+- o isolate morreu **antes** de o provedor emitir — não há nota, e liberar é o
+  certo;
+- o isolate morreu **depois** de `provider.emit()` ter dado certo e antes de
+  `persistEmission` gravar — a nota **existe** para a SEFAZ, com chave e
+  protocolo, e reemitir criaria uma **segunda nota fiscal real para a mesma
+  venda**: exatamente o estrago que A5 existe para impedir, chegando por um
+  caminho novo.
+
+Quem sabe a diferença é o provedor. Por isso a resolução é sempre a mesma
+sequência — **consultar a `ref`, e só então decidir** —, e por isso ela mora
+dentro de `handleQuery`, não num caminho novo.
+
+#### A máquina de estados
+
+Os cinco estados de `fiscal_document_status`, e quem escreve cada um.
+
+| Estado | Significado | Quem o escreve hoje |
+| --- | --- | --- |
+| `processando_autorizacao` | Reserva da emissão: a `ref` está travada, o provedor pode ou não ter recebido o pedido | `reserveEmission` (A5) |
+| `autorizado` | Nota autorizada pela SEFAZ, com chave e protocolo | `persistEmission`, `persistQueryStatus` |
+| `erro_autorizacao` | A emissão não deu certo; reemitir é legítimo | `persistEmission`, `persistQueryStatus`, `releaseStuckReservation` (**novo em A6**) |
+| `denegado` | A SEFAZ denegou (situação fiscal do emitente/destinatário) | `persistQueryStatus` (**alcançável a partir de A6**) |
+| `cancelado` | Cancelamento registrado, com evento próprio | `persistCancel` |
+
+**Transições que existem hoje** (`→` = escrita no banco):
+
+```
+(sem linha) ──emit──▶ processando_autorizacao ──emit ok───────▶ autorizado
+                              │                ──emit recusado─▶ erro_autorizacao
+                              │
+                              ├──falha no transporte, mesma requisição──▶ (linha apagada / status anterior)   [releaseEmission, A5]
+                              │
+                              └──consulta: o provedor não conhece a ref──▶ erro_autorizacao                    [releaseStuckReservation, A6]
+
+erro_autorizacao ──emit──▶ processando_autorizacao        (CAS de reserveEmission, A5)
+denegado         ──emit──▶ processando_autorizacao        (idem)
+autorizado       ──cancel──▶ cancelado                    (persistCancel)
+```
+
+**Transições que a consulta produz** (`decideConsulta`, `reservation.ts`). Linhas
+= o que o banco diz; colunas = o que o provedor respondeu.
+
+| banco \ provedor | `autorizado` | `erro_autorizacao` | `denegado` | `cancelado` | `processando_autorizacao` | `nao_encontrado` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `processando_autorizacao` | grava | grava | grava | grava | mantém (aguardar) | **libera → `erro_autorizacao`** |
+| `autorizado` | grava | grava | grava | grava | mantém | mantém (divergência) |
+| `erro_autorizacao` | grava | grava | grava | grava | mantém | mantém |
+| `denegado` | grava | grava | grava | grava | mantém | mantém |
+| `cancelado` | **mantém** | **mantém** | **mantém** | grava | mantém | mantém |
+
+Três regras dentro dessa tabela, cada uma fechando um jeito de perder dado:
+
+1. **`cancelado` é terminal e nada o desfaz.** Antes de A6, `persistQueryStatus`
+   escrevia o que viesse: um provedor com propagação atrasada respondendo
+   `autorizado` ressuscitaria uma nota que a empresa já cancelou — e o
+   cancelamento é evento nosso, com linha própria em `fiscal_document_events`. É
+   a única transição que A6 fecha de propósito.
+2. **`nao_encontrado` sobre uma linha que **não** é reserva não escreve nada.**
+   Um provedor que não conhece uma nota que o banco diz `autorizado` é
+   divergência para o operador investigar, nunca motivo para apagar uma chave de
+   acesso.
+3. **`processando_autorizacao` vindo do provedor não é gravado.** É o estado
+   normal da emissão assíncrona (A12); gravá-lo faria `persistQueryStatus` zerar
+   `chave`, `numero` e `protocolo` com os nulos da consulta. A resposta é "ainda
+   não terminou", não uma atualização.
+
+**Transições que continuam faltando**, e de quem são: o disparo automático da
+consulta (A7), a emissão que nasce assíncrona de verdade e o webhook que a
+resolve (A12), e a carta de correção e a inutilização, que são eventos e não
+estados do documento (sem tarefa marcada).
+
+#### Automático ou manual: manual, e sem limiar de tempo nenhum
+
+A decisão pedida era se um limite ("reserva com mais de N minutos") deveria
+disparar a consulta sozinho ou só quando o operador clica. **Manual**, e o
+argumento que fecha não é de esforço:
+
+**Perguntar ao provedor é seguro em qualquer idade da reserva.** A consulta não
+escreve nada por si — ela lê o que o provedor sabe e reconcilia. Uma reserva de
+dois segundos consultada devolve `processando_autorizacao` (ou o documento, se o
+provedor já terminou), e nada é liberado. **O limiar não protegeria de nada que a
+própria consulta já não proteja**, e a única regra que importa — "nunca libere sem
+perguntar" — não precisa dele.
+
+O limiar só serve para decidir **quando consultar sem um humano presente**. Isso é
+agendamento: `pg_cron`, fila, Edge Function agendada — **A7 por definição do
+enunciado**, e é onde esta tarefa para. Qualquer coisa aquém disso seria
+"automático apenas quando alguém já está clicando", que é manual com passos a
+mais.
+
+Havia uma terceira opção considerada e recusada: disparar a consulta **de dentro
+do `handleEmit`**, quando `decideEmissao` encontra uma reserva. Ela não precisaria
+de agendador e resolveria o caso do operador que reclica "Emitir". Foi recusada
+por dois motivos. Primeiro, poria uma chamada de rede ao provedor **no caminho
+crítico da emissão** — o mais sensível do sistema, e o que A5 acabou de endurecer
+—, acrescentando um modo de falha novo a ele. Segundo, o botão de consulta já
+cobre o caso: nenhum estado fica inalcançável para o operador.
+
+**O número que A7 vai querer**, e que esta pesquisa entrega de bônus: enquanto os
+provedores forem síncronos, **uma reserva mais velha que o limite de relógio da
+plataforma (400s; 150s no plano gratuito) não pode estar sendo segurada por um
+isolate vivo** — o isolate não sobrevive a isso. É um limiar derivado da
+plataforma, não chutado. **E ele deixa de valer em A12**: com a emissão
+assíncrona de verdade, uma reserva de horas é normal (a Focus responde 202 e
+autoriza depois). Por isso o limiar não entrou no código agora: ele teria de ser
+desfeito. O **mecanismo** — consultar antes de decidir — vale nos dois mundos, e
+é o que A12 vai encontrar pronto.
+
+#### O que foi construído
+
+**No front (três arquivos).** `requestFiscalQuery` em `fiscalEmitApi.ts`;
+`queryInvoice` em `useInvoicesData.ts`; e o botão **"Consultar status"** em
+`InvoicesPage.tsx`, entre "Emitir Nota" e "Visualizar". Habilitado quando o
+documento está em `processando_autorizacao`, `erro_autorizacao` ou `denegado` —
+os três estados em que o banco pode estar atrás do provedor. `autorizado` e
+`cancelado` já têm desfecho gravado. A permissão exigida é `view` (a ação `query`
+pede `view` na Edge Function), que quem chegou à tela já tem.
+
+`FiscalActionOutcome` ganhou `status` e `mensagem` no ramo `ok: true`. Emitir e
+cancelar não os leem — ali o botão clicado já diz o que aconteceu. Consultar, sim:
+o mesmo clique termina em "o provedor confirmou a autorização", "ainda está
+processando" ou "a emissão anterior não foi concluída e a venda foi liberada", e
+quem sabe qual dos três é a Edge Function.
+
+**Na Edge Function (três arquivos).** `decideConsulta` em `reservation.ts` (a
+tabela acima, sem I/O, testável); `releaseStuckReservation` e a ampliação de
+`persistQueryStatus` em `persist.ts`; e `handleQuery` em `index.ts`, que passou
+de "grava o que vier" a despacho da tabela.
+
+`releaseStuckReservation` tem três escolhas que não são óbvias:
+
+- **É um compare-and-swap**, `where id = ? and status = 'processando_autorizacao'`,
+  pelo mesmo motivo do CAS de A5. Entre a consulta ao provedor e esta escrita há
+  uma janela: a requisição original pode não estar morta, só lenta, e gravar o
+  desfecho dela no meio. Se isso acontecer o `where` não casa, nada é escrito, e
+  `handleQuery` relê a linha e responde com o que a outra gravou.
+- **Muda o status em vez de apagar a linha**, ao contrário do `releaseEmission` de
+  A5. Lá a linha era sempre recém-criada (`previousStatus === null`) e não tinha
+  filho nenhum. Aqui não há como saber: a reserva pode ter sido tomada por cima
+  de uma nota recusada (o CAS de `reserveEmission`), e `fiscal_document_items` e
+  `fiscal_document_events` apontam para ela com **`on delete cascade`** —
+  conferido na migration de A3, não presumido. Apagar levaria junto o histórico
+  de rejeições, que é o que uma auditoria fiscal procura.
+- **Registra um evento `rejeicao`** em `fiscal_document_events`, com
+  `request_payload: { origem: "consulta", motivo: "reserva_orfa" }`. É o que
+  transforma a liberação numa transição auditável (quem, quando, por quê) em vez
+  de um status que mudou sozinho. `fiscal_event_type` já tinha `rejeicao` e o
+  índice único de eventos só se aplica quando `sequencia` não é nula — nenhuma
+  coluna nova foi precisa. Falha ao gravar o evento vai para o log e **não**
+  desfaz nem esconde a liberação: ela já aconteceu, e mentir sobre isso deixaria
+  o operador esperando uma nota que não vai sair.
+
+O status de destino é `erro_autorizacao`, e não `denegado`: denegação é ato da
+SEFAZ contra a situação fiscal do emitente ou do destinatário, e nada disso
+aconteceu. `erro_autorizacao` é o que o enum já tem para "não deu certo, tentar de
+novo é legítimo", e é o que `decideEmissao` já aceita reemitir. A explicação vai
+em `mensagem_sefaz` — a coluna se chama assim e a mensagem **não vem da SEFAZ**,
+então ela diz isso na primeira frase (`MENSAGEM_RESERVA_LIBERADA`). Criar uma
+coluna nova para uma frase custaria uma migration numa tabela fiscal; deixar a
+mensagem antiga no lugar seria pior, porque descreveria uma tentativa que não é a
+última.
+
+#### A mudança em `seedFromRow`, sem a qual nada disso é testável
+
+`handleQuery` e `handleCancel` semeiam o provedor simulado com a linha do banco,
+porque o simulado guarda estado em memória e cada requisição cai num isolate novo
+(A1). Com a reserva semeada, a consulta responderia `processando_autorizacao`
+**para sempre** — o provedor repetindo o que nós acabamos de lhe contar — e a
+liberação de uma reserva órfã seria inalcançável justamente no único provedor
+testável hoje.
+
+`seedFromRow` passa a devolver `[]` para uma linha em `processando_autorizacao`.
+A justificativa não é de conveniência de teste: **uma reserva é escrituração
+nossa**, feita antes de o provedor ver a `ref`, e não tem chave, número, protocolo
+nem XML. Devolvê-la ao simulado o faria afirmar que se lembra de um documento que
+nunca produziu. Sem semear, ele responde `nao_encontrado` — que é a verdade (o
+isolate que emitiu morreu e a memória dele morreu junto), e é o que um provedor
+real responde para uma `ref` que nunca chegou a ele.
+
+O efeito colateral em `handleCancel` foi conferido e é benigno: cancelar uma
+reserva passa a receber `nao_encontrado` em vez do 501 "cancelamento só é possível
+para documento autorizado". As duas são recusas, as duas não gravam nada, e a tela
+nem oferece o botão nesse estado (`canCancel` exige `autorizado`).
+
+#### O que o `/code-review alto` da própria A6 encontrou
+
+Duas correções, as duas no código novo desta tarefa, as duas no caminho de
+recuperação — que é justamente o que ela existe para construir:
+
+1. **O ramo "a reserva não estava mais lá" mentia sobre o desfecho.** Entre a
+   consulta ao provedor e o compare-and-swap de `releaseStuckReservation` há uma
+   janela em que a emissão original — lenta, não morta — sai de
+   `processando_autorizacao`. A primeira versão respondia `ok: true` com "a
+   emissão foi concluída enquanto a consulta acontecia" para **os três**
+   desfechos possíveis, e dois deles são o contrário disso: se o `emit()` da
+   original falhou por transporte, `releaseEmission` **apaga** a linha (o caso
+   `previousStatus === null` de A5) e a resposta certa é "tente de novo"; se ela
+   terminou em `erro_autorizacao`, o operador via uma mensagem verde de sucesso
+   no lugar da recusa da SEFAZ. A correção não é uma mensagem nova: é relê a
+   linha e passar por `decideAposPerderCorrida`, a tabela que A5 já escreveu
+   exatamente para "outro terminou primeiro, e o desfecho dele é o que vale" —
+   incluindo o caso da linha que sumiu.
+2. **A nota recuperada nascia autorizada e vazia.** `persistQueryStatus`
+   escrevia só sete colunas de estado, o que bastava enquanto o único caso era
+   reperguntar por uma nota que `persistEmission` já havia gravado inteira. A6
+   criou o caso em que **a consulta é a primeira escrita do desfecho**, e ali o
+   resultado era uma nota "Autorizado" com chave e com "Visualizar" e "Gerar XML"
+   desabilitados para sempre — apesar de a resposta da consulta trazer os dois
+   artefatos (`toDocument` no simulado, `caminho_xml_nota_fiscal` /
+   `caminho_danfe` na Focus). Agora `xml_content`/`xml_path`, `pdf_content`/
+   `pdf_path` e `qr_code_url` entram, e a consulta que resolve uma reserva
+   registra o evento `autorizacao` (ou `rejeicao`) que a primeira tentativa não
+   chegou a gravar.
+
+   Os artefatos entram **coalescidos** — só sobrescrevem quando a consulta traz
+   valor. Escrita incondicional apagaria o XML de uma nota autorizada na primeira
+   consulta que voltasse sem ele, e o XML autorizado é o que menos pode sumir.
+
+   **`fiscal_document_items` continua sem ser reconstruído, e isso é decisão.**
+   Reconstruí-los exigiria montar o `NfePayload` de novo, e o payload de agora
+   pode não ser o que foi declarado à SEFAZ na hora — cadastro de cliente, preço
+   e alíquota mudam entre a emissão e a consulta. Gravar itens que divergem do
+   XML autorizado seria pior que não gravar nenhum: o XML fica no cabeçalho e é a
+   prova do que foi declarado. Fechar essa lacuna direito é reprocessamento, ou
+   seja, **A7**.
+
+#### Fronteira explícita com A7 e A12
+
+- **A7 (fila de retry e reprocessamento agendado)** — nada de `pg_cron`, nenhuma
+  Edge Function agendada, nenhuma tabela de fila foi criada. A consulta automática
+  por idade é dela, e o limiar derivado acima é o insumo que esta tarefa deixa
+  pronto.
+- **A12 (integração com a Focus)** — nada específico do provedor entrou.
+  `decideConsulta` decide a partir do `FiscalStatus` do contrato, e funciona com
+  qualquer `FiscalProvider`. Quando a Focus responder 202 e autorizar depois, o
+  mecanismo já existe: o operador consulta e o desfecho é gravado; o webhook, se
+  vier, escreve pelo mesmo `persistQueryStatus`.
+- **A10 (numeração fiscal atômica)** — intocada.
+
+#### Testes
+
+**418 testes passando** em 13 arquivos (eram 407). Os 11 novos estão em
+`tests/unit/fiscalEmitReservation.test.ts`, no terceiro `describe`, e cobrem a
+tabela inteira — incluindo o caso caro (reserva + provedor já autorizou ⇒ gravar,
+não liberar), o cancelamento que não é desfeito, a divergência que não apaga
+chave, e uma asserção que varre o vocabulário inteiro de `FiscalStatus` para
+provar que **só `nao_encontrado` libera**.
+
+O que não cabe num teste sem rede é a atomicidade do compare-and-swap de
+`releaseStuckReservation` — ela é do Postgres, pelo mesmo motivo que a reserva de
+A5 não é testada ali.
+
+**Nenhum teste de componente foi criado** para o botão novo: o projeto não tem
+nenhum. `vitest.config.ts` usa `environment: "node"`, não há `jsdom` nem
+`@testing-library/*` nas dependências, e nenhum dos outros seis botões da tela tem
+teste. Inventar um framework de teste de UI para um botão seria decisão de
+infraestrutura, não parte de A6.
+
+As 3 suítes que falham continuam sendo as mesmas de A5, pela mesma condição de
+ambiente pré-existente: `FACILITE_TEST_EMAIL` / `FACILITE_TEST_PASSWORD` e as
+credenciais de isolamento não estão em `.env.local`.
+
+`npm run build`, `npm run lint` (62 avisos pré-existentes, o mesmo número de A5,
+nenhum nos arquivos tocados) e `deno check supabase/functions/fiscal-emit/index.ts`
+limpos.

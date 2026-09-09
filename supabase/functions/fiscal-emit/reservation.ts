@@ -63,6 +63,16 @@
  * emissão assíncrona do provedor real vai produzir de propósito (202 agora,
  * autorização depois) —, a transição para `denegado` e o reprocessamento
  * agendado são A6 e A7. Ver a entrada de A5 no AGENTS.md.
+ *
+ * ## O que A6 (09/09/2026) acrescentou, e o que corrigiu do parágrafo acima
+ *
+ * O invariante de A5 vale para o **código**, não para a execução: um isolate
+ * morto por limite de CPU, de memória ou por uma implantação não roda o `catch`
+ * de `handleEmit`, e a reserva fica órfã **hoje**, com os provedores síncronos.
+ * A segunda metade deste arquivo (`decideConsulta`) é a resolução dessa reserva
+ * — sempre perguntando ao provedor antes de liberar —, e é também onde
+ * `denegado` finalmente passa a ser escrito. Ver o bloco "A resolução de uma
+ * reserva presa", mais abaixo.
  */
 
 import type { FiscalModel } from "../_shared/fiscal/types.ts";
@@ -253,4 +263,228 @@ export function isViolacaoDeUnicidade(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "23505"
   );
+}
+
+/* ------------------------------------------------------------------------ */
+/* A resolução de uma reserva presa (A6, 09/09/2026)                         */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * **O que A5 garantia, e por que a garantia não é suficiente.**
+ *
+ * A5 fechou o invariante "`processando_autorizacao` não sobrevive à requisição
+ * HTTP que o escreveu": todo caminho de saída de `handleEmit` depois da reserva
+ * ou grava o desfecho ou chama `releaseEmission`. A leitura estava certa **sobre
+ * o código**. O que ela pressupunha é que o código sempre chega ao fim.
+ *
+ * Ele não chega. A documentação da Supabase lista seis motivos de desligamento
+ * de um worker de Edge Function — `EventLoopCompleted`, `WallClockTime`,
+ * `CPUTime`, `Memory`, `EarlyDrop` e `TerminationRequested` (implantações e
+ * atualizações) — e diz, sobre limpeza: *implemente, mas espere que ela possa
+ * não rodar*. Quatro desses seis matam o isolate no meio da execução, e num
+ * isolate morto o `catch` de `handleEmit` **não roda**: a linha fica em
+ * `processando_autorizacao` para sempre, e `decideEmissao` recusa reemitir por
+ * cima dela — a venda fica sem nota e sem saída.
+ *
+ * Os limites são 400s de relógio (150s no plano gratuito), 2s de CPU e 256MB de
+ * memória por worker. Os dois últimos são alcançáveis por este código: além do
+ * `buildPayload`, a emissão lê `ibpt_rates` e `mva_rules` **inteiras** (sem
+ * `limit`, sem filtro — ver `data.ts`) e a coluna `numero` inteira da filial
+ * (`readLastNumero`), e o provedor simulado ainda monta XML e DANFE em string.
+ * `TerminationRequested` não depende de volume nenhum: basta implantar
+ * `fiscal-emit` enquanto uma emissão está em voo.
+ *
+ * ## A regra: nunca liberar sem perguntar ao provedor
+ *
+ * Uma reserva velha **não** pode ser simplesmente devolvida para reemissão. Os
+ * dois desfechos possíveis são indistinguíveis pelo banco:
+ *
+ * - o isolate morreu **antes** de o provedor emitir — não há nota, e liberar é
+ *   o certo;
+ * - o isolate morreu **depois** de o provedor emitir e antes de `persistEmission`
+ *   gravar — a nota **existe** para a SEFAZ, e reemitir criaria uma segunda nota
+ *   real para a mesma venda: exatamente o estrago que A5 existe para impedir,
+ *   agora por um caminho novo.
+ *
+ * Quem sabe a diferença é o provedor. Por isso a resolução é sempre a mesma
+ * sequência: **consultar a `ref`, e só então decidir**. `nao_encontrado` libera;
+ * qualquer documento de verdade é gravado (a nota não estava perdida — só a
+ * resposta da primeira chamada não chegou a ser gravada).
+ *
+ * ## Por que não há limite de tempo aqui
+ *
+ * A pergunta "a reserva tem mais de N minutos?" não aparece nesta tabela, e a
+ * ausência é decisão, não esquecimento: **perguntar ao provedor é seguro em
+ * qualquer idade da reserva**. A consulta não escreve nada por si; ela lê o que
+ * o provedor sabe. Uma reserva de dois segundos consultada devolve
+ * `processando_autorizacao` (ou o documento, se o provedor já terminou) e nada
+ * é liberado — o limiar não protegeria de nada que a própria consulta já não
+ * proteja.
+ *
+ * O limiar só serve para decidir **quando consultar sem um humano presente** —
+ * e isso é agendamento, ou seja, A7. Ver a entrada de A6 no AGENTS.md para o
+ * número que A7 vai querer (o limite de relógio da plataforma) e por que ele
+ * deixa de valer quando A12 trouxer a emissão assíncrona de verdade.
+ */
+
+/**
+ * O que o provedor respondeu, reduzido ao que a decisão precisa.
+ *
+ * `status` é `string` e não `FiscalStatus` pelo mesmo motivo de
+ * `EmissaoSnapshot.status`: o valor atravessa o JSON do provedor, e a decisão
+ * trata o desconhecido em vez de confiar no tipo.
+ */
+export type ConsultaSnapshot = {
+  status: string;
+  chave: string | null;
+  mensagemSefaz: string | null;
+};
+
+/**
+ * O que fazer com a linha depois de o provedor responder.
+ *
+ * - `gravar` — o provedor tem um documento de verdade; ele passa a ser o que a
+ *   linha diz (`persistQueryStatus`).
+ * - `liberar` — o provedor não tem nada para esta `ref` e a linha é uma reserva:
+ *   nenhuma nota foi emitida, e a venda volta a poder emitir.
+ * - `manter` — nada é escrito.
+ */
+export type ConsultaDecisao =
+  | ({ kind: "gravar" } & EmissaoResposta)
+  | ({ kind: "liberar"; mensagemSefaz: string } & EmissaoResposta)
+  | ({ kind: "manter" } & EmissaoResposta);
+
+/**
+ * O texto gravado em `mensagem_sefaz` quando uma reserva órfã é liberada.
+ *
+ * A coluna se chama `mensagem_sefaz` e esta mensagem **não vem da SEFAZ** — ela
+ * diz isso na primeira frase, de propósito. É o único canal de texto livre que a
+ * tela lê (`InvoicesPage.tsx` mostra "Mensagem da SEFAZ"), e criar uma coluna
+ * nova para uma frase custaria uma migration numa tabela fiscal; deixar a
+ * mensagem antiga no lugar seria pior, porque ela descreveria uma tentativa que
+ * não é a última.
+ */
+export const MENSAGEM_RESERVA_LIBERADA =
+  "A emissão anterior não foi concluída pelo sistema (não é recusa da SEFAZ). " +
+  "O provedor não tem registro desta nota, então nenhum documento foi emitido " +
+  "e a venda pode ser emitida novamente.";
+
+/**
+ * O status para o qual uma reserva liberada vai.
+ *
+ * **Não é `delete`**, ao contrário do que `releaseEmission` faz no caminho de
+ * erro da própria requisição. Lá a linha era sempre recém-criada e não tinha
+ * filho nenhum; aqui a reserva pode ter sido tomada por cima de uma nota
+ * recusada (o CAS de `reserveEmission`), e `fiscal_document_items` e
+ * `fiscal_document_events` apontam para ela com `on delete cascade` — apagar a
+ * linha apagaria junto o histórico de rejeições, que é justamente o que uma
+ * auditoria fiscal vai procurar.
+ *
+ * `erro_autorizacao` é o estado que o enum já tem para "a emissão não deu
+ * certo, tentar de novo é legítimo", e é o que `decideEmissao` já aceita
+ * reemitir. `denegado` estaria errado: denegação é ato da SEFAZ contra a
+ * situação fiscal do emitente ou do destinatário, e nada disso aconteceu aqui.
+ */
+export const STATUS_APOS_LIBERAR = "erro_autorizacao";
+
+/**
+ * A tabela de transições da consulta.
+ *
+ * Linhas = o que o banco diz hoje; colunas = o que o provedor respondeu. A
+ * versão legível está no AGENTS.md (entrada de A6); aqui está a que roda.
+ *
+ * Três regras, nesta ordem:
+ *
+ * 1. **`cancelado` é terminal e nada o desfaz.** Um cancelamento é evento nosso,
+ *    registrado em `fiscal_document_events` e mostrado na tela; um provedor que
+ *    responda `autorizado` por atraso de propagação não pode ressuscitar a nota.
+ *    É a única transição que A6 fecha de propósito — antes desta tarefa,
+ *    `persistQueryStatus` escrevia o que viesse, sem olhar o que havia.
+ * 2. **`nao_encontrado` sobre uma reserva libera; sobre qualquer outro estado,
+ *    não escreve nada.** Um provedor que não conhece uma nota que o banco diz
+ *    `autorizado` é divergência para o operador investigar, nunca motivo para
+ *    apagar uma chave de acesso.
+ * 3. **`processando_autorizacao` vindo do provedor não é gravado.** É o estado
+ *    normal da emissão assíncrona (A12), e escrevê-lo por cima da linha faria
+ *    `persistQueryStatus` zerar `chave`, `numero` e `protocolo` com os nulos da
+ *    consulta. Não há o que atualizar: a resposta é "ainda não terminou".
+ *
+ * O resto (`autorizado`, `erro_autorizacao`, `denegado`, `cancelado` vindos do
+ * provedor) é gravado — é o desfecho que a primeira chamada não conseguiu
+ * gravar, e é por aqui que `denegado` finalmente passa a ser escrito.
+ */
+export function decideConsulta(
+  existing: EmissaoSnapshot,
+  consultado: ConsultaSnapshot,
+  origem: string,
+): ConsultaDecisao {
+  if (existing.status === "cancelado" && consultado.status !== "cancelado") {
+    return {
+      kind: "manter",
+      errors: [
+        `A nota desta ${origem} está cancelada aqui, mas o provedor responde ` +
+          `"${consultado.status}". Nada foi alterado — confira no portal do provedor antes de agir.`,
+      ],
+      extra: { status: existing.status },
+    };
+  }
+
+  if (consultado.status === "nao_encontrado") {
+    if (existing.status === RESERVA_STATUS) {
+      return {
+        kind: "liberar",
+        mensagemSefaz: MENSAGEM_RESERVA_LIBERADA,
+        errors: [],
+        extra: { status: STATUS_APOS_LIBERAR, mensagem: MENSAGEM_RESERVA_LIBERADA },
+      };
+    }
+    // O que `handleQuery` já respondia desde A1, agora com o motivo escrito: o
+    // banco sabe mais que o provedor neste caso, e sobrescrever apagaria a
+    // chave de uma nota que existe.
+    return {
+      kind: "manter",
+      errors: ["O provedor não conhece esta nota."],
+      extra: { status: existing.status },
+    };
+  }
+
+  if (consultado.status === RESERVA_STATUS) {
+    return {
+      kind: "manter",
+      errors: [],
+      extra: {
+        status: existing.status,
+        mensagem:
+          "A emissão ainda está em processamento no provedor. Consulte de novo em alguns instantes.",
+      },
+    };
+  }
+
+  if (consultado.status === "autorizado") {
+    return {
+      kind: "gravar",
+      errors: [],
+      extra: {
+        status: consultado.status,
+        chave: consultado.chave,
+        mensagem: "O provedor confirmou a autorização desta nota.",
+      },
+    };
+  }
+
+  if (consultado.status === "cancelado") {
+    return {
+      kind: "gravar",
+      errors: [],
+      extra: { status: consultado.status, mensagem: "O provedor informa que esta nota está cancelada." },
+    };
+  }
+
+  // `erro_autorizacao` e `denegado`: recusa é resultado de negócio, e sai pelo
+  // mesmo canal que `handleEmit` usa para uma recusa na hora da emissão.
+  return {
+    kind: "gravar",
+    errors: [consultado.mensagemSefaz ?? "A SEFAZ recusou a emissão."],
+    extra: { status: consultado.status },
+  };
 }

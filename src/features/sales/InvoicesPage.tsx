@@ -55,10 +55,11 @@ export default function InvoicesPage() {
   const canCreate = hasPermission(MODULE_ID, "create");
   const canEdit = hasPermission(MODULE_ID, "edit");
 
-  const { sales, loading, error, emitInvoice, cancelInvoice } = useInvoicesData(currentBranchId);
+  const { sales, loading, error, emitInvoice, cancelInvoice, queryInvoice } = useInvoicesData(currentBranchId);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [emitting, setEmitting] = useState(false);
+  const [querying, setQuerying] = useState(false);
   const [actionErrors, setActionErrors] = useState<string[]>([]);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
@@ -92,6 +93,41 @@ export default function InvoicesPage() {
       setActionErrors([extractErrorMessage(err, "Não foi possível emitir a nota.")]);
     } finally {
       setEmitting(false);
+    }
+  }
+
+  /**
+   * "Consultar status" — o botão que A6 (09/09/2026) ligou à ação `query` da
+   * Edge Function, que existia desde A1 sem nenhum chamador.
+   *
+   * Ele é a saída de uma nota presa em `processando_autorizacao`: a emissão
+   * reserva a linha no banco antes de falar com o provedor (A5), e um isolate
+   * morto no meio — por limite de CPU, de memória ou por uma implantação —
+   * deixa a reserva pendurada, sem nada que a limpe. `handleEmit` recusa
+   * reemitir por cima dela, de propósito.
+   *
+   * O que a consulta faz **não** é liberar a reserva: é perguntar ao provedor,
+   * pela `ref`, o que ele sabe. Se ele já autorizou, o resultado dele é gravado
+   * (a nota não estava perdida — só a resposta não chegou a ser gravada); se
+   * ele não conhece a nota, aí sim a venda é liberada para nova emissão.
+   * Liberar sem perguntar criaria uma segunda nota real para a mesma venda.
+   */
+  async function handleQuery() {
+    if (!selected) return;
+    setActionErrors([]);
+    setActionMessage(null);
+    setQuerying(true);
+    try {
+      const outcome = await queryInvoice(selected.saleId);
+      if (outcome.ok) {
+        setActionMessage(outcome.mensagem ?? "Consulta concluída.");
+      } else {
+        setActionErrors(outcome.errors);
+      }
+    } catch (err) {
+      setActionErrors([extractErrorMessage(err, "Não foi possível consultar o status da nota.")]);
+    } finally {
+      setQuerying(false);
     }
   }
 
@@ -139,6 +175,23 @@ export default function InvoicesPage() {
   const document = selected?.document ?? null;
   const canCancel = Boolean(document && document.status === "autorizado" && canEdit);
 
+  /**
+   * A consulta só faz sentido nos estados em que o banco pode estar
+   * desatualizado em relação ao provedor: a reserva que pode ter ficado órfã, e
+   * a recusa que pode ter sido revertida do lado dele. Uma nota `autorizado` ou
+   * `cancelado` já tem desfecho gravado, e consultar não mudaria nada
+   * (`decideConsulta` protege o cancelamento explicitamente).
+   *
+   * A permissão é a de leitura — a ação `query` pede `view` na Edge Function, e
+   * quem chegou nesta tela já a tem.
+   */
+  const canQuery = Boolean(
+    document &&
+      (document.status === "processando_autorizacao" ||
+        document.status === "erro_autorizacao" ||
+        document.status === "denegado"),
+  );
+
   return (
     <AppShell navItems={navItems} secondaryText="Notas fiscais emitidas" contentTone="blue" fillViewport>
       <RegistryLayout variant="table-controls">
@@ -176,8 +229,14 @@ export default function InvoicesPage() {
             {
               id: "emitir",
               label: loading ? "Carregando..." : emitting ? "Emitindo..." : "Emitir Nota",
-              disabled: !selected || !canCreate || emitting || loading,
+              disabled: !selected || !canCreate || emitting || querying || loading,
               onClick: handleEmit,
+            },
+            {
+              id: "consultar-status",
+              label: querying ? "Consultando..." : "Consultar status",
+              disabled: !canQuery || querying || emitting || loading,
+              onClick: handleQuery,
             },
             {
               id: "visualizar",
