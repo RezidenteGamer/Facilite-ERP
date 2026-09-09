@@ -767,6 +767,18 @@ export async function persistCancel(admin: SupabaseClient, input: PersistCancelI
   }
 }
 
+/**
+ * Quem pediu a reconciliação: o operador que clicou "Consultar status" (A6) ou
+ * a varredura agendada (A7).
+ *
+ * Vai para `fiscal_document_events.request_payload`. Sem isto, uma transição
+ * feita pela fila — que roda **sem usuário**, e portanto grava `created_by`
+ * nulo — ficaria indistinguível de um evento cujo autor se perdeu. Numa tabela
+ * que existe para auditoria fiscal, "mudou sozinho" e "mudou pela varredura das
+ * 03h" não podem ter o mesmo registro.
+ */
+export type OrigemReconciliacao = "consulta" | "fila";
+
 export type PersistQueryStatusInput = {
   documentId: string;
   branchId: string;
@@ -774,7 +786,14 @@ export type PersistQueryStatusInput = {
   document: FiscalDocument;
   /** O status que a linha tinha antes desta escrita — decide se há evento a registrar. */
   previousStatus: string;
-  createdBy: string;
+  /**
+   * Nulo quando quem escreve é a varredura de A7: ela não tem usuário, e
+   * `fiscal_document_events.created_by` é nulável de propósito (o default
+   * `auth.uid()` já era nulo sob `service_role`). Quem identifica a origem é
+   * `origem`, não este campo.
+   */
+  createdBy: string | null;
+  origem?: OrigemReconciliacao;
 };
 
 /**
@@ -811,6 +830,7 @@ export async function persistQueryStatus(
   input: PersistQueryStatusInput,
 ): Promise<void> {
   const { documentId, branchId, ambiente, document, previousStatus, createdBy } = input;
+  const origem = input.origem ?? "consulta";
 
   const patch: Record<string, unknown> = {
     status: document.status,
@@ -844,7 +864,7 @@ export async function persistQueryStatus(
     ambiente,
     status_sefaz: document.statusSefaz,
     mensagem_sefaz: document.mensagemSefaz,
-    request_payload: { origem: "consulta", motivo: "reserva_resolvida" },
+    request_payload: { origem, motivo: "reserva_resolvida" },
     response_payload: { status: document.status, chave: document.chave, protocolo: document.protocolo },
     xml_content: null,
     xml_path: null,
@@ -868,7 +888,9 @@ export type ReleaseStuckReservationInput = {
   ambiente: FiscalAmbiente;
   /** O que vai para `mensagem_sefaz` e para o evento — ver `MENSAGEM_RESERVA_LIBERADA`. */
   mensagem: string;
-  createdBy: string;
+  /** Nulo quando quem libera é a varredura de A7 — ver `PersistQueryStatusInput.createdBy`. */
+  createdBy: string | null;
+  origem?: OrigemReconciliacao;
 };
 
 /**
@@ -910,6 +932,7 @@ export async function releaseStuckReservation(
   input: ReleaseStuckReservationInput,
 ): Promise<boolean> {
   const { documentId, branchId, ambiente, mensagem, createdBy } = input;
+  const origem = input.origem ?? "consulta";
 
   const { data, error } = await admin
     .from("fiscal_documents")
@@ -932,7 +955,7 @@ export async function releaseStuckReservation(
     ambiente,
     status_sefaz: null,
     mensagem_sefaz: mensagem,
-    request_payload: { origem: "consulta", motivo: "reserva_orfa" },
+    request_payload: { origem, motivo: "reserva_orfa" },
     response_payload: { status: "nao_encontrado" },
     xml_content: null,
     xml_path: null,
@@ -946,4 +969,163 @@ export async function releaseStuckReservation(
     );
   }
   return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* A fila de reprocessamento agendado (A7, 09/09/2026)                       */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * A linha presa, com o que a varredura precisa para consultar o provedor.
+ *
+ * Acrescenta três colunas ao `FiscalDocumentRow` de sempre: a origem (venda ou
+ * devolução, para a mensagem que `decideConsulta` monta) e `updated_at`, que é
+ * quando a reserva foi tomada — ver `CandidatoFila.reservadaEm`.
+ */
+export type StuckReservationRow = FiscalDocumentRow & {
+  sale_id: string | null;
+  sale_return_id: string | null;
+  updated_at: string;
+};
+
+/**
+ * As reservas presas há mais tempo, da mais velha para a mais nova.
+ *
+ * O filtro por status e por idade também acontece aqui, no banco, e **não** é
+ * quem decide: quem decide é `decideElegibilidade` (`queue.ts`), que reavalia
+ * os dois. Filtrar no SQL existe para a janela não vir cheia de reserva recém
+ * criada — que é o caso comum, e o único de verdade enquanto os provedores
+ * forem síncronos.
+ *
+ * `order("updated_at")` ascendente é fairness, não otimização: quem está
+ * esperando há mais tempo é atendido primeiro.
+ */
+export async function readStuckReservations(
+  admin: SupabaseClient,
+  corte: string,
+  limite: number,
+): Promise<StuckReservationRow[]> {
+  const { data, error } = await admin
+    .from("fiscal_documents")
+    .select(`${DOCUMENT_COLUMNS}, sale_id, sale_return_id, updated_at`)
+    .eq("status", RESERVA_STATUS)
+    .lt("updated_at", corte)
+    .order("updated_at", { ascending: true })
+    .limit(limite);
+  if (error) throw error;
+  return (data ?? []) as unknown as StuckReservationRow[];
+}
+
+/** O que `fiscal_queue` guarda de cada documento que a fila já tentou resolver. */
+export type FiscalQueueRow = {
+  fiscal_document_id: string;
+  tentativas: number;
+  proxima_tentativa_em: string;
+};
+
+/**
+ * Quantos ids cabem num `in.(...)` sem esbarrar no tamanho da URL.
+ *
+ * O PostgREST recebe o filtro na **query string**, e um UUID custa 37
+ * caracteres com a vírgula: a janela inteira da varredura (200 candidatos)
+ * daria ~7,4 KB de URL, contra um limite de linha de requisição que fica na
+ * casa dos 8 KB no gateway. Passar perto disso é ruim de um jeito específico —
+ * a leitura só estouraria quando houvesse **muita** reserva presa, ou seja,
+ * exatamente na hora em que a varredura precisa funcionar. Em blocos de 50 a
+ * URL fica em ~1,9 KB e a conta deixa de depender do tamanho da janela.
+ */
+const IDS_POR_CONSULTA = 50;
+
+/**
+ * As linhas de `fiscal_queue` dos documentos informados, indexadas por
+ * documento.
+ *
+ * Duas leituras em vez de um join porque o PostgREST não expressa bem "traga a
+ * linha da esquerda mesmo sem a da direita" — e porque a decisão que usa as
+ * duas mora em `queue.ts`, fora do banco, onde ela é testável.
+ */
+export async function readQueueEntries(
+  admin: SupabaseClient,
+  documentIds: string[],
+): Promise<Map<string, FiscalQueueRow>> {
+  const porDocumento = new Map<string, FiscalQueueRow>();
+
+  for (let inicio = 0; inicio < documentIds.length; inicio += IDS_POR_CONSULTA) {
+    const bloco = documentIds.slice(inicio, inicio + IDS_POR_CONSULTA);
+    const { data, error } = await admin
+      .from("fiscal_queue")
+      .select("fiscal_document_id, tentativas, proxima_tentativa_em")
+      .in("fiscal_document_id", bloco);
+    if (error) throw error;
+
+    for (const row of (data ?? []) as unknown as FiscalQueueRow[]) {
+      porDocumento.set(row.fiscal_document_id, row);
+    }
+  }
+
+  return porDocumento;
+}
+
+export type SaveQueueEntryInput = {
+  fiscalDocumentId: string;
+  tentativas: number;
+  proximaTentativaEm: string;
+  /** O que deu errado na última tentativa, ou `null` quando ela não falhou. */
+  ultimoErro: string | null;
+};
+
+/**
+ * Grava o resultado de uma tentativa da fila.
+ *
+ * `upsert` por `fiscal_document_id` (índice único) — a linha nasce na primeira
+ * tentativa que **não** resolveu o documento e é reescrita nas seguintes.
+ *
+ * **Nunca lança.** Ela é bookkeeping: uma falha aqui não pode derrubar o tique
+ * inteiro nem esconder o que a consulta já conseguiu escrever em
+ * `fiscal_documents`. O pior efeito de perder esta escrita é a linha ser tentada
+ * de novo no próximo tique sem backoff — barato, e visível no log.
+ */
+export async function saveQueueEntry(
+  admin: SupabaseClient,
+  input: SaveQueueEntryInput,
+): Promise<void> {
+  const { error } = await admin.from("fiscal_queue").upsert(
+    {
+      fiscal_document_id: input.fiscalDocumentId,
+      tentativas: input.tentativas,
+      ultima_tentativa_em: new Date().toISOString(),
+      proxima_tentativa_em: input.proximaTentativaEm,
+      ultimo_erro: input.ultimoErro,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "fiscal_document_id" },
+  );
+  if (error) {
+    console.error("[fiscal-emit] falha ao gravar a fila", input.fiscalDocumentId, error.message);
+  }
+}
+
+/**
+ * Tira o documento da fila — ele saiu de `processando_autorizacao` e não há mais
+ * o que perguntar.
+ *
+ * A fila guarda só **o que ainda está sendo perseguido**; o rastro do que
+ * aconteceu é `fiscal_document_events`, que `persistQueryStatus` e
+ * `releaseStuckReservation` escrevem com `request_payload.origem = "fila"`.
+ * Manter a linha aqui depois de resolvida duplicaria esse histórico num lugar
+ * que ninguém audita.
+ *
+ * **Nunca lança**, pelo mesmo motivo de `saveQueueEntry`.
+ */
+export async function clearQueueEntry(
+  admin: SupabaseClient,
+  fiscalDocumentId: string,
+): Promise<void> {
+  const { error } = await admin
+    .from("fiscal_queue")
+    .delete()
+    .eq("fiscal_document_id", fiscalDocumentId);
+  if (error) {
+    console.error("[fiscal-emit] falha ao limpar a fila", fiscalDocumentId, error.message);
+  }
 }

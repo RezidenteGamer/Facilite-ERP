@@ -30,4 +30,12 @@ verify_jwt = false
 # esquecimento). Ela não substitui a checagem interna: a chave anônima também é
 # um JWT válido para o gateway, e quem decide de verdade são `has_permission`
 # e `has_branch_access`, chamados dentro da função com o token do chamador.
+#
+# A ação `sweep` (A7, 09/09/2026) é a exceção **dentro** da função, não aqui: ela
+# é chamada pelo `pg_cron`, que não tem usuário, e portanto não passa por
+# `has_permission`/`has_branch_access`. Ela continua atravessando o gateway (o
+# agendador manda a chave anônima no `Authorization`) e se autentica por um
+# segredo próprio, `FISCAL_QUEUE_SECRET`, no header `x-fiscal-queue-secret` —
+# ver `recusaVarredura` em `index.ts`. `verify_jwt` continua `true`: baixá-lo
+# abriria as outras três ações junto.
 verify_jwt = true

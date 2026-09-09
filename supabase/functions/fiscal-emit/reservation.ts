@@ -325,6 +325,11 @@ export function isViolacaoDeUnicidade(error: unknown): boolean {
  * e isso é agendamento, ou seja, A7. Ver a entrada de A6 no AGENTS.md para o
  * número que A7 vai querer (o limite de relógio da plataforma) e por que ele
  * deixa de valer quando A12 trouxer a emissão assíncrona de verdade.
+ *
+ * **A7 (09/09/2026) usou o número e não mexeu nesta tabela**: o limiar mora em
+ * `queue.ts` (`LIMIAR_RESERVA_ORFA_MS`), e a varredura agendada chama
+ * `decideConsulta` pelo mesmo caminho que o botão de A6 — ver
+ * `reconciliaComProvedor` em `index.ts`.
  */
 
 /**

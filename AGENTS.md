@@ -6539,3 +6539,298 @@ credenciais de isolamento não estão em `.env.local`.
 `npm run build`, `npm run lint` (62 avisos pré-existentes, o mesmo número de A5,
 nenhum nos arquivos tocados) e `deno check supabase/functions/fiscal-emit/index.ts`
 limpos.
+
+### Decisão arquitetural: a fila de emissão agendada — a fila não reemite nota, ela termina de perguntar (A7) (09/09/2026)
+
+Quarta tarefa da Etapa 3. O plano mestre descrevia A7 como "fila de emissão com
+retentativa: tabela `fiscal_queue` + Edge Function agendada (`pg_cron`). Hoje a
+emissão é síncrona no clique."
+
+**Nada foi aplicado nem implantado.** A migration
+`00000000000012_a7_fila_de_emissao_agendada.sql` foi escrita e **não** foi
+aplicada — nem por `apply_migration`, nem por `execute_sql`, nem por um
+`select cron.schedule(...)` avulso "para testar". `fiscal-emit` **não** foi
+implantada. Nenhuma regra de cálculo tributário, a numeração fiscal e o
+mecanismo de reserva de A5/A6 (`decideEmissao`, `decideConsulta`,
+`reserveEmission`, `releaseEmission`) ficaram intocados — A7 só os **chama**.
+
+#### A decisão que organiza a tarefa: o que entra na fila
+
+O enunciado listou três candidatos, que não são a mesma coisa. **Entrou um.**
+
+**(a) Reserva presa em `processando_autorizacao` — ENTROU.** É o único caso em
+que a fila não precisa decidir nada de novo: A6 já resolveu *o que fazer* com a
+resposta do provedor (`decideConsulta`), e o que faltava era *quando perguntar
+sem um humano presente* — que A6 escreveu, com todas as letras, ser de A7. A
+varredura chama exatamente o mesmo caminho do botão "Consultar status".
+
+**(b) `erro_autorizacao` — FICOU DE FORA.** Quatro razões, em ordem de peso:
+
+1. **É recusa da SEFAZ, e recusa é determinística.** Um NCM inválido, uma IE
+   errada, um CFOP incompatível recusam igual na décima tentativa. Um laço
+   automático produziria rejeição idêntica para sempre e, com o provedor real,
+   custo por tentativa.
+2. **O subconjunto seguro não é distinguível neste código hoje.** A SEFAZ de
+   fato documenta rejeições transitórias (serviço paralisado, por exemplo), mas
+   para classificá-las seria preciso ter códigos reais para classificar: o único
+   `status_sefaz` de emissão que este sistema produz é o **`225`** do provedor
+   simulado ("falha no schema XML" — permanente por definição), e
+   `focusProvider` lança `FiscalNotConfiguredError` nas sete operações até A12.
+   Escrever uma tabela de códigos transitórios agora seria regra fiscal sobre
+   suposição, e ela teria de ser reescrita quando os códigos de verdade
+   chegassem.
+3. **Reemitir consome numeração, e a numeração não é atômica** — `readLastNumero`
+   é um máximo lido sem trava, e A10 é justamente a tarefa que conserta isso. Um
+   agendador que reemite é exatamente a coisa que produz duas emissões
+   concorrentes sem ninguém olhando.
+4. **`erro_autorizacao` deixou de significar só "a SEFAZ recusou".** Uma
+   descoberta desta tarefa, que corrige o enunciado: desde A6,
+   `releaseStuckReservation` grava `erro_autorizacao` com `status_sefaz` nulo
+   para uma **reserva órfã liberada** — não é recusa de ninguém. Um retry cego
+   de `erro_autorizacao` pegaria essas linhas junto, misturando dois casos que
+   têm respostas opostas.
+
+   Isso também desfaz a premissa de que "não existe nenhum registro persistido de
+   falha que não seja recusa": existe, desde A6, e é o que a varredura de A7
+   passa a produzir sozinha.
+
+**(c) Venda com "emitir nota" cuja emissão nunca aconteceu — FICOU DE FORA.**
+Não é escolha de esforço: **não há o que varrer**. `sales` não tem nenhuma
+coluna que registre "o operador pediu nota" — conferido no catálogo do projeto,
+não presumido —, então a fila não teria como distinguir essa venda de qualquer
+venda de balcão que nunca deveria ter nota. Criar o rastro exigiria (i) mudar
+`handleEmit` para gravar uma tentativa **antes** de tentar, ou seja, mexer no
+caminho crítico que A5 e A6 acabaram de endurecer, e (ii) depois emitir nota
+fiscal automaticamente por cima da numeração não atômica de A10. O botão "Emitir
+Nota" continua sendo a saída desse caso, e o fluxo síncrono do clique — o botão
+de Notas Emitidas e o checkbox da finalização da venda (`useSaleDraft.ts`) —
+**não mudou em nada**.
+
+Resumindo o escopo em uma frase: **a fila termina de perguntar; ela não emite.**
+
+#### A6 foi reaproveitado, não duplicado
+
+`decideConsulta` não foi tocada. O que A7 fez foi extrair de `handleQuery` o
+núcleo que já existia — `reconciliaComProvedor` em `index.ts`: consulta o
+provedor pela `ref`, passa a resposta por `decideConsulta`, e grava
+(`persistQueryStatus`) ou libera (`releaseStuckReservation`). O botão de A6 e a
+varredura de A7 chamam a **mesma função**; a única diferença entre eles é quem
+assina o evento.
+
+O limiar que A6 deixou pronto (o limite de relógio de um worker de Edge
+Function, **400 s**) virou `LIMIAR_RESERVA_ORFA_MS` em `queue.ts`. Continua não
+sendo um limiar de segurança — A6 provou que consultar é seguro em qualquer
+idade, porque a consulta não escreve nada por si. É um limiar de **economia**:
+abaixo dele, a reserva pode ser uma emissão em voo e perguntar não traz
+informação nova. Usei os 400 s e não os 150 s do plano gratuito porque o número
+maior vale para qualquer plano.
+
+#### Backoff e limite de tentativas
+
+`fiscal_queue.tentativas` conta **falhas consecutivas da própria fila**
+(transporte, provedor fora do ar, erro ao escrever), e o backoff é
+`5 min → 15 min → 45 min → 2h15 → teto de 6h`.
+
+Duas escolhas que não são óbvias:
+
+- **Não existe limite de tentativas, de propósito.** Desistir significaria uma
+  venda sem nota, presa em `processando_autorizacao`, que nenhuma tela deixa
+  reemitir e que ninguém está vigiando — o pior desfecho possível. Uma
+  requisição a cada seis horas é barata e cura sozinha quando o provedor volta.
+  O contador continua existindo para o suporte enxergar que aquela linha está
+  apanhando há dias.
+- **"O provedor respondeu que ainda está processando" zera o contador.** Não é
+  falha: ele falou com a gente. Uma emissão que nasce assíncrona (o 202 da
+  Focus, A12) fica legitimamente em voo, e contá-la como falha faria o backoff
+  abandonar justamente a nota que a fila existe para acompanhar até o fim. Hoje
+  esse caminho é inalcançável — com `seedFromRow` devolvendo `[]` para uma
+  reserva (decisão de A6), o simulado responde `nao_encontrado` e a linha se
+  resolve na primeira tentativa. Ele existe para A12.
+
+**O limite de taxa da Focus, pesquisado:** a API é limitada a **100 créditos por
+minuto por token de acesso**, 1 crédito por requisição, para qualquer documento
+e qualquer método; estourado o limite ela responde **HTTP 429** e as respostas
+trazem `Rate-Limit-Limit`, `Rate-Limit-Remaining` e `Rate-Limit-Reset`. Fonte: a
+referência da Focus publicada no Postman API Network
+(<https://www.postman.com/focusnfe/focus-nfe/documentation/906jrtc/focus-nfe>) —
+com uma ressalva de honestidade: o índice atual de `doc.focusnfe.com.br`
+(`llms.txt`, acesso em 09/09/2026) **não tem página dedicada a rate limit**, e a
+página de autenticação não menciona o assunto; o número vem da referência do
+Postman, cuja renderização é SPA e não abriu direto. É por isso que o lote é de
+**25 consultas por tique**: 25 créditos num minuto, com a emissão normal
+acontecendo ao lado, contra um teto de 100.
+
+#### A frequência: 5 minutos
+
+Duas âncoras, uma de cada lado:
+
+- **Por baixo:** uma reserva só é candidata depois de 400 s (~6,7 min). Um tique
+  de 1 minuto rodaria 5x mais para, no melhor caso, descobrir a mesma coisa 4
+  minutos antes; nos outros 4 tiques ele não acharia nada, porque não há nada
+  novo para achar.
+- **Por cima:** a latência de detecção no pior caso é `400 s + intervalo`. Com 5
+  minutos dá ~12 minutos entre a emissão morrer e a venda voltar a poder ser
+  emitida. Com 1 hora, seria uma venda sem nota por uma hora, com o operador
+  vendo "emissão em andamento" e sem nada a fazer — que é exatamente o problema
+  que A7 existe para resolver.
+
+Cabe nos limites dos dois lados: a Supabase recomenda no máximo 8 jobs
+concorrentes e jobs de até 10 minutos (este é 1 job de segundos).
+
+#### `fiscal_queue` é livro de tentativas, não uma segunda lista de trabalho
+
+A tabela **não** guarda "o que precisa ser processado" — isso já está em
+`fiscal_documents` (uma reserva presa é uma linha em `processando_autorizacao`),
+e duplicá-la criaria duas fontes da verdade sobre a mesma nota, que divergem no
+primeiro erro de escrita. O que ela guarda é o que `fiscal_documents` não tem
+como guardar: **quantas vezes a fila já tentou e quando pode tentar de novo**.
+
+A linha nasce na primeira tentativa que não resolveu o documento e é **apagada**
+quando ele sai de `processando_autorizacao`: a fila contém só o que ainda está
+sendo perseguido, e no caminho feliz ela está vazia. O histórico do que
+aconteceu não fica ali — fica em `fiscal_document_events`, com
+`request_payload.origem = 'fila'`, que é a tabela que uma auditoria fiscal lê.
+
+Sem `branch_id` próprio, herdando a filial pelo documento — mesmo padrão (e
+mesmo motivo) de `fiscal_document_items`; aqui não existe o caso da inutilização
+que obrigava `fiscal_document_events` a ter âncora própria. Uma policy só,
+`select`, pelo mesmo portão de Notas Emitidas, com `revoke`/`grant` explícitos
+por cima (A3, A1).
+
+#### A autenticação da varredura, e por que ela não podia ser a das outras três
+
+`emit`, `cancel` e `query` são atos de um operador: exigem JWT de usuário e
+passam por `has_permission` e `has_branch_access`, que decidem por `auth.uid()`.
+**A varredura não tem usuário** — e criar um "usuário de serviço" com permissão
+fiscal em todas as filiais recriaria exatamente a conta que A1 fechou.
+
+Então `sweep` se autentica por um segredo próprio, `FISCAL_QUEUE_SECRET`, no
+header `x-fiscal-queue-secret`, comparado em **tempo constante**. Ele não
+substitui o gateway: `verify_jwt = true` continua valendo (baixá-lo abriria as
+outras três ações junto), e o agendador manda a chave anônima no `Authorization`
+só para atravessá-lo — ela é pública e não autoriza nada. **Falha fechado**: sem
+a variável configurada, a varredura responde 503 e não roda.
+
+`created_by` vai **nulo** nos eventos que a fila escreve (a coluna é nulável de
+propósito desde A3 — o default `auth.uid()` já era nulo sob `service_role`), e
+quem identifica a origem é o campo novo `origem` de `persistQueryStatus` /
+`releaseStuckReservation`. Numa tabela que existe para auditoria fiscal, "mudou
+sozinho" e "mudou pela varredura das 03h" não podem ter o mesmo registro.
+
+#### A migration
+
+`pg_cron` **não estava instalado** (conferido: 1.6.4 disponível,
+`installed_version` nulo), e `pg_net` **também não** (0.20.4 disponível, nulo).
+`supabase_vault` 0.3.1 já estava, no schema `vault`.
+
+- `create extension if not exists pg_cron with schema pg_catalog` — a forma
+  documentada pela Supabase; a extensão cria por conta própria o schema `cron`
+  (`cron.job`, `cron.job_run_details`), seguido dos dois `grant` para `postgres`.
+- `create extension if not exists pg_net` — sem cláusula de schema, também a
+  forma documentada; ela cria o schema `net`. **Nenhuma das duas em `public`**, e
+  todo objeto delas é referenciado qualificado (`cron.schedule`,
+  `net.http_post`), para nada depender de `search_path`.
+- `fiscal_queue` + índice único por documento + índice por vencimento.
+- Um índice **parcial** novo em `fiscal_documents (updated_at) where status =
+  'processando_autorizacao'`, sem o qual a varredura seria seq scan a cada 5
+  minutos numa tabela que só cresce. Parcial porque reserva presa é exceção: no
+  caminho feliz o índice tem zero linha.
+- `public.fiscal_queue_tick()`, `security definer`, com `revoke` de
+  `public, anon, authenticated, service_role` e `grant execute` só para
+  `postgres`.
+- `select cron.schedule('fiscal-queue-tick', '*/5 * * * *', ...)`.
+
+**A migration não contém segredo nenhum e não cria nenhum.** Ela lê três
+segredos do Vault em tempo de execução (`fiscal_queue_project_url`,
+`fiscal_queue_anon_key`, `fiscal_queue_sweep_secret`), que o operador cria à mão
+antes de aplicar — os comandos estão na seção 5 do arquivo.
+
+**Por que o tique é uma função e não `net.http_post` solto dentro do
+`cron.schedule`:** ela falha macio e legível quando os segredos ainda não existem
+(um `raise warning`, em vez de o job estourar a cada 5 minutos e encher
+`cron.job_run_details` de ruído); a URL e os headers ficam num lugar só; e dá
+para validar à mão com `select public.fiscal_queue_tick();`, que é o único jeito
+de exercitar isto sem esperar cinco minutos.
+
+#### Ordem de aplicação (para quem for aplicar depois)
+
+1. criar os três segredos no Vault;
+2. `supabase secrets set FISCAL_QUEUE_SECRET=...` com o mesmo valor do terceiro;
+3. implantar `fiscal-emit` (a ação `sweep`);
+4. aplicar a migration.
+
+Fora de ordem nada quebra de forma perigosa — o tique falha e o erro fica em
+`cron.job_run_details`, e a função responde 503 enquanto o segredo não existir.
+
+#### Testes
+
+**444 testes passando** em 14 arquivos (eram 418 em 13). Os 26 novos estão em
+`tests/unit/fiscalQueueEligibility.test.ts`, e cobrem a única decisão que A7
+acrescenta: o limiar nos dois lados do corte, o backoff e seu teto, a diferença
+entre "falhou" e "o provedor pediu para esperar", o lote, e as duas datas
+ilegíveis — que **não** são simétricas (data de reserva corrompida ignora, porque
+sem ela o limiar não protege de nada; data de fila corrompida consulta, porque
+travar uma reserva órfã para sempre é o pior dos dois erros).
+
+A asserção que guarda a decisão de escopo varre o vocabulário inteiro de
+`FiscalStatus` e prova que **só `processando_autorizacao` entra na fila** — se
+alguém um dia afrouxar isso para reemitir `erro_autorizacao`, é ali que quebra
+primeiro.
+
+O que não cabe num teste sem rede é o agendamento em si: `pg_cron` não é
+exercitável no Vitest. A validação manual — conferir `cron.job`, forçar um tique
+com `select public.fiscal_queue_tick();`, ler `net._http_response` e
+`cron.job_run_details`, e olhar o estado de `fiscal_queue` — está escrita na
+**seção 7 da migration**.
+
+As 3 suítes que falham continuam sendo as mesmas de A5 e A6, pela mesma condição
+de ambiente pré-existente: `FACILITE_TEST_EMAIL` / `FACILITE_TEST_PASSWORD` e as
+credenciais de isolamento não estão em `.env.local`.
+
+`npm run build`, `npm run lint` (62 avisos pré-existentes, o mesmo número de A5 e
+A6, nenhum nos arquivos tocados) e `deno check
+supabase/functions/fiscal-emit/index.ts` limpos.
+
+#### O que o `/code-review alto` da própria A7 encontrou
+
+Três achados, os três no código novo, e os três corrigidos aqui:
+
+1. **O backoff nunca acertava o próprio tique.** O agendador dispara às
+   12:00:00, a linha é processada às 12:00:02 e a próxima tentativa ficava
+   marcada para 12:05:02 — dois segundos **depois** do tique das 12:05:00, que
+   portanto a pulava. Cada degrau da escada valia em silêncio um tique a mais
+   (5 min viravam 10, 15 viravam 20), e a escada documentada aqui, no
+   `queue.ts` e na migration descrevia um comportamento que o código não tinha.
+   Corrigido com `TOLERANCIA_AGENDAMENTO_MS` (30 s) — maior que o atraso que um
+   tique acumula, muito menor que o menor degrau —, com dois testes: um prova
+   que a tentativa marcada logo depois do tique é aceita, o outro que a folga
+   não engole um degrau inteiro.
+2. **`readQueueEntries` podia estourar o tamanho da URL exatamente na hora
+   errada.** O `in.(...)` do PostgREST viaja na query string, e a janela inteira
+   (200 UUIDs × 37 caracteres) daria ~7,4 KB — encostado no limite de linha de
+   requisição do gateway. O modo de falha é o pior possível: a leitura só
+   quebraria com **muita** reserva presa, isto é, precisamente quando a
+   varredura precisa funcionar, e o tique inteiro voltaria 500 a cada 5 minutos.
+   Agora ela lê em blocos de 50 (~1,9 KB), e a conta deixa de depender do
+   tamanho da janela.
+3. **O timeout do `pg_net` era apertado contra o lote.** 60 s para até 25
+   consultas sequenciais dá 2,4 s por linha; um provedor real gasta mais que
+   isso, e o timeout encerra a requisição — podendo levar o isolate junto
+   (`EarlyDrop`) com a cauda do lote por processar. Uma cauda perdida não
+   corrompe nada (as escritas de cada linha são independentes, e a linha volta
+   no tique seguinte), mas aparece como timeout em `net._http_response` em vez
+   do resumo, escondendo o que a varredura fez. Agora são 180 s (~7 s por
+   linha), bem abaixo dos 400 s de relógio da própria Edge Function, que
+   continua sendo o teto de verdade.
+
+#### Fronteira com A10 e A12
+
+- **A10 (numeração fiscal atômica)** — intocada, e virou **argumento** desta
+  tarefa: enquanto `readLastNumero` for um máximo lido sem trava, nenhuma
+  reemissão automática é segura. É a razão nº 3 de `erro_autorizacao` ter ficado
+  de fora.
+- **A12 (integração com a Focus)** — nada específico do provedor entrou. Quando a
+  emissão nascer assíncrona, o limiar deixa de significar "isto está órfão" e
+  passa a significar "já é hora da primeira pergunta"; o caminho `aguardando` da
+  fila, hoje inalcançável, é o que vai sustentar isso, e o mecanismo (perguntar
+  antes de decidir) vale nos dois mundos.

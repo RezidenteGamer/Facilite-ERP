@@ -18,7 +18,7 @@
  * e só então chama o provedor e persiste. Do cliente vem apenas *o que* emitir
  * (qual venda, qual devolução, qual modelo) — nunca *com que valores*.
  *
- * ## Escopo: `emit`, `cancel`, `query`
+ * ## Escopo: `emit`, `cancel`, `query` — e, desde A7, `sweep`
  *
  * São as operações que o produto exerce hoje. Os outros quatro métodos do
  * contrato (`correctionLetter`, `invalidateRange`, `getXml`, `getDanfe`) existem
@@ -62,14 +62,26 @@
  * configuração ausente (`FiscalNotConfiguredError`), que é o que o front já
  * traduz em mensagem na tela.
  *
- * ## Quatro arquivos, e não um
+ * ## E a resolução deixa de depender de alguém clicar (A7, 09/09/2026)
+ *
+ * A6 deu saída à reserva órfã, mas só quando um operador abre Notas Emitidas e
+ * clica. Uma venda emitida às 18h de sexta ficaria presa até segunda, e o
+ * operador nem tem como saber que precisa clicar — a tela diz "em andamento".
+ * A ação `sweep` é o mesmo caminho de A6 chamado por um `cron.schedule`, a cada
+ * 5 minutos, sobre as reservas mais velhas que o limite de relógio da
+ * plataforma. **Ela não emite nem reemite nada**: o que entra na fila, e por que
+ * `erro_autorizacao` ficou de fora, está em `queue.ts`.
+ *
+ * ## Cinco arquivos, e não um
  *
  * `admin-users` cabe em um arquivo; esta não caberia. `data.ts` é a leitura (o
- * ponto de A1), `persist.ts` é a escrita nas três tabelas de A3, `reservation.ts`
- * é a tabela de estados da emissão (A5) — sem I/O, para caber num teste de
- * unidade —, e este arquivo é a borda HTTP: CORS, autenticação, permissão e
- * despacho. A fronteira entre "o que eu li do banco" e "o que eu gravo" é
- * justamente o que precisa ficar legível numa revisão de segurança.
+ * ponto de A1), `persist.ts` é a escrita nas quatro tabelas (as três de A3 mais
+ * `fiscal_queue`, de A7), `reservation.ts` é a tabela de estados da emissão
+ * (A5/A6) e `queue.ts` é a regra de quando perguntar sem humano presente (A7)
+ * — os dois últimos sem I/O, para caberem num teste de unidade —, e este arquivo
+ * é a borda HTTP: CORS, autenticação, permissão e despacho. A fronteira entre "o
+ * que eu li do banco" e "o que eu gravo" é justamente o que precisa ficar
+ * legível numa revisão de segurança.
  *
  * ## Depende da migration de A3
  *
@@ -112,23 +124,37 @@ import {
   readTaxRules,
 } from "./data.ts";
 import {
+  clearQueueEntry,
   persistCancel,
   persistEmission,
   persistQueryStatus,
   readDocumentByRef,
   readLastNumero,
+  readQueueEntries,
+  readStuckReservations,
   releaseEmission,
   releaseStuckReservation,
   reserveEmission,
+  saveQueueEntry,
   type FiscalAmbiente,
   type FiscalDocumentOrigin,
   type FiscalDocumentRow,
+  type OrigemReconciliacao,
+  type StuckReservationRow,
 } from "./persist.ts";
+import {
+  JANELA_CANDIDATOS,
+  agendarAposAguardar,
+  agendarAposFalha,
+  corteDeIdade,
+  selecionaLote,
+} from "./queue.ts";
 import {
   RESERVA_STATUS,
   decideAposPerderCorrida,
   decideConsulta,
   decideEmissao,
+  type ConsultaDecisao,
 } from "./reservation.ts";
 
 const CORS_HEADERS = {
@@ -264,10 +290,20 @@ function seedFromRow(row: FiscalDocumentRow): SimulatedFiscalProviderSeed["docum
 /* As três ações                                                             */
 /* ------------------------------------------------------------------------ */
 
-type Context = {
+/**
+ * O que basta para falar com o provedor e reconciliar uma linha.
+ *
+ * Separado de `Context` porque a varredura de A7 **não tem usuário nem filial**:
+ * ela roda sem sessão, por cima de todas as filiais, e um `branchId` inventado
+ * ali seria pior que a ausência dele.
+ */
+type ProviderContext = {
   admin: SupabaseClient;
   providerId: FiscalProviderId;
   ambiente: FiscalAmbiente;
+};
+
+type Context = ProviderContext & {
   branchId: string;
   userId: string;
 };
@@ -472,8 +508,53 @@ async function handleQuery(ctx: Context, origin: FiscalDocumentOrigin): Promise<
     return outcome(["A nota não pertence à filial informada."]);
   }
 
+  const { decisao, aplicado } = await reconciliaComProvedor(ctx, existing, origem, {
+    createdBy: ctx.userId,
+    origemEscrita: "consulta",
+  });
+
+  if (decisao.kind === "liberar" && !aplicado) {
+    // A emissão original não estava morta, só lenta: ela saiu de
+    // `processando_autorizacao` entre a consulta ao provedor e a escrita, e
+    // o desfecho dela é o que vale. Qual desfecho, porém, muda a resposta —
+    // dizer "concluída" para os três seria mentira em dois deles. Relê a linha
+    // e reaproveita a mesma tabela de `handleEmit`, que já sabe traduzir cada
+    // estado (inclusive a linha que sumiu porque `releaseEmission` a apagou
+    // depois de o `emit()` falhar por transporte).
+    const atual = await readDocumentByRef(ctx.admin, ref);
+    const resposta = decideAposPerderCorrida(atual, existing.model, origem);
+    return outcome(resposta.errors, resposta.extra);
+  }
+
+  // `manter`: nada é escrito. É o caso da consulta que só confirma o que já
+  // sabíamos, e o das duas divergências que não podem virar escrita — o
+  // provedor que não conhece uma nota autorizada, e o que contradiz um
+  // cancelamento nosso.
+  return outcome(decisao.errors, decisao.extra);
+}
+
+/**
+ * **Consulta o provedor pela `ref` e aplica `decideConsulta`** — o núcleo que
+ * A6 escreveu, agora com dois chamadores.
+ *
+ * Extraído em A7 (09/09/2026) exatamente para que a varredura agendada **não
+ * reimplemente decisão nenhuma**: ela chama isto, com `createdBy: null` e
+ * `origemEscrita: "fila"`, e o que decide continua sendo a tabela de
+ * `reservation.ts`. Fora daqui, a diferença entre o operador e a fila é só quem
+ * assina o evento.
+ *
+ * `aplicado` é `false` num caso só: `liberar` cujo compare-and-swap não casou —
+ * a linha saiu de `processando_autorizacao` entre a consulta e a escrita. Cada
+ * chamador decide o que fazer com isso; nenhum deve tratá-lo como erro.
+ */
+async function reconciliaComProvedor(
+  ctx: ProviderContext,
+  existing: FiscalDocumentRow,
+  origem: string,
+  autor: { createdBy: string | null; origemEscrita: OrigemReconciliacao },
+): Promise<{ decisao: ConsultaDecisao; aplicado: boolean }> {
   const provider = createProvider(ctx, { documents: seedFromRow(existing) });
-  const document = await provider.query(ref);
+  const document = await provider.query(existing.ref);
 
   const decisao = decideConsulta(existing, document, origem);
 
@@ -484,9 +565,10 @@ async function handleQuery(ctx: Context, origin: FiscalDocumentOrigin): Promise<
       ambiente: ctx.ambiente,
       document,
       previousStatus: existing.status,
-      createdBy: ctx.userId,
+      createdBy: autor.createdBy,
+      origem: autor.origemEscrita,
     });
-    return outcome(decisao.errors, decisao.extra);
+    return { decisao, aplicado: true };
   }
 
   if (decisao.kind === "liberar") {
@@ -495,33 +577,190 @@ async function handleQuery(ctx: Context, origin: FiscalDocumentOrigin): Promise<
       branchId: existing.branch_id,
       ambiente: ctx.ambiente,
       mensagem: decisao.mensagemSefaz,
-      createdBy: ctx.userId,
+      createdBy: autor.createdBy,
+      origem: autor.origemEscrita,
     });
-    if (!liberou) {
-      // A emissão original não estava morta, só lenta: ela saiu de
-      // `processando_autorizacao` entre a consulta ao provedor e esta escrita, e
-      // o desfecho dela é o que vale. Qual desfecho, porém, muda a resposta —
-      // dizer "concluída" para os três seria mentira em dois deles. Relê a linha
-      // e reaproveita a mesma tabela de `handleEmit`, que já sabe traduzir cada
-      // estado (inclusive a linha que sumiu porque `releaseEmission` a apagou
-      // depois de o `emit()` falhar por transporte).
-      const atual = await readDocumentByRef(ctx.admin, ref);
-      const resposta = decideAposPerderCorrida(atual, existing.model, origem);
-      return outcome(resposta.errors, resposta.extra);
-    }
-    return outcome(decisao.errors, decisao.extra);
+    return { decisao, aplicado: liberou };
   }
 
-  // `manter`: nada é escrito. É o caso da consulta que só confirma o que já
-  // sabíamos, e o das duas divergências que não podem virar escrita — o
-  // provedor que não conhece uma nota autorizada, e o que contradiz um
-  // cancelamento nosso.
-  return outcome(decisao.errors, decisao.extra);
+  return { decisao, aplicado: true };
 }
 
-function createProvider(ctx: Context, seed: SimulatedFiscalProviderSeed): FiscalProvider {
+function createProvider(
+  ctx: Pick<ProviderContext, "providerId">,
+  seed: SimulatedFiscalProviderSeed,
+): FiscalProvider {
   return createFiscalProvider(ctx.providerId, { simulatedSeed: seed });
 }
+
+/* ------------------------------------------------------------------------ */
+/* A varredura agendada (A7, 09/09/2026)                                     */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * **O tique da fila: resolver, sem humano presente, as reservas que ficaram
+ * órfãs.**
+ *
+ * É a quarta ação da função, e a única que não vem de uma tela. Quem a chama é
+ * o `cron.schedule` da migration de A7, a cada 5 minutos, via `net.http_post`.
+ *
+ * **Ela não decide nada de novo.** Para cada linha presa ela faz o mesmo que o
+ * botão "Consultar status" de A6 faz — `reconciliaComProvedor`, ou seja
+ * `provider.query(ref)` passado por `decideConsulta`. O que A7 acrescenta é
+ * *quando* perguntar (`decideElegibilidade`, em `queue.ts`) e o que fazer quando
+ * a própria pergunta falha (o backoff em `fiscal_queue`).
+ *
+ * ## O que ela deliberadamente não faz
+ *
+ * **Não emite nem reemite nota nenhuma.** Nenhuma linha em `erro_autorizacao`
+ * volta para o provedor por conta desta varredura, e nenhuma venda sem nota vira
+ * emissão automática. O porquê de cada uma dessas duas exclusões está no
+ * cabeçalho de `queue.ts` e na entrada de A7 no AGENTS.md. O caminho síncrono do
+ * clique — "Emitir Nota" e o checkbox da finalização da venda — ficou exatamente
+ * como estava.
+ *
+ * ## Uma falha não derruba o lote
+ *
+ * Cada linha é tentada dentro do seu próprio `try`. Uma reserva cujo provedor
+ * está fora do ar não pode impedir que as outras 24 do lote sejam resolvidas —
+ * é o modo de falha mais provável de todos, porque "o provedor está fora" é
+ * justamente o que produz reserva órfã em série.
+ */
+async function handleSweep(ctx: ProviderContext): Promise<Response> {
+  const agora = new Date();
+
+  const candidatos = await readStuckReservations(
+    ctx.admin,
+    corteDeIdade(agora),
+    JANELA_CANDIDATOS,
+  );
+  const fila = await readQueueEntries(
+    ctx.admin,
+    candidatos.map((row) => row.id),
+  );
+
+  const lote = selecionaLote(
+    candidatos,
+    (row: StuckReservationRow) => {
+      const entrada = fila.get(row.id);
+      return {
+        status: row.status,
+        reservadaEm: row.updated_at,
+        fila: entrada
+          ? { tentativas: entrada.tentativas, proximaTentativaEm: entrada.proxima_tentativa_em }
+          : null,
+      };
+    },
+    agora,
+  );
+
+  const resumo = {
+    candidatos: candidatos.length,
+    tentados: lote.length,
+    gravados: 0,
+    liberados: 0,
+    aguardando: 0,
+    resolvidosPorOutro: 0,
+    falhas: 0,
+  };
+
+  for (const row of lote) {
+    const origem = row.sale_return_id ? "devolução" : "venda";
+    try {
+      const { decisao, aplicado } = await reconciliaComProvedor(ctx, row, origem, {
+        createdBy: null,
+        origemEscrita: "fila",
+      });
+
+      if (decisao.kind === "manter") {
+        // Sobre uma linha reservada, `manter` só tem um significado possível: o
+        // provedor respondeu `processando_autorizacao`, ou seja, a emissão está
+        // viva do lado dele (o caso normal de A12). Os outros dois `manter` de
+        // `decideConsulta` exigem que o banco diga `autorizado` ou `cancelado`,
+        // e uma linha assim não chega até aqui. Não é falha: o provedor falou
+        // com a gente, e o contador de tentativas zera.
+        await saveQueueEntry(ctx.admin, {
+          fiscalDocumentId: row.id,
+          ...agendarAposAguardar(new Date()),
+          ultimoErro: null,
+        });
+        resumo.aguardando += 1;
+        continue;
+      }
+
+      // `gravar` e `liberar` tiram a linha de `processando_autorizacao`; o
+      // `liberar` que não aplicou significa que outra requisição a tirou
+      // primeiro. Nos três casos não há mais o que perseguir.
+      await clearQueueEntry(ctx.admin, row.id);
+      if (decisao.kind === "gravar") resumo.gravados += 1;
+      else if (aplicado) resumo.liberados += 1;
+      else resumo.resolvidosPorOutro += 1;
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : String(err);
+      await saveQueueEntry(ctx.admin, {
+        fiscalDocumentId: row.id,
+        ...agendarAposFalha(fila.get(row.id)?.tentativas ?? 0, new Date()),
+        ultimoErro: message,
+      });
+      resumo.falhas += 1;
+      console.error("[fiscal-emit] fila: falha ao resolver a reserva", row.ref, message);
+    }
+  }
+
+  console.log("[fiscal-emit] fila", JSON.stringify(resumo));
+  return jsonResponse({ ok: true, ...resumo });
+}
+
+/**
+ * A autenticação da varredura, que não pode ser a das outras três ações.
+ *
+ * `emit`, `cancel` e `query` são atos de um operador: elas exigem um JWT de
+ * usuário e passam por `has_permission` e `has_branch_access`, que decidem por
+ * `auth.uid()`. A varredura não tem usuário nenhum — e inventar um "usuário de
+ * serviço" com permissão fiscal em todas as filiais criaria justamente a conta
+ * que A1 fechou.
+ *
+ * Então ela se autentica por um **segredo próprio**, `FISCAL_QUEUE_SECRET`, no
+ * header `x-fiscal-queue-secret`. Ele não substitui o portão do gateway
+ * (`verify_jwt = true` continua valendo, e o `cron.schedule` manda a chave
+ * anônima no `Authorization` para passar por ele) — ele é o que separa "qualquer
+ * um com a chave pública" de "o agendador".
+ *
+ * **Falha fechado**: sem a variável configurada, a varredura não roda. Uma
+ * função implantada antes de o segredo existir responde 503 e o agendador
+ * registra o erro em `cron.job_run_details`, em vez de rodar sem porteiro.
+ */
+function recusaVarredura(req: Request): Response | null {
+  const esperado = Deno.env.get("FISCAL_QUEUE_SECRET")?.trim();
+  if (!esperado) {
+    return jsonResponse(
+      { error: "A varredura da fila fiscal não está configurada (FISCAL_QUEUE_SECRET ausente)." },
+      503,
+    );
+  }
+  if (!segredosIguais(req.headers.get("x-fiscal-queue-secret") ?? "", esperado)) {
+    return jsonResponse({ error: "Não autorizado." }, 401);
+  }
+  return null;
+}
+
+/**
+ * Comparação de tempo constante.
+ *
+ * `a === b` sai no primeiro byte diferente, e a diferença de tempo entre "errou
+ * no primeiro caractere" e "errou no último" é mensurável. Custa cinco linhas
+ * fechar isso, e é a única defesa que um segredo estático tem contra quem pode
+ * chamar o endpoint à vontade.
+ */
+function segredosIguais(recebido: string, esperado: string): boolean {
+  const a = new TextEncoder().encode(recebido);
+  const b = new TextEncoder().encode(esperado);
+  if (a.length !== b.length) return false;
+  let diferenca = 0;
+  for (let i = 0; i < a.length; i += 1) diferenca |= a[i] ^ b[i];
+  return diferenca === 0;
+}
+
 
 /* ------------------------------------------------------------------------ */
 /* Borda HTTP                                                                */
@@ -547,6 +786,27 @@ Deno.serve(async (req: Request) => {
   }
 
   const action = payload.action;
+
+  // **A varredura sai antes de tudo**, e de propósito: ela não tem `branchId`,
+  // não tem venda, não tem usuário, e a validação abaixo recusaria as três
+  // ausências. Ver `recusaVarredura` para por que a autenticação dela é outra.
+  if (action === "sweep") {
+    const recusa = recusaVarredura(req);
+    if (recusa) return recusa;
+
+    const admin = createClient(supabaseUrl, serviceRoleKey);
+    const providerId = resolveFiscalProviderId(Deno.env.get("FISCAL_PROVIDER"), (message) =>
+      console.warn(message),
+    );
+    try {
+      return await handleSweep({ admin, providerId, ambiente: resolveAmbiente(providerId) });
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : String(err);
+      console.error("[fiscal-emit] sweep", message);
+      return jsonResponse({ error: message }, 500);
+    }
+  }
+
   if (action !== "emit" && action !== "cancel" && action !== "query") {
     return jsonResponse({ error: "Ação desconhecida." }, 400);
   }
