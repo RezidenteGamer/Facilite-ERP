@@ -72,6 +72,18 @@
  * plataforma. **Ela não emite nem reemite nada**: o que entra na fila, e por que
  * `erro_autorizacao` ficou de fora, está em `queue.ts`.
  *
+ * ## E a numeração deixa de ser um máximo lido sem trava (A10, 09/09/2026)
+ *
+ * A5 travou a **identidade** da emissão (a `ref`, uma nota por venda). Faltava a
+ * **sequência**: `handleEmit` lia `readLastNumero` — um `select max()` sem trava
+ * — e semeava com ele uma instância nova do provedor simulado a cada
+ * requisição, então duas emissões concorrentes de **vendas diferentes** na mesma
+ * filial saíam com o mesmo número. A10 troca isso por uma alocação atômica no
+ * Postgres (`fiscal_numbering_next`, chamada por `alocarNumeroFiscal`): o
+ * provedor recebe o número **pronto** em vez de calculá-lo. Os dois mecanismos
+ * continuam separados de propósito — são dois problemas de concorrência
+ * diferentes.
+ *
  * ## Cinco arquivos, e não um
  *
  * `admin-users` cabe em um arquivo; esta não caberia. `data.ts` é a leitura (o
@@ -103,6 +115,7 @@ import { validarPayloadFiscal } from "../_shared/fiscal/payloadValidation.ts";
 import { FiscalNotConfiguredError } from "../_shared/fiscal/provider.ts";
 import { saleFiscalRef, saleReturnFiscalRef } from "../_shared/fiscal/refs.ts";
 import { resolveFiscalProviderId } from "../_shared/fiscal/registry.ts";
+import { SERIE_SIMULADA } from "../_shared/fiscal/simulatedFiscalProvider.ts";
 import type { FiscalDocument, FiscalModel, NfePayload } from "../_shared/fiscal/types.ts";
 
 import { decideAcessoPorSegredo } from "../_shared/http/sharedSecret.ts";
@@ -116,11 +129,11 @@ import {
   readTaxRules,
 } from "./data.ts";
 import {
+  alocarNumeroFiscal,
   clearQueueEntry,
   persistCancel,
   persistEmission,
   readDocumentByRef,
-  readLastNumero,
   readQueueEntries,
   readStuckReservations,
   releaseEmission,
@@ -320,21 +333,46 @@ async function handleEmit(ctx: Context, origin: FiscalDocumentOrigin, model: Fis
 
   let document: FiscalDocument;
   try {
-    // A numeração só precisa ser restaurada para o provedor simulado — o real
-    // numera do lado dele. Consultar o banco para os dois seria uma leitura a
-    // mais por emissão, em troca de nada.
-    const lastNumbers =
+    // **A numeração é alocada aqui, e só para o provedor simulado** — o real
+    // numera do lado dele (o `NfePayload` não tem campo `numero` nenhum: quem
+    // numera é sempre quem emite). Alocar para os dois gastaria um número de
+    // uma sequência que ninguém usa.
+    //
+    // Até A10 esta linha era `readLastNumero` — um `select max()` sem trava que
+    // duas emissões concorrentes liam igual, saindo com o mesmo número. Agora é
+    // um incremento atômico no Postgres (`fiscal_numbering_next`), e o provedor
+    // recebe o número **pronto** em vez de calculá-lo.
+    //
+    // **Depois da reserva, de propósito**: quem perde a corrida da `ref` não
+    // chega aqui e não queima número. E antes de `provider.emit()`, porque é o
+    // número que vai para a chave de acesso. Se a emissão falhar depois desta
+    // chamada, o número fica queimado — ver `alocarNumeroFiscal`.
+    //
+    // A alocação e a entrega ao provedor são montadas a partir do **mesmo**
+    // objeto de propósito: repetir `cnpj` e `serie` nos dois lugares deixaria os
+    // dois poderem divergir numa edição futura, e a divergência é silenciosa —
+    // o provedor ignora uma alocação cuja série não é a dele e emite pelo
+    // contador local, com um número que o banco nunca reservou.
+    const chaveDeNumeracao = {
+      cnpj: built.payload.cnpj_emitente,
+      model,
+      // A mesma constante que o provedor usa para emitir.
+      serie: SERIE_SIMULADA,
+    };
+    const numeros =
       ctx.providerId === "simulado"
         ? [
             {
-              cnpj: built.payload.cnpj_emitente,
-              model,
-              ultimoNumero: await readLastNumero(ctx.admin, ctx.branchId, model),
+              ...chaveDeNumeracao,
+              numero: await alocarNumeroFiscal(ctx.admin, {
+                ...chaveDeNumeracao,
+                ambiente: ctx.ambiente,
+              }),
             },
           ]
         : undefined;
 
-    const provider = createProvider(ctx, { lastNumbers });
+    const provider = createProvider(ctx, { numeros });
     document = await provider.emit({ ref, model, payload: built.payload });
 
     await persistEmission(ctx.admin, {

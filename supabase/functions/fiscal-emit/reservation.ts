@@ -22,8 +22,10 @@
  *   requisição (`createProvider`), então o `Map` de `documents` que faz a
  *   idempotência por `ref` dentro de `emit()` nasce vazio nas duas — a proteção
  *   não vale entre requisições concorrentes nem dentro do mesmo isolate. As
- *   duas emitem: mesmo `numero` (as duas leram o mesmo `readLastNumero`) e
- *   **chaves de acesso diferentes**, porque o `cNF` da chave é sorteado.
+ *   duas emitem: mesmo `numero` (as duas leram o mesmo `readLastNumero`, que
+ *   era um `max()` sem trava — a corrida de numeração que A10 fechou depois,
+ *   em 09/09/2026) e **chaves de acesso diferentes**, porque o `cNF` da chave
+ *   é sorteado.
  * - **Em `persistEmission`**, o `upsert(..., { onConflict: "ref" })` não falha
  *   com violação de unicidade: ele **sobrescreve**. A segunda escrita apaga a
  *   chave da primeira. Se a primeira já tinha sido autorizada de verdade, a
@@ -289,10 +291,11 @@ export function isViolacaoDeUnicidade(error: unknown): boolean {
  * Os limites são 400s de relógio (150s no plano gratuito), 2s de CPU e 256MB de
  * memória por worker. Os dois últimos são alcançáveis por este código: além do
  * `buildPayload`, a emissão lê `ibpt_rates` e `mva_rules` **inteiras** (sem
- * `limit`, sem filtro — ver `data.ts`) e a coluna `numero` inteira da filial
- * (`readLastNumero`), e o provedor simulado ainda monta XML e DANFE em string.
- * `TerminationRequested` não depende de volume nenhum: basta implantar
- * `fiscal-emit` enquanto uma emissão está em voo.
+ * `limit`, sem filtro — ver `data.ts`), e o provedor simulado ainda monta XML e
+ * DANFE em string. (Havia um terceiro: a leitura da coluna `numero` inteira da
+ * filial, `readLastNumero` — ela saiu em A10, substituída por um RPC que devolve
+ * um inteiro.) `TerminationRequested` não depende de volume nenhum: basta
+ * implantar `fiscal-emit` enquanto uma emissão está em voo.
  *
  * ## A regra: nunca liberar sem perguntar ao provedor
  *

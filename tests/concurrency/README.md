@@ -1,13 +1,20 @@
 # Baterias de concorrência
 
-Duas baterias, o mesmo princípio: o que está sendo testado é a trava do banco,
-não uma simulação dela — por isso as duas rodam contra o Supabase real, como
+Três baterias, o mesmo princípio: o que está sendo testado é a trava do banco,
+não uma simulação dela — por isso as três rodam contra o Supabase real, como
 `tests/isolation`.
 
 - **`stockConcurrency.test.ts`** (C4) — a baixa de estoque.
-- **`fiscalEmitConcurrency.test.ts`** (A5) — a emissão fiscal.
+- **`fiscalEmitConcurrency.test.ts`** (A5) — a emissão fiscal (a `ref`).
+- **`fiscalNumberingConcurrency.test.ts`** (A10) — a numeração fiscal.
 
-As duas precisam da conta de teste em `.env.local`:
+As duas fiscais medem corridas **diferentes**, e é por isso que são duas: A5
+disputa a **identidade** da emissão (duas requisições, a mesma venda, e só uma
+nota pode existir); A10 disputa a **sequência** do número (três requisições, três
+vendas, e todas passam — cada uma com o seu número). Uma reserva por `ref` não
+faz nada pela segunda, e um contador atômico não faz nada pela primeira.
+
+As três precisam da conta de teste em `.env.local`:
 
 ```
 FACILITE_TEST_EMAIL=...
@@ -156,5 +163,82 @@ tem valor fiscal. **Não rodar esta bateria contra um Supabase com
 
 Menor que o de C4. Cada execução cria a própria venda, e a corrida medida é
 entre as duas emissões *daquela* venda — duas execuções paralelas não disputam
-a mesma `ref`. O que elas disputam é a numeração (`readLastNumero`), que não é
-atômica e é assunto de A10; isso não afeta nenhuma asserção desta bateria.
+a mesma `ref`. O que elas disputam é a numeração, que desde A10 (09/09/2026) é
+atômica; isso não afeta nenhuma asserção desta bateria, que não olha o número.
+
+---
+
+## Numeração fiscal (A10)
+
+Cria **três vendas diferentes** na mesma filial, dispara as três emissões
+simultaneamente e afirma que as notas saem com números **distintos e
+sequenciais** a partir do maior número já gravado.
+
+Antes de A10, `handleEmit` lia `readLastNumero` — um `select max()` na coluna
+`numero`, sem trava nenhuma — e semeava com esse máximo uma instância nova do
+provedor simulado por requisição. As três liam o mesmo máximo, cada uma somava 1
+dentro do próprio processo, e as três gravavam **o mesmo número**. A reserva de
+A5 não impedia nada: cada venda tem `ref` própria, e a reserva protege a
+identidade da emissão, não a sequência. A correção é
+`public.fiscal_numbering_next` (migration
+`00000000000013_a10_numeracao_fiscal_atomica.sql`), um
+`insert ... on conflict do update ... returning` que o Postgres serializa
+sozinho na linha da sequência.
+
+### Ela exige a migration aplicada **e** a função implantada
+
+Dois pré-requisitos, e a bateria falha de formas diferentes em cada um:
+
+- **Sem a migration**, `fiscal_numbering_next` não existe e a emissão volta com
+  erro do RPC — a mensagem da asserção diz isso com todas as letras.
+- **Com a migration e sem o deploy**, a função implantada ainda chama
+  `readLastNumero`: as três notas saem com o **mesmo número**, e a bateria
+  reprova. Essa falha é a prova da corrida, e não deve ser silenciada.
+
+### Preparo
+
+O mesmo de A5 (permissões de Produtos, Realizar venda e Notas emitidas; filial
+com CNPJ, IE, UF e endereço; ao menos uma linha em `tax_groups`). O produto de
+teste é próprio (`TESTE-CONCORRENCIA-NUMERACAO-…`), criado uma vez e
+reaproveitado.
+
+### Rastro que ela deixa no banco
+
+Três vezes o de A5 por execução: **três vendas de verdade** (com
+`financial_entries` que o gatilho de C3 impede de apagar) e **três notas
+simuladas** em `fiscal_documents`/`_items`/`_events`. E, ao contrário das outras
+duas baterias, ela **consome numeração fiscal**: cada execução avança
+`fiscal_numbering.ultimo_numero` em 3, e esses números não voltam — é o
+comportamento certo (número queimado se resolve por inutilização de faixa, não
+reciclando), mas vale saber antes de rodá-la em laço.
+
+Como toda nota simulada é sempre `ambiente = 'homologacao'`, nada disso tem
+valor fiscal. **Não rodar contra um Supabase com `FISCAL_PROVIDER=focus-nfe` em
+produção.**
+
+### O que ela afirma, e o que deliberadamente não afirma
+
+Três asserções, nesta ordem de importância:
+
+1. **Distintos** — o coração. Antes de A10 as três notas saíam com o mesmo
+   número, e este conjunto teria tamanho 1.
+2. **Acima do que já está gravado** — é o que prova que a semente da migration
+   fez o contador nascer sabendo o maior número já emitido, em vez de começar do
+   zero e colidir.
+3. **Consecutivos entre si** (`max - min == 2`) — o "sequenciais".
+
+Ela **não** afirma que os números são exatamente `base+1 … base+3`, e a ausência
+é decisão: um número alocado numa emissão que falhou fica **queimado** (o
+comportamento correto — buraco de numeração se resolve por inutilização de
+faixa, não reciclando), então o contador se afasta do maior número gravado de
+forma permanente. Uma faixa exata passaria a reprovar, para sempre, uma
+numeração que está certa.
+
+### Risco aceito: duas execuções ao mesmo tempo
+
+Maior que o de A5, e aqui ele **pode afetar a terceira asserção**: se outra
+emissão da mesma filial e modelo (outra execução desta bateria, ou alguém usando
+o sistema) cair no meio, os números continuam distintos — a trava está
+funcionando — mas se intercalam e deixam de ser consecutivos. A mensagem da
+asserção diz isso. Não vale resolver com lock distribuído só para o teste: se
+aparecer, rodar de novo sozinho.

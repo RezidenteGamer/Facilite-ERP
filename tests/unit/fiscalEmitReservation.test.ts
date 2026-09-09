@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createSimulatedFiscalProvider } from "@fiscal-core/simulatedFiscalProvider.ts";
+import {
+  SERIE_SIMULADA,
+  createSimulatedFiscalProvider,
+} from "@fiscal-core/simulatedFiscalProvider.ts";
 import type { NfePayload } from "@fiscal-core/types.ts";
 
 import {
@@ -75,37 +78,44 @@ function payload(): NfePayload {
 }
 
 /**
- * Uma instância do simulado como `handleEmit` a constrói: nova a cada
- * requisição (`createProvider`), com a numeração restaurada do banco
- * (`readLastNumero`) e nada mais.
+ * Uma instância do simulado como `handleEmit` a construía **antes de A5**: nova
+ * a cada requisição (`createProvider`), com a numeração vinda do banco e nada
+ * mais.
+ *
+ * O `numero` é passado **igual nas duas** de propósito: era exatamente o que
+ * `readLastNumero` produzia até A10 (09/09/2026) — um `select max()` sem trava,
+ * lido igual pelas duas requisições concorrentes. Depois de A10 a borda aloca o
+ * número atomicamente (`fiscal_numbering_next`) e nunca entrega o mesmo a duas
+ * emissões; aqui ele é fixado à mão para reproduzir o mundo que A5 tinha de
+ * consertar, que é o que este bloco existe para demonstrar.
  *
  * O `randomInt` é injetado com valores diferentes nas duas instâncias porque é
  * assim que dois processos independentes se comportam — o sorteio do `cNF` e do
  * protocolo não é coordenado entre eles. Injetar deixa o teste determinístico
  * em vez de depender de duas chamadas a `Math.random` não colidirem.
  */
-function provedorDeUmaRequisicao(ultimoNumero: number, semente: number) {
+function provedorDeUmaRequisicao(numero: number, semente: number) {
   return createSimulatedFiscalProvider({
     now: () => new Date("2026-09-07T12:00:00-03:00"),
     randomInt: (max) => semente % max,
-    seed: { lastNumbers: [{ cnpj: CNPJ, model: "nfe", ultimoNumero }] },
+    seed: { numeros: [{ cnpj: CNPJ, model: "nfe", serie: SERIE_SIMULADA, numero }] },
   });
 }
 
 describe("a corrida de emissão que A5 fecha", () => {
   it("duas requisições concorrentes emitem duas notas diferentes para a mesma ref", async () => {
     // As duas leram o banco antes de qualquer uma escrever: mesma `ref`, mesma
-    // ausência de nota, mesmo `readLastNumero`.
+    // ausência de nota, mesmo número (o `readLastNumero` de então).
     const ref = "venda-11111111-1111-1111-1111-111111111111";
-    const ultimoNumeroLidoPelasDuas = 41;
+    const numeroQueAsDuasRecebiam = 42;
 
     const [primeira, segunda] = await Promise.all([
-      provedorDeUmaRequisicao(ultimoNumeroLidoPelasDuas, 12_345_678).emit({
+      provedorDeUmaRequisicao(numeroQueAsDuasRecebiam, 12_345_678).emit({
         ref,
         model: "nfe",
         payload: payload(),
       }),
-      provedorDeUmaRequisicao(ultimoNumeroLidoPelasDuas, 87_654_321).emit({
+      provedorDeUmaRequisicao(numeroQueAsDuasRecebiam, 87_654_321).emit({
         ref,
         model: "nfe",
         payload: payload(),
@@ -117,9 +127,9 @@ describe("a corrida de emissão que A5 fecha", () => {
     expect(primeira.status).toBe("autorizado");
     expect(segunda.status).toBe("autorizado");
 
-    // Mesmo número (as duas continuaram de 41) e chaves diferentes: são duas
-    // notas distintas para a mesma venda. O `upsert` por `ref` de
-    // `persistEmission` guarda só uma das duas — a última a gravar.
+    // Mesmo número e chaves diferentes: são duas notas distintas para a mesma
+    // venda. O `upsert` por `ref` de `persistEmission` guarda só uma das duas —
+    // a última a gravar.
     expect(segunda.numero).toBe(primeira.numero);
     expect(segunda.chave).not.toBe(primeira.chave);
   });

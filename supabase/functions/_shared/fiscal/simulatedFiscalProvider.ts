@@ -35,10 +35,31 @@
  * A saída **não** foi dar banco ao provedor (ele existe justamente para não ter
  * I/O), e sim aceitar que a borda restaure o pouco que ele precisa lembrar:
  * `seed.documents` recoloca no `Map` as notas que a borda leu de
- * `fiscal_documents`, e `seed.lastNumbers` diz de onde a numeração continua.
+ * `fiscal_documents`, e `seed.numeros` diz qual número esta emissão usa.
  * O provedor real não precisa de nada disso — quem guarda o estado dele é a API
  * dele —, e é por isso que o parâmetro é opcional e vive só aqui, não no
  * contrato `FiscalProvider`.
+ *
+ * ## A numeração deixou de ser contada aqui quando a borda manda (A10, 09/09/2026)
+ *
+ * Até A10, `seed.lastNumbers` dizia "o último número foi N" e este provedor
+ * calculava `N + 1` sozinho. Como a borda lia esse N com um `select` sem trava
+ * (`readLastNumero`) e construía uma instância nova por requisição, duas
+ * emissões concorrentes de vendas diferentes recebiam o mesmo N e saíam com o
+ * **mesmo número** — a corrida que A10 fecha.
+ *
+ * A inversão é pequena e resolve a classe inteira: a borda passou a **alocar** o
+ * número antes de chamar `emit()` (`fiscal_numbering_next`, um incremento
+ * atômico no Postgres) e a entregá-lo pronto em `seed.numeros`. Quem numera
+ * deixou de ser este `Map` e passou a ser o banco — que é onde a concorrência
+ * de verdade acontece.
+ *
+ * O contador interno **continua existindo**, e não é resíduo: ele é o que faz
+ * este provedor seguir sendo autossuficiente para quem o usa sem borda nenhuma
+ * — a prévia no navegador e as baterias de `tests/unit`. A regra é uma só:
+ * **número alocado manda; na ausência dele, conta-se aqui**. A borda sempre
+ * aloca (e, se a alocação falhar, a emissão falha antes de chegar aqui), então
+ * o caminho de contagem local nunca é o de produção.
  *
  * ## Este provedor **não valida payload** desde A9 (09/09/2026)
  *
@@ -94,17 +115,27 @@ export type SimulatedSeedDocument = FiscalDocument & {
   cartasCorrecao?: number;
 };
 
-/** O último número já usado numa combinação CNPJ + modelo (a série é a do provedor). */
+/**
+ * Um número **já alocado pela borda** para a próxima emissão desta combinação
+ * de CNPJ + modelo + série (A10, 09/09/2026).
+ *
+ * Não é "o último usado" — é o número que a emissão vai carregar. Quem o
+ * escolheu foi `fiscal_numbering_next` no Postgres, com incremento atômico; o
+ * provedor só o usa. A série entra aqui porque numeração é por série, e a
+ * entrada só vale para a série em que este provedor emite (`options.serie`,
+ * `SERIE_SIMULADA` por padrão) — uma alocação de outra série é ignorada, em vez
+ * de aplicada à errada em silêncio.
+ */
 export type SimulatedSeedNumbering = {
   cnpj: string;
   model: FiscalModel;
-  /** A próxima emissão sai com `ultimoNumero + 1`. */
-  ultimoNumero: number;
+  serie: number;
+  numero: number;
 };
 
 export type SimulatedFiscalProviderSeed = {
   documents?: SimulatedSeedDocument[];
-  lastNumbers?: SimulatedSeedNumbering[];
+  numeros?: SimulatedSeedNumbering[];
 };
 
 export type SimulatedFiscalProviderOptions = {
@@ -148,6 +179,17 @@ type StoredInvalidation = {
 
 /** Limite de cartas de correção por NF-e — regra da SEFAZ, não escolha nossa. */
 const MAX_CARTAS_CORRECAO = 20;
+
+/**
+ * A série em que este provedor emite quando ninguém escolhe outra.
+ *
+ * Exportada desde A10 porque deixou de ser detalhe interno: a borda precisa
+ * **alocar o número na mesma série em que a nota vai sair**, e ela não constrói
+ * o provedor diretamente (passa por `createFiscalProvider`, que não repassa
+ * `serie`). Uma constante compartilhada é o que impede a borda de alocar na
+ * série 1 e a nota sair na 2 — ou o contrário — sem ninguém perceber.
+ */
+export const SERIE_SIMULADA = 1;
 
 /**
  * Projeta o registro interno no que o contrato promete.
@@ -200,12 +242,22 @@ export function createSimulatedFiscalProvider(
 ): FiscalProvider {
   const now = options.now ?? (() => new Date());
   const randomInt = options.randomInt ?? ((max: number) => Math.floor(Math.random() * max));
-  const serie = options.serie ?? 1;
+  const serie = options.serie ?? SERIE_SIMULADA;
   const fallbackUfCode = options.fallbackUfCode ?? "35"; // SP
 
   const documents = new Map<string, StoredDocument>();
-  /** Contador de numeração por CNPJ + modelo + série, como a SEFAZ exige. */
+  /**
+   * Contador local por CNPJ + modelo + série.
+   *
+   * Desde A10 ele é o **caminho de reserva**, não o de produção: quando a borda
+   * aloca o número no banco (`seed.numeros`), é ele que vale. Este contador
+   * serve a quem usa o provedor sem borda — a prévia no navegador e os testes
+   * de unidade —, e continua sendo o que faz duas emissões seguidas na mesma
+   * instância saírem com números diferentes.
+   */
   const counters = new Map<string, number>();
+  /** Números que a borda já alocou, consumidos uma vez cada. Ver `numeroDaEmissao`. */
+  const alocados = new Map<string, number>();
   /** Faixas já inutilizadas — ver `invalidateRange`. */
   const invalidations: StoredInvalidation[] = [];
 
@@ -221,10 +273,24 @@ export function createSimulatedFiscalProvider(
     });
   }
 
-  for (const numbering of options.seed?.lastNumbers ?? []) {
+  for (const numbering of options.seed?.numeros ?? []) {
     const cnpj = onlyDigits(numbering.cnpj);
-    if (!cnpj || !Number.isInteger(numbering.ultimoNumero) || numbering.ultimoNumero < 0) continue;
-    counters.set(`${cnpj}:${numbering.model}:${serie}`, numbering.ultimoNumero);
+    // Uma alocação torta é **descartada**, não corrigida: o contador local
+    // assume, e a emissão sai com um número que não é o que o banco reservou.
+    // Aceitá-la seria pior — um `numero` zero ou fracionário viraria chave de
+    // acesso inválida.
+    if (!cnpj || numbering.serie !== serie) continue;
+    if (!Number.isInteger(numbering.numero) || numbering.numero < 1) continue;
+
+    // **A primeira alocação de cada chave é a que vale.** Sobrescrever
+    // descartaria em silêncio um número que o banco já entregou (e que já foi
+    // queimado da sequência); a emissão sairia com o segundo, e o primeiro
+    // viraria buraco sem ninguém saber. Este provedor emite uma nota por `ref`,
+    // então duas alocações para a mesma chave são erro de quem montou o seed —
+    // e o certo é ignorar a segunda, não a primeira.
+    const key = `${cnpj}:${numbering.model}:${serie}`;
+    if (alocados.has(key)) continue;
+    alocados.set(key, numbering.numero);
   }
 
   function invalidationCovering(cnpj: string, model: string, numero: number): StoredInvalidation | undefined {
@@ -256,6 +322,35 @@ export function createSimulatedFiscalProvider(
     return next;
   }
 
+  /**
+   * O número desta emissão: **o que a borda alocou**, se houver; senão, o do
+   * contador local (A10, 09/09/2026).
+   *
+   * A alocação é consumida uma vez só e vira a nova âncora do contador. As duas
+   * metades importam:
+   *
+   * - **consumir** impede que uma segunda emissão nesta mesma instância (outra
+   *   `ref`) repita o número que o banco reservou para a primeira;
+   * - **ancorar** faz essa segunda emissão continuar de onde a alocação parou,
+   *   em vez de voltar ao 1 do contador vazio. Ela não seria atômica — mas na
+   *   Edge Function ela não acontece: `handleEmit` emite uma nota por
+   *   requisição e aloca uma vez.
+   *
+   * O pulo de faixa inutilizada **não** se aplica ao número alocado: quem já o
+   * aplicou foi `fiscal_numbering_next`, lendo `fiscal_document_events`. Repetir
+   * aqui, contra o array em memória (que numa Edge Function nasce vazio), só
+   * poderia empurrar a nota para um número que o banco não reservou.
+   */
+  function numeroDaEmissao(cnpj: string, model: string): number {
+    const key = `${cnpj}:${model}:${serie}`;
+    const alocado = alocados.get(key);
+    if (alocado === undefined) return nextNumero(cnpj, model);
+
+    alocados.delete(key);
+    counters.set(key, alocado);
+    return alocado;
+  }
+
   return {
     id: "simulado",
 
@@ -276,7 +371,7 @@ export function createSimulatedFiscalProvider(
 
       const issuedAt = now();
       const cnpj = onlyDigits(payload.cnpj_emitente);
-      const numero = nextNumero(cnpj, model);
+      const numero = numeroDaEmissao(cnpj, model);
       const ufCode =
         resolveUfCode({ uf: payload.uf_emitente ?? null, codigoIbgeMunicipio: null }) ??
         fallbackUfCode;

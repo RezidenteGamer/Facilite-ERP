@@ -7335,3 +7335,256 @@ do que A9 fez: trazer as regras que **só a Focus** conhece (as que a API dela
 recusa e que este validador não tem como saber) — e, se alguma delas provar que
 uma regra local é mais rígida que a real, afrouxar a local, nunca duplicar a
 dela.
+
+---
+
+### Decisão arquitetural: a numeração fiscal atômica — a chave é o CNPJ, o número não volta, e a faixa inutilizada é consultada, não recriada (A10) (09/09/2026)
+
+Sétima tarefa da Etapa 3, e a que **toda tarefa desde B4 vinha adiando com o nome
+dela escrito**: A5 ("a reserva não faz nada por vendas diferentes, que é o caso
+de A10"), A6, A7 ("reemitir consome numeração, e a numeração não é atômica" — a
+razão nº 3 de `erro_autorizacao` ter ficado de fora da fila), A8 e A9
+("intocada"). O plano mestre a descrevia como "numeração atômica por filial e
+série, com registro do inutilizado".
+
+**Nada foi aplicado nem implantado.** A migration
+`00000000000013_a10_numeracao_fiscal_atomica.sql` foi escrita e **não** foi
+aplicada — nem por `apply_migration`, nem por `execute_sql`, nem por um
+`create table` avulso "para testar". `fiscal-emit` e `fiscal-webhook` **não**
+foram implantadas. Nenhuma regra de cálculo tributário foi tocada, e o mecanismo
+de reserva de A5/A6/A7 (`decideEmissao`, `decideConsulta`, `reserveEmission`,
+`releaseEmission`, `releaseStuckReservation`) ficou intacto — A10 só passou a
+correr ao lado dele.
+
+#### A corrida, e por que o primitivo de A5 não serve aqui
+
+`handleEmit` lia `readLastNumero(admin, branchId, model)` — um `select` da
+coluna `numero` inteira, **sem trava nenhuma** — e passava o máximo como semente
+para uma instância nova do provedor simulado, criada por requisição. Duas
+emissões concorrentes de **vendas diferentes** na mesma filial e modelo liam o
+mesmo máximo e cada uma somava 1 no próprio processo: as duas saíam com o
+**mesmo número**. A reserva de A5 não impedia nada — cada venda tem `ref`
+própria, e a reserva protege a *identidade* da emissão, não a *sequência*.
+
+A diferença com A5 é o que muda o primitivo:
+
+| | A5 (a `ref`) | A10 (o número) |
+| --- | --- | --- |
+| pergunta | quem emite esta venda? | com que número cada um emite? |
+| resposta certa | **um** vencedor, os outros leem o resultado dele | **todos** passam, cada um com o seu |
+| primitivo | `insert` que esbarra em unicidade (23505), ou CAS sobre o status | `insert ... on conflict do update set ultimo_numero = ultimo_numero + 1 returning` |
+
+O segundo é atômico pelo mesmo motivo que o primeiro: quem decide é o banco, não
+a ordem em que dois processos leram (C4). Quem chega junto espera o lock da linha
+e o `DO UPDATE` reavalia sobre a versão já incrementada — saem N e N+1, nunca N e
+N. Não precisa de `select ... for update` explícito, nem de segunda escrita, nem
+de transação entre statements (que o PostgREST não oferece).
+
+#### A chave: **CNPJ do emitente + modelo + série + ambiente**
+
+O enunciado deixou a escolha entre `branch_id` e CNPJ em aberto, e pediu pesquisa
+antes de fixar. O que a pesquisa achou:
+
+- **A numeração da SEFAZ é por estabelecimento**, e estabelecimento é o CNPJ de
+  14 dígitos — que é o que entra na chave de acesso (cUF + AAMM + **CNPJ** + mod
+  + **serie** + **nNF** + tpEmis + cNF + DV). Dois contadores separados para o
+  mesmo CNPJ produziriam o mesmo `nNF` no mesmo mês: chaves de acesso iguais em
+  tudo menos no `cNF` sorteado, e Rejeição 539 na segunda.
+- **Matriz e filial NÃO dividem CNPJ**, ao contrário do que o enunciado
+  levantava: os quatro dígitos de ordem do estabelecimento (`/0001`, `/0002`)
+  fazem parte do CNPJ. O cenário real de colisão é outro — duas linhas de
+  `branches` para o **mesmo** estabelecimento (duplicata de cadastro, ou dois
+  pontos de venda registrados com o CNPJ da matriz). É contra ele que a chave
+  protege, e ele é plausível: `branches.cnpj` é `text` nulável **sem índice
+  único**, e não existe módulo de Filiais — filial se cadastra à mão no painel.
+- **Nos dados de hoje a escolha não muda nada** (conferido, não presumido): uma
+  filial só (`00.000.000/0001-91`), zero CNPJ duplicado entre filiais, zero
+  filial sem CNPJ válido. Ela muda o que acontece no dia em que a segunda filial
+  for cadastrada — que é justamente quando ninguém vai estar lendo este arquivo.
+
+**`branch_id` não é coluna de `fiscal_numbering`**, e a ausência é a decisão:
+guardá-lo ao lado criaria um segundo eixo que pode divergir do primeiro (duas
+filiais, um CNPJ) e faria o leitor achar que a numeração é por filial.
+
+**`ambiente` entra na chave** porque homologação e produção são bases distintas
+da SEFAZ, e o projeto já trata a distinção como estrutural em dois lugares —
+`fiscal_documents.ambiente` ("uma nota de homologação nunca tem valor fiscal",
+A3) e `fiscal_document_events.ambiente` ("uma faixa inutilizada em homologação
+não inutiliza nada em produção", A3). Numeração é da mesma família: sem isso, o
+dia em que `FISCAL_AMBIENTE=producao` for ligado a primeira nota real nasceria
+continuando a contagem das notas simuladas.
+
+#### A migration de dados existentes, e como ela foi conferida
+
+`fiscal_documents` já tem notas com número. Um contador nascendo em zero
+entregaria o número 1 para uma emissão nova enquanto o 1 já existe — por isso a
+migration semeia a tabela com o **maior número por chave**, e não com nada.
+
+Três cuidados, cada um por um motivo medido no banco:
+
+1. **O CNPJ vem de `branches`, não do documento.** As 15 notas de hoje têm
+   `fiscal_documents.emitente_cnpj` **nulo** — são da era do navegador
+   (agosto/2026), anteriores a A3 ter criado a coluna. O `coalesce(fd.emitente_cnpj,
+   b.cnpj)` não é defesa teórica: é o único caminho para 100% das linhas
+   existentes. O do documento vem primeiro mesmo assim, porque para uma nota
+   posterior a A3 ele é o snapshot do que foi **declarado**, e é ele que está na
+   chave de acesso.
+2. **`numero` e `serie` são `text`** (o provedor real devolve string): os dois
+   passam por filtro de dígitos antes do cast, e o `max()` é numérico. É a mesma
+   pegadinha que `readLastNumero` documentava — em `text`, "9" > "10".
+3. **Entram as canceladas.** Um número cancelado foi usado e não volta. Ficam de
+   fora só as sem número (reserva, recusa antes de numerar).
+
+`on conflict ... greatest(...)` torna a semente idempotente e garante que
+reaplicar a migration **nunca ande para trás** com um contador que já avançou.
+
+**Como foi conferida, sem aplicar nada:** a subconsulta da semente foi rodada em
+**leitura** contra o banco antes de a migration ser escrita, e o resultado
+bateu com o esperado — duas linhas, `00000000000191 / nfe / 1 / homologacao / 2`
+e `.../ nfce / 1 / homologacao / 3`, cobrindo as 15 notas (8 NF-e + 7 NFC-e),
+**nenhuma descartada** (zero número não numérico, zero série não numérica, zero
+CNPJ irresolvível). A seção 5 da migration deixa as duas consultas de conferência
+para depois da aplicação, sendo a segunda a que importa: nenhuma nota existente
+pode ficar acima do contador.
+
+#### A inutilização: **consultada, não recriada** — e a fronteira desenhada de propósito
+
+O plano dizia "com registro do inutilizado". A decisão foi separar as duas coisas
+que essa frase junta:
+
+- **O registro já existe, e não é novo.** `fiscal_document_events` com
+  `tipo = 'inutilizacao'` (A3) tem `branch_id`, `ambiente`, `model`, `serie`,
+  `numero_inicial`, `numero_final`, `ref` única e um CHECK exigindo os cinco.
+  Criar uma segunda tabela para o mesmo fato seria a "segunda fonte da verdade"
+  que a migration de A7 recusou para `fiscal_queue`.
+- **O que faltava era a consulta**, e ela entrou:
+  `fiscal_numbering_next` pula a faixa quando ela existir, com um laço que salta
+  a faixa inteira de uma vez e itera para cobrir faixas encadeadas. A junção com
+  `branches` existe porque aquela tabela ancora em `branch_id` (precisa de âncora
+  de filial para a RLS) e a sequência é por CNPJ — se duas filiais dividirem o
+  CNPJ, as faixas das duas valem para a mesma sequência, que é o certo.
+  A consulta roda **em toda emissão** sobre uma tabela que ganha uma linha por
+  autorização, então ela vem com índice parcial próprio
+  (`fiscal_document_events_inutilizacao_faixa_idx`, `where tipo = 'inutilizacao'`)
+  — mesmo raciocínio, e mesmo formato, do índice parcial que A7 criou para a
+  varredura. Sem ele seria seq scan de uma tabela que só cresce, a cada nota.
+- **O que ficou fora, e por quê:** `invalidateRange` continua **sem porta HTTP**.
+  `fiscal-emit` despacha `emit`/`cancel`/`query`/`sweep` e nada mais, e ligar a
+  ação a uma tela é decisão de produto com escopo próprio (justificativa,
+  confirmação, permissão, o que a tela mostra depois). O enunciado pediu para não
+  fazê-lo, e a pesquisa não deu razão forte para contrariar: **`fiscal_document_events`
+  está vazia** — zero linhas de qualquer tipo, conferido. O pulo de faixa nasce,
+  portanto, exercitando zero linhas. É preparo deliberado, não funcionalidade
+  meia-boca: o dia em que a inutilização ganhar tela, a numeração já a respeita.
+
+O array `invalidations` em memória do provedor simulado **continua existindo** e
+não foi tocado — ele é o que faz o `invalidateRange` do provedor ser coerente
+consigo mesmo dentro de uma instância (e o que os testes de A2 exercitam). O que
+mudou é que ele deixou de ter qualquer influência sobre o número que sai numa
+emissão da Edge Function: **quando a borda aloca, o pulo de faixa já foi aplicado
+pelo Postgres**, e reaplicá-lo aqui contra um array que numa Edge Function nasce
+vazio só poderia empurrar a nota para um número que o banco não reservou.
+
+#### O número não volta — e isso é a regra fiscal, não uma limitação
+
+Se a emissão falhar **depois** da alocação (transporte, provedor fora, isolate
+morto), a reserva da `ref` é desfeita por `releaseEmission`, mas a sequência
+**não anda para trás**: o número fica queimado. É deliberado, e tem duas
+justificativas que se sustentam sozinhas:
+
+1. **É como a regra funciona.** Buraco de numeração se resolve declarando
+   inutilização da faixa à SEFAZ — que é exatamente o mecanismo que a seção
+   anterior deixou consultável.
+2. **Devolver recriaria a corrida.** Dois processos poderiam receber o mesmo
+   número devolvido, que é o estrago que esta tarefa fecha.
+
+A alocação acontece **depois** de `reserveEmission` (quem perde a corrida da
+`ref` não chega lá e não queima número) e **antes** de `provider.emit()` (o
+número vai para a chave de acesso).
+
+#### O provedor simulado: de "continue de N" para "use N"
+
+`seed.lastNumbers` (o último número usado, de onde o provedor contava sozinho)
+virou `seed.numeros` — o número **já alocado**, com a série junto. É a inversão
+que remove a aritmética do lado errado da rede: quem numera passou a ser o banco.
+
+O contador interno **continua existindo**, e não é resíduo: é o que faz o
+provedor seguir autossuficiente para quem o usa sem borda nenhuma — a prévia no
+navegador e as baterias de `tests/unit`. A regra é uma só: **número alocado
+manda; na ausência dele, conta-se localmente.** A borda sempre aloca, e se a
+alocação falhar a emissão falha antes de chegar ao provedor — então o caminho de
+contagem local nunca é o de produção.
+
+Duas sutilezas que viraram teste:
+- a alocação é **consumida uma vez** e vira a nova âncora do contador, para que
+  uma segunda emissão na mesma instância não repita o número reservado para a
+  primeira nem volte ao 1 do contador vazio;
+- uma alocação de **outra série** é descartada em vez de aplicada à errada em
+  silêncio — daí `serie` ter entrado em `SimulatedSeedNumbering`, e daí
+  `SERIE_SIMULADA` ser exportada: a borda não constrói o provedor diretamente
+  (passa por `createFiscalProvider`, que não repassa `serie`), então alocar numa
+  série e emitir noutra era um furo silencioso possível.
+
+#### Por que RPC, e não `update` pelo PostgREST
+
+O PostgREST só aceita **valores literais** no corpo de um `update` — não há como
+escrever `ultimo_numero = ultimo_numero + 1` por ele. `select` seguido de
+`update` a partir da borda seria a mesma corrida com outro nome. Por isso o
+incremento mora numa função (`public.fiscal_numbering_next`, `security definer`)
+e `alocarNumeroFiscal` é só o transporte. A função é a **única** coisa com
+permissão de escrever na tabela: `execute` revogado de `public`/`anon`/
+`authenticated` e concedido só a `service_role` — chamá-la sem emitir nota queima
+um número, então ela não é operação de tela.
+
+`fiscal_numbering` nasce com **RLS ligada e nenhuma policy**, ao contrário de
+`fiscal_queue` (que tem `select` para quem enxerga a nota). A diferença é o que a
+linha significa: a fila é informação de suporte sobre uma nota específica; esta
+tabela é o contador, e o número dela já aparece em `fiscal_documents.numero`, com
+filial e RLS. Uma policy de leitura aqui exporia a numeração de todas as filiais
+de um CNPJ a quem tem acesso a uma delas, sem nenhuma tela precisando disso.
+
+#### Testes
+
+**513 testes passando** em 17 arquivos (eram 509). Os 4 líquidos novos estão em
+`tests/unit/fiscalProvider.test.ts`, no `describe` "numeração alocada pela borda
+(A10)": o número alocado é o que sai na nota e na chave de acesso, ele não é
+reciclado numa segunda emissão da mesma instância, alocação de outra série é
+ignorada, a ausência de alocação continua caindo no contador local, e a alocação
+é por modelo (a NFC-e não consome o número da NF-e). O caso antigo "continua a
+numeração a partir do último número informado" saiu — ele afirmava o contrato que
+A10 substituiu.
+
+`tests/unit/fiscalEmitReservation.test.ts` teve só o helper adaptado ao seed
+novo: ele passa **o mesmo número às duas instâncias** de propósito, que é o que
+`readLastNumero` produzia, para continuar demonstrando a corrida de A5.
+
+**A prova de A10 é `tests/concurrency/fiscalNumberingConcurrency.test.ts`**, no
+padrão de A5: três vendas diferentes, três emissões simultâneas, e os números têm
+de ser **distintos e sequenciais** a partir do maior já gravado. Contra a versão
+implantada hoje ela reprova — as três recebem o mesmo número —, e essa reprovação
+é a prova da corrida.
+
+**Ela não foi executada, e não há como afirmar que passaria.** Falta
+`FACILITE_TEST_EMAIL`/`FACILITE_TEST_PASSWORD` no `.env.local` deste ambiente
+(mesma condição pré-existente que A5, A6, A7 e A9 já registravam), e faltam as
+duas coisas que esta sessão está proibida de fazer: aplicar a migration e
+implantar `fiscal-emit`. São agora **4 suítes** falhando por ambiente, e não 3 —
+a nova é a quarta, e falha com a mensagem dizendo o que falta configurar, de
+propósito: uma bateria que se auto-desliga daria verde falso.
+
+`npm run build`, `npm run lint` (62 avisos pré-existentes, o mesmo número de A9,
+nenhum nos arquivos tocados) e
+`deno check supabase/functions/fiscal-emit/index.ts` limpos.
+
+#### Fronteira com A11 e A12
+
+- **A12 (integração com a Focus)** — **não vai usar este mecanismo**, e isso é a
+  conclusão mais importante da pesquisa desta tarefa: `NfePayload` não tem campo
+  `numero` nem `serie`, ou seja, quem numera é sempre o provedor. O real numera
+  do lado dele. `fiscal_numbering` existe para o simulado — e é por isso que a
+  alocação está atrás de um `if (ctx.providerId === "simulado")`, para não gastar
+  número de uma sequência que ninguém usa. O que A12 herda é a **tabela pronta**
+  para o dia em que um provedor exigir numeração nossa, e a garantia de que a
+  numeração local nunca colide com a que já está gravada.
+- **A inutilização com tela** — o que falta é a ação HTTP em `fiscal-emit`, a
+  escrita do evento e a tela. O banco e a numeração já estão prontos para ela.

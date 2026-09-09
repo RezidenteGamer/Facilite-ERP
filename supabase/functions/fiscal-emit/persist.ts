@@ -232,48 +232,72 @@ export async function releaseEmission(
   }
 }
 
+/* ------------------------------------------------------------------------ */
+/* A numeração atômica (A10, 09/09/2026)                                     */
+/* ------------------------------------------------------------------------ */
+
+export type AlocacaoNumeroInput = {
+  /** CNPJ do emitente como saiu do payload — a função normaliza para 14 dígitos. */
+  cnpj: string;
+  model: FiscalModel;
+  serie: number;
+  ambiente: FiscalAmbiente;
+};
+
 /**
- * O maior número já emitido nesta filial para este modelo.
+ * **Aloca o próximo número fiscal desta sequência, atomicamente.**
  *
- * Serve para o provedor simulado continuar a numeração de onde parou, em vez de
- * recomeçar do 1 a cada requisição (ver `seed` em `simulatedFiscalProvider.ts`).
- * **Não é reserva de numeração** — duas emissões simultâneas leem o mesmo
- * máximo e saem com o mesmo número. Numeração atômica por filial e série é a
- * tarefa A10; isto aqui só impede que o passo A1 piore o que já existia (o
- * contador em memória do navegador, que zerava a cada F5).
+ * Substitui `readLastNumero`, que era um `select max()` sem trava: duas
+ * emissões concorrentes de vendas diferentes na mesma filial liam o mesmo
+ * máximo, cada uma somava 1 no próprio processo, e as duas saíam com o mesmo
+ * número. A corrida inteira, e por que o primitivo aqui não é o de A5, estão em
+ * `supabase/migrations/00000000000013_a10_numeracao_fiscal_atomica.sql`.
  *
- * ## Por que a consulta não é ordenada nem limitada
+ * ## Por que RPC, e não `update` pelo PostgREST
  *
- * A forma óbvia — as N notas mais recentes, e o maior número entre elas — está
- * errada exatamente por causa da história que esta função existe para
- * consertar: até A1 a numeração reiniciava do 1 a cada sessão do navegador, e
- * por isso o banco tem notas antigas com números **maiores** que as recentes
- * (uma sessão longa foi até 50; dez sessões curtas depois dela ficaram em 1–5).
- * Uma janela das mais recentes devolveria 5, e a numeração seguinte colidiria
- * com as notas 6 a 50. E ordenar por `numero` no banco também não resolve: a
- * coluna é `text` (o provedor real devolve string), então "9" ordenaria acima
- * de "10". Sobra ler a coluna inteira — uma coluna curta, só para o provedor
- * simulado — e tirar o máximo aqui.
+ * O PostgREST só aceita **valores literais** no corpo de um `update` — não há
+ * como escrever `ultimo_numero = ultimo_numero + 1` por ele, e fazer `select`
+ * seguido de `update` daqui seria a mesma corrida com outro nome. O incremento
+ * tem de acontecer dentro de um statement do Postgres, então ele mora numa
+ * função (`fiscal_numbering_next`) e esta chamada é só o transporte.
+ *
+ * ## O número não volta
+ *
+ * Se a emissão falhar depois desta chamada, o número **fica queimado** — a
+ * reserva da `ref` é desfeita (`releaseEmission`), mas a sequência não anda
+ * para trás. É deliberado, e é como a regra fiscal funciona: buraco de
+ * numeração se resolve declarando inutilização da faixa, não reciclando o
+ * número. Devolvê-lo ao contador recriaria exatamente a corrida que esta função
+ * fecha — dois processos poderiam receber o mesmo número devolvido.
+ *
+ * **Lança** quando o banco recusa: CNPJ inválido, série fora de 0–999,
+ * sequência esgotada, ou a migration de A10 ainda não aplicada (o RPC não
+ * existe). Lançar é o certo — sem número não há nota, e `handleEmit` já desfaz
+ * a reserva no `catch`.
  */
-export async function readLastNumero(
+export async function alocarNumeroFiscal(
   admin: SupabaseClient,
-  branchId: string,
-  model: FiscalModel,
+  input: AlocacaoNumeroInput,
 ): Promise<number> {
-  const { data, error } = await admin
-    .from("fiscal_documents")
-    .select("numero")
-    .eq("branch_id", branchId)
-    .eq("model", model)
-    .not("numero", "is", null);
+  const { data, error } = await admin.rpc("fiscal_numbering_next", {
+    p_cnpj: input.cnpj,
+    p_model: input.model,
+    p_serie: input.serie,
+    p_ambiente: input.ambiente,
+  });
   if (error) throw error;
 
-  let maior = 0;
-  for (const row of (data ?? []) as unknown as { numero: string | null }[]) {
-    const numero = Number(row.numero);
-    if (Number.isInteger(numero) && numero > maior) maior = numero;
+  const numero = Number(data);
+  if (!Number.isInteger(numero) || numero < 1) {
+    // Só acontece se a função mudar de contrato (ou se alguém a substituir por
+    // outra com o mesmo nome). Recusar aqui é melhor que emitir uma nota com
+    // número zero, que viraria chave de acesso inválida sem ninguém notar.
+    throw new Error(
+      `fiscal_numbering_next devolveu um número inválido (${JSON.stringify(data)}) para ` +
+        `${input.model} série ${input.serie} (${input.ambiente}).`,
+    );
   }
-  return maior;
+  return numero;
 }
 
 function toNumberOrNull(value: number | undefined): number | null {

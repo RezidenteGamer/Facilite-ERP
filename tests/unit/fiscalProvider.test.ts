@@ -10,6 +10,7 @@ import {
   resolveFiscalProviderId,
 } from "@fiscal-core/registry.ts";
 import {
+  SERIE_SIMULADA,
   createSimulatedFiscalProvider,
   isValidAccessKey,
 } from "@fiscal-core/simulatedFiscalProvider.ts";
@@ -354,31 +355,93 @@ describe("SimulatedFiscalProvider — seed do estado pela borda (A1)", () => {
     expect(reemitida.numero).toBe(emitida.numero);
   });
 
-  it("continua a numeração a partir do último número informado", async () => {
-    const fiscal = createSimulatedFiscalProvider({
-      now: () => new Date("2026-09-01T15:00:00Z"),
-      randomInt: () => 7,
-      seed: { lastNumbers: [{ cnpj: CNPJ, model: "nfe", ultimoNumero: 41 }] },
-    });
-
-    const document = await fiscal.emit({ ref: "venda-42", model: "nfe", payload: payload() });
-    expect(document.numero).toBe("42");
-  });
-
   it("ignora numeração inválida em vez de corromper o contador", async () => {
     const fiscal = createSimulatedFiscalProvider({
       now: () => new Date("2026-09-01T15:00:00Z"),
       randomInt: () => 7,
       seed: {
-        lastNumbers: [
-          { cnpj: "", model: "nfe", ultimoNumero: 99 },
-          { cnpj: CNPJ, model: "nfe", ultimoNumero: -3 },
+        numeros: [
+          { cnpj: "", model: "nfe", serie: SERIE_SIMULADA, numero: 99 },
+          { cnpj: CNPJ, model: "nfe", serie: SERIE_SIMULADA, numero: -3 },
         ],
       },
     });
 
     const document = await fiscal.emit({ ref: "venda-1", model: "nfe", payload: payload() });
     expect(document.numero).toBe("1");
+  });
+});
+
+/**
+ * A10 (09/09/2026): quem numera passou a ser o banco, não este `Map`.
+ *
+ * Até aqui a borda dizia "o último número foi N" e o provedor calculava `N + 1`
+ * sozinho — e como esse N vinha de um `select max()` sem trava
+ * (`readLastNumero`), duas requisições concorrentes recebiam o mesmo N e
+ * emitiam com o mesmo número. Agora a borda **aloca** o número
+ * (`fiscal_numbering_next`, incremento atômico no Postgres) e o entrega pronto.
+ *
+ * O que dá para provar sem banco é o lado de cá do contrato: que o número
+ * alocado é o que sai na nota, que ele não é reciclado, e que a ausência de
+ * alocação continua caindo no contador local — o caminho da prévia no navegador
+ * e destes próprios testes. A atomicidade em si é do Postgres e está em
+ * `tests/concurrency/fiscalNumberingConcurrency.test.ts`, pelo mesmo motivo que
+ * a reserva de A5 não é testada aqui.
+ */
+describe("SimulatedFiscalProvider — numeração alocada pela borda (A10)", () => {
+  function comAlocacao(numeros: { cnpj: string; model: "nfe" | "nfce"; serie: number; numero: number }[]) {
+    return createSimulatedFiscalProvider({
+      now: () => new Date("2026-09-01T15:00:00Z"),
+      randomInt: () => 7,
+      seed: { numeros },
+    });
+  }
+
+  it("emite com o número que a borda alocou", async () => {
+    const fiscal = comAlocacao([{ cnpj: CNPJ, model: "nfe", serie: SERIE_SIMULADA, numero: 42 }]);
+
+    const document = await fiscal.emit({ ref: "venda-42", model: "nfe", payload: payload() });
+    expect(document.numero).toBe("42");
+    expect(document.serie).toBe(String(SERIE_SIMULADA));
+    // O número alocado entra na chave de acesso, nas posições 26–34.
+    expect(document.chave?.slice(25, 34)).toBe("000000042");
+  });
+
+  it("não recicla o número alocado numa segunda emissão da mesma instância", async () => {
+    const fiscal = comAlocacao([{ cnpj: CNPJ, model: "nfe", serie: SERIE_SIMULADA, numero: 42 }]);
+
+    const primeira = await fiscal.emit({ ref: "venda-a", model: "nfe", payload: payload() });
+    const segunda = await fiscal.emit({ ref: "venda-b", model: "nfe", payload: payload() });
+
+    // A alocação vale uma vez; a segunda continua de onde ela parou, em vez de
+    // repetir 42 ou voltar ao 1 do contador vazio. (Na Edge Function este caso
+    // não existe — uma emissão por requisição, uma alocação por emissão.)
+    expect(primeira.numero).toBe("42");
+    expect(segunda.numero).toBe("43");
+  });
+
+  it("ignora alocação de outra série em vez de aplicá-la à série errada", async () => {
+    const fiscal = comAlocacao([{ cnpj: CNPJ, model: "nfe", serie: SERIE_SIMULADA + 1, numero: 500 }]);
+
+    const document = await fiscal.emit({ ref: "venda-1", model: "nfe", payload: payload() });
+    expect(document.numero).toBe("1");
+  });
+
+  it("sem alocação nenhuma, o contador local continua valendo (prévia e teste)", async () => {
+    const fiscal = provider();
+
+    expect((await fiscal.emit({ ref: "venda-1", model: "nfe", payload: payload() })).numero).toBe("1");
+    expect((await fiscal.emit({ ref: "venda-2", model: "nfe", payload: payload() })).numero).toBe("2");
+  });
+
+  it("a alocação é por modelo: a NFC-e não consome o número da NF-e", async () => {
+    const fiscal = comAlocacao([
+      { cnpj: CNPJ, model: "nfe", serie: SERIE_SIMULADA, numero: 7 },
+      { cnpj: CNPJ, model: "nfce", serie: SERIE_SIMULADA, numero: 300 },
+    ]);
+
+    expect((await fiscal.emit({ ref: "venda-1", model: "nfe", payload: payload() })).numero).toBe("7");
+    expect((await fiscal.emit({ ref: "venda-2", model: "nfce", payload: payload() })).numero).toBe("300");
   });
 });
 
