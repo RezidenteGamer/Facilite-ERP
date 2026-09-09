@@ -7111,3 +7111,227 @@ quando ele está no nosso lado. Corrigido para `statusResultante`, com o
 - **A10 (numeração fiscal atômica)** — intocada, e continua valendo o argumento
   de A7: nada nesta tarefa emite nem reemite nota. O webhook, como a fila,
   **termina de perguntar**.
+
+---
+
+### Decisão arquitetural: o validador local sai do provedor simulado e passa a valer para os dois — e o dígito verificador que não existia (A9) (09/09/2026)
+
+Sexta tarefa da Etapa 3. O plano mestre descrevia A9 como "validador local:
+expandir o que hoje só checa NCM/CFOP/CST para emitente, destinatário, endereço,
+IE, regime, unidade, quantidade e valores. Inclui dígito verificador de
+CPF/CNPJ, que não existe em lugar nenhum".
+
+**Nenhuma migration foi escrita, nada foi aplicado e nada foi implantado.** A9 é
+inteiramente código: dois arquivos novos no núcleo compartilhado, um ponto de
+chamada em `handleEmit`, e três correções em `invoiceMapping.ts` sem as quais o
+validador recusaria a nota que o próprio motor monta. Nenhuma coluna nova,
+nenhum CHECK novo, nenhum valor novo em coluna existente. `fiscal-emit` e
+`fiscal-webhook` continuam **não implantadas**, nenhuma regra de cálculo
+tributário foi tocada, e nada de B1–B10 foi recalculado ou conferido.
+
+#### A decisão central: onde o validador roda
+
+Ele **saiu** de `simulatedFiscalProvider.ts` e passou a rodar em `handleEmit`
+(`fiscal-emit/index.ts`), depois de `buildPayload` e antes de `reserveEmission`.
+Não ficou cópia no provedor: o arquivo voltou a ser só transporte.
+
+O que decidiu foram três consequências de ele estar onde estava, cada uma
+suficiente sozinha:
+
+1. **A validação dependia de uma variável de ambiente.** Rodando dentro do
+   provedor simulado, ela só existia com `FISCAL_PROVIDER=simulado`. O caminho
+   do provedor real — `focusProvider.ts`, hoje lançando
+   `FiscalNotConfiguredError` — não passava por ela e não passaria quando A12 o
+   ligasse. Uma nota emitida em produção teria **menos** conferência que a mesma
+   nota emitida em teste, que é o inverso do que se quer.
+2. **Uma nota obviamente errada gastaria uma chamada de rede** — e, com o
+   provedor real, possivelmente um crédito — para voltar recusada por algo que
+   dava para ver localmente: CNPJ cujo dígito verificador não fecha, CEP com 7
+   dígitos, filial sem endereço cadastrado.
+3. **A recusa era gravada como se fosse da SEFAZ.** O provedor devolvia
+   `erro_autorizacao` com `statusSefaz: "225"` e "Rejeição: falha no schema XML
+   da NF-e", e `persistEmission` escrevia isso em `fiscal_documents`. Ninguém
+   tinha falado com a SEFAZ: o `cStat` era inventado. É exatamente o erro que A5
+   recusou cometer quando escreveu, na liberação de reserva, que aquilo "não é
+   recusa da SEFAZ".
+
+O argumento contrário — validar demais localmente pode recusar o que a SEFAZ
+aceitaria — **foi levado a sério e virou critério de escopo**, não de lugar. Ele
+não diz onde o validador deve rodar; diz o que ele pode afirmar. Está registrado
+no cabeçalho de `payloadValidation.ts` e é o que mantém a IE por estado e o CEP
+do destinatário fora (abaixo).
+
+Duas consequências práticas do lugar novo:
+
+- **Vem antes da reserva.** Uma nota que não vai sair não deixa linha
+  `processando_autorizacao` pendurada em `fiscal_documents` para A6/A7 terem de
+  resolver depois.
+- **Volta como `outcome(errors)`**, o mesmo formato que os erros do próprio
+  `buildPayload` já usavam — não como `erro_autorizacao` com `cStat`. A recusa
+  local passou a se parecer com o que é.
+
+#### O dígito verificador: `cpfCnpj.ts`
+
+Não existia **em lugar nenhum do repositório** — nem no núcleo fiscal, nem em
+`src/lib`, nem em `cnpjLookup.ts` (que consulta a BrasilAPI e só confere o
+comprimento de 14). O que existia era o DV **da chave de acesso**
+(`accessKeyCheckDigit`), que é módulo 11 de outro conjunto de dígitos e não diz
+nada sobre o CNPJ que entra nela: a chave fecha o DV dela mesma ainda que o CNPJ
+das posições 7-20 seja inventado.
+
+**Fonte do algoritmo:** o cálculo do módulo 11 do Cadastro Nacional da Pessoa
+Jurídica e do Cadastro de Pessoas Físicas, da Receita Federal — público e
+determinístico. Não é pesquisa de documentação externa como as tarefas fiscais
+anteriores (A4, A8) e não veio de biblioteca de terceiros: são duas tabelas de
+peso e uma regra de resto.
+
+- **CNPJ**: pesos `5,4,3,2,9,8,7,6,5,4,3,2` sobre os 12 primeiros dígitos (1º
+  DV) e `6,5,4,3,2,9,8,7,6,5,4,3,2` sobre os 13 primeiros (2º DV).
+- **CPF**: pesos de `10` a `2` sobre os 9 primeiros (1º DV) e de `11` a `2`
+  sobre os 10 primeiros (2º DV).
+- Nos dois: resto `0` ou `1` ⇒ DV `0`.
+
+As duas tabelas são a mesma progressão vista de pontas diferentes, e é por isso
+que uma função só (`digitoModulo11`) serve aos dois — o peso começa onde a
+tabela manda e desce até `2`, voltando a `9` quando passa disso. Deliberadamente
+**não** compartilha código com `accessKeyCheckDigit`: lá o peso *sobe* de 2 a 9
+percorrendo a chave de trás para frente; parametrizar as duas numa função só
+esconderia a diferença em vez de mostrá-la.
+
+As duas armadilhas clássicas têm teste dedicado em `tests/unit/cpfCnpj.test.ts`:
+
+1. **Sequência de dígitos repetidos.** `11111111111` e `00000000000000` **passam
+   o módulo 11** — a conta fecha de verdade (soma zero ⇒ resto zero ⇒ DV `00`).
+   A Receita as trata como inválidas por definição, e por isso a checagem
+   explícita vem antes do cálculo. O algoritmo sozinho aceitaria o documento mais
+   obviamente falso que existe.
+2. **Zeros à esquerda.** Todo o cálculo roda sobre a **string** de dígitos,
+   nunca sobre `Number` — `00000000000191` (Banco do Brasil) viraria `191` num
+   `parseInt`, com os pesos todos deslocados. O comprimento é conferido depois de
+   tirar a pontuação e antes de tudo: 13 dígitos não são "um CNPJ a que falta um
+   zero", são um CNPJ inválido.
+
+**Sobre formato gravado**: as funções respondem `true`/`false` e não normalizam
+nem devolvem valor formatado. `branches.cnpj` e `contacts.document` são `text`
+livre (o cadastro grava com ou sem pontuação, conforme quem digitou), e
+`invoiceMapping` já aplicava `onlyDigits` no documento do destinatário antes de
+montar o payload. A9 **não introduz um formato paralelo**: lê o que está lá, tira
+a pontuação só para conferir, e não reescreve nada.
+
+#### Os campos cobertos
+
+Todos em `validarPayloadFiscal(payload, model)`, com o modelo decidindo o que é
+obrigatório (NF-e exige destinatário e endereço dele; NFC-e não — a venda de
+balcão sem CPF é a operação mais comum do PDV).
+
+- **Emitente** — CNPJ com **dígito verificador** (não mais só "14 dígitos");
+  nome; inscrição estadual (presença); endereço completo (logradouro, número,
+  bairro, município, UF e CEP), com UF conferida contra a tabela de siglas que
+  já monta o `cUF` da chave e CEP de 8 dígitos; CRT em `{1, 2, 3, 4}` — o mesmo
+  vocabulário que `branches.regime_tributario` e `taxSituations.ts` já usam,
+  incluindo o `4` (MEI) que entrou pela NT 2024.001.
+- **Destinatário** — CNPJ **ou** CPF, nunca os dois (é um `xs:choice` no grupo
+  `dest`), com dígito verificador em qualquer um deles; nome e `indIEDest` em
+  `{1, 2, 9}` na NF-e; inscrição estadual exigida quando `indIEDest = 1` e
+  **proibida** quando ele é `2` ou `9` (regra `E17`; informá-la junto do
+  indicador de isento é a rejeição **791**, já citada em `invoiceMapping.ts`);
+  endereço completo na NF-e; UF e CEP conferidos no formato sempre que vierem,
+  inclusive na NFC-e.
+- **Itens** — descrição, CFOP, NCM e CST/CSOSN (o que já existia); **unidade
+  comercial e unidade tributável** (`uCom` id `I09` e `uTrib` id `I13`, ambos
+  `1-1`; desde A4 as contrapartes `qTrib`/`vUnTrib` já viajavam sempre, faltava
+  exigir as unidades, que vêm só do cadastro do produto e não têm como ser
+  deduzidas); quantidade comercial e tributável maiores que zero; valores
+  unitários, bruto, desconto e frete finitos e não negativos.
+- **Totais** — valor dos produtos, valor total, desconto, frete, seguro e outras
+  despesas finitos e não negativos.
+
+`NaN` e `Infinity` são recusados junto do negativo: os três são resultado de
+conta que deu errado antes de chegar ao payload, e nenhum deles se declara numa
+nota.
+
+#### O que ficou fora, e por quê
+
+- **Formato de Inscrição Estadual por estado.** São 27 formatos, cada um com
+  máscara e dígito verificador próprios (alguns com mais de uma regra vigente
+  conforme a época do cadastro). É trabalho genuíno e grande o bastante para ser
+  tarefa própria — e uma tabela errada aqui recusaria nota que a SEFAZ aceita,
+  que é o pior desfecho possível para um validador local. O que A9 confere da IE
+  é **quando ela deve existir**, não como ela é escrita por dentro.
+- **CEP do destinatário como obrigatório.** No leiaute 4.00 o `CEP` do
+  `enderEmit` (id `C13`) é `1-1` e o do `enderDest` (id `E13`) é `0-1`. O
+  validador segue a diferença ao pé da letra: exige o do emitente e, do
+  destinatário, confere só o formato quando ele vem. Um teste afirma
+  explicitamente que a mensagem "CEP ausente" **não** sai para o destinatário.
+- **Coerência município × UF e código IBGE de município.** O payload não carrega
+  `cMun` — quem o deriva é o provedor, a partir do nome do município e da UF.
+  Não há o que conferir aqui sem inventar cadastro.
+- **Aritmética de imposto, de qualquer espécie.** Nenhuma base, alíquota ou
+  valor é recalculado ou cruzado; nenhum resultado de B1–B10 é conferido. Um
+  teste afirma isso de frente: uma nota cujo total não bate com a soma dos itens
+  passa pelo validador. Duplicar essa conta aqui seria a segunda opinião que este
+  projeto evita — e a primeira opinião é a de quem calculou.
+
+#### As correções em `invoiceMapping.ts` que A9 obrigou
+
+Um validador que recusa a nota que o próprio motor monta não é um validador, é
+um bloqueio. Ao rodar o validador expandido contra a saída dos três documentos
+(`buildNfePayloadFromSale`, `buildNfcePayloadFromSale`, `buildReturnNfePayload`),
+dois defeitos latentes apareceram — **os dois seriam rejeição no provedor real**,
+e nenhum deles era visível enquanto o simulado autorizava qualquer coisa:
+
+1. **A IE do destinatário ia sempre, sem olhar o `indIEDest`.** Os três
+   documentos copiavam `contact.inscricaoEstadual` para o payload direto. Como
+   `contacts.indicador_ie` é opcional e está nulo na imensa maioria dos contatos
+   (o mesmo cadastro que a correção da Rejeição 696 já tinha encontrado em
+   04/09/2026), a nota saía com `indIEDest = 9` **e** IE preenchida — as duas
+   coisas que a regra `E17` proíbe juntas. Agora passa por `ieDoDestinatario`,
+   que só a informa com `indIEDest = 1`.
+2. **`contacts.document` é `text NOT NULL DEFAULT ''`**, e cliente sem documento
+   virava `cpf_destinatario: ""` no payload — campo presente e vazio, diferente
+   de ausente tanto para o schema quanto para o validador. Agora passa por
+   `documentoDoDestinatario`, que omite o grupo quando não há dígito nenhum. Na
+   NFC-e isso é o caso legítimo do balcão; na NF-e é o validador que recusa, com
+   a mensagem certa, em vez de a SEFAZ recusar um `<CPF></CPF>`.
+
+As duas correções valem para os três documentos. Nenhuma delas toca cálculo de
+imposto.
+
+#### Testes
+
+- **`tests/unit/cpfCnpj.test.ts`** (10 casos) — CPF e CNPJ válidos e inválidos,
+  com e sem pontuação, dígito verificador errado, tamanho errado (inclusive o
+  CNPJ a que falta o zero à esquerda), as dez sequências repetidas de cada
+  documento, e a prova de que um CNPJ válido não é um CPF válido.
+- **`tests/unit/fiscalPayloadValidation.test.ts`** (37 casos) — um por categoria
+  nova do validador, no padrão de asserção direta das outras baterias fiscais:
+  monta o payload completo e quebra **um** campo por caso. O último bloco é o
+  que impede A9 de virar bloqueio: seis casos que mandam pelo validador a nota
+  que `invoiceMapping` monta de verdade — NF-e para contribuinte, NF-e para
+  pessoa física, NF-e para o cadastro que era rejeição 791, NFC-e de balcão sem
+  cliente, NFC-e com cliente sem documento, e a devolução.
+- **`tests/unit/fiscalProvider.test.ts`** — dois casos reescritos. O que afirmava
+  que o provedor recusa payload incompleto agora afirma o contrário (ele
+  autoriza; quem recusa é a borda) e delega a recusa ao validador. O de
+  `getXml`/`getDanfe` para nota sem artefato passou a chegar ao mesmo estado pelo
+  `seed` — a forma honesta, agora que o provedor não fabrica mais recusa.
+- **`scripts/fiscal-cycle-check.mjs`** — o passo 2 ("caminho de recusa") deixou
+  de depender de `provider.emit()` recusar e passou a chamar
+  `validarPayloadFiscal` direto, na mesma ordem que `handleEmit` segue.
+
+Bateria completa: **509 testes passando** (`npm test`, 17 arquivos). As três
+suítes que falham (`tests/concurrency/*`, `tests/isolation/*`) falham por falta
+de `FACILITE_TEST_EMAIL` no `.env.local` deste ambiente — elas exigem Supabase
+real e, no caso de `fiscalEmitConcurrency`, a Edge Function implantada. Não têm
+relação com A9 e não foram alteradas.
+
+#### Fronteira com A12
+
+`focusProvider.ts` continua esqueleto. O que A9 deixa pronto para ela: o payload
+que chega ao `emit()` do provedor real **já passou** pelo mesmo crivo que o
+simulado, então a primeira chamada de verdade não vai ser gasta com uma nota que
+dava para recusar aqui. O que A12 ainda precisa fazer com validação é o inverso
+do que A9 fez: trazer as regras que **só a Focus** conhece (as que a API dela
+recusa e que este validador não tem como saber) — e, se alguma delas provar que
+uma regra local é mais rígida que a real, afrouxar a local, nunca duplicar a
+dela.

@@ -150,6 +150,10 @@ let exitCode = 0;
 try {
   const { getFiscalProvider } = await server.ssrLoadModule("/src/lib/fiscal/provider.ts");
   const { isValidAccessKey } = await server.ssrLoadModule("/src/lib/fiscal/accessKey.ts");
+  // A validação estrutural saiu do provedor em A9 (09/09/2026) e roda antes
+  // dele, em `handleEmit`. Este script segue a mesma ordem: valida, e só então
+  // chama `emit()`.
+  const { validarPayloadFiscal } = await server.ssrLoadModule("/src/lib/fiscal/payloadValidation.ts");
   const { supabase } = await server.ssrLoadModule("/src/lib/supabaseClient.ts");
 
   if (!supabase) throw new Error("Supabase não configurado — confira o .env.local.");
@@ -184,18 +188,13 @@ try {
 
   /* ---- 2. caminho de recusa: payload com os buracos que o banco ainda tem ---- */
 
-  const refRecusa = `check-recusa-${sale.id}`;
-  const recusado = await provider.emit({
-    ref: refRecusa,
-    model: "nfe",
-    payload: buildPayloadFromSale(sale, false),
-  });
+  const problemas = validarPayloadFiscal(buildPayloadFromSale(sale, false), "nfe");
   check(
-    "emit() recusa payload incompleto sem lançar exceção",
-    recusado.status === "erro_autorizacao" && recusado.chave === null,
-    `status=${recusado.status}`,
+    "validarPayloadFiscal() recusa payload incompleto antes de chamar o provedor",
+    problemas.length > 0,
+    `${problemas.length} problema(s)`,
   );
-  console.log(`         motivo: ${recusado.mensagemSefaz}`);
+  console.log(`         motivos: ${problemas.join("; ")}`);
 
   /* ---- 3. ciclo feliz: emitir ---- */
 

@@ -99,6 +99,7 @@ import {
   buildNfePayloadFromSale,
   buildReturnNfePayload,
 } from "../_shared/fiscal/invoiceMapping.ts";
+import { validarPayloadFiscal } from "../_shared/fiscal/payloadValidation.ts";
 import { FiscalNotConfiguredError } from "../_shared/fiscal/provider.ts";
 import { saleFiscalRef, saleReturnFiscalRef } from "../_shared/fiscal/refs.ts";
 import { resolveFiscalProviderId } from "../_shared/fiscal/registry.ts";
@@ -278,6 +279,23 @@ async function handleEmit(ctx: Context, origin: FiscalDocumentOrigin, model: Fis
 
   const built = await buildPayload(ctx, origin, model);
   if (!built.ok) return outcome(built.errors);
+
+  // **A validação estrutural roda aqui, antes de qualquer provedor (A9,
+  // 09/09/2026).** Até A9 ela morava dentro do provedor simulado, o que a
+  // amarrava à variável de ambiente: com `FISCAL_PROVIDER=focus` (A12) a nota
+  // sairia para a rede sem crivo nenhum, gastando uma chamada — e possivelmente
+  // um crédito — para voltar recusada por um CNPJ cujo dígito verificador não
+  // fecha. Daqui ela alcança os dois provedores igualmente.
+  //
+  // Vem **antes** de `reserveEmission` pelo mesmo motivo que ela vem depois de
+  // `buildPayload`: uma nota que não vai sair não deve deixar reserva pendurada
+  // em `fiscal_documents` para A6/A7 terem de resolver depois.
+  //
+  // E volta como `outcome(errors)` — o mesmo formato dos erros do próprio
+  // `buildPayload` —, não como `erro_autorizacao` com `cStat` da SEFAZ: ninguém
+  // falou com a SEFAZ, e escrever que ela recusou seria inventar a resposta.
+  const problemasDeEstrutura = validarPayloadFiscal(built.payload, model);
+  if (problemasDeEstrutura.length > 0) return outcome(problemasDeEstrutura);
 
   // **A reserva vem depois de `buildPayload`, e é de propósito.** É
   // `readSaleForInvoice` (dentro dele) que confere que a venda pertence mesmo à

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createFocusProvider } from "@fiscal-core/focusProvider.ts";
+import { validarPayloadFiscal } from "@fiscal-core/payloadValidation.ts";
 import { FiscalNotConfiguredError } from "@fiscal-core/provider.ts";
 import {
   DEFAULT_FISCAL_PROVIDER_ID,
@@ -93,14 +94,20 @@ describe("SimulatedFiscalProvider — os três métodos originais", () => {
     expect(Object.keys(document)).not.toContain("cnpjEmitente");
   });
 
-  it("recusa payload incompleto como resultado de negócio, sem lançar", async () => {
+  it("não valida payload: desde A9 quem recusa é a borda, antes do provedor", async () => {
+    // Até A9 este provedor tinha `validatePayload` própria e devolvia
+    // `erro_autorizacao` com um `cStat` "225" inventado. A função saiu inteira
+    // para `payloadValidation.ts` e roda em `handleEmit`, antes de qualquer
+    // provedor — inclusive o real de A12, que antes não passava por crivo
+    // nenhum. Aqui sobrou o transporte: o que entra vira documento.
+    //
+    // Ver a bateria dedicada em `fiscalPayloadValidation.test.ts`.
     const fiscal = provider();
     const semNcm = payload({ items: [{ ...payload().items[0], codigo_ncm: "" }] });
     const document = await fiscal.emit({ ref: "venda-2", model: "nfe", payload: semNcm });
 
-    expect(document.status).toBe("erro_autorizacao");
-    expect(document.mensagemSefaz).toContain("NCM ausente");
-    expect(document.chave).toBeNull();
+    expect(document.status).toBe("autorizado");
+    expect(validarPayloadFiscal(semNcm, "nfe")).toContain("item 1: NCM ausente");
   });
 
   it("é idempotente por ref e responde nao_encontrado para ref desconhecida", async () => {
@@ -266,9 +273,35 @@ describe("SimulatedFiscalProvider — getXml / getDanfe (A2)", () => {
   });
 
   it("devolve null (e não exceção) quando não há artefato para a referência", async () => {
-    const fiscal = provider();
-    const recusada = payload({ items: [{ ...payload().items[0], cfop: "" }] });
-    await fiscal.emit({ ref: "venda-recusada", model: "nfe", payload: recusada });
+    // Duas ausências diferentes: a `ref` que este provedor nunca viu, e a nota
+    // que a borda restaurou sem artefato — o caso de uma emissão que a SEFAZ
+    // recusou e que `fiscal_documents` guarda sem XML nem PDF. Antes de A9 o
+    // segundo caso era produzido pela validação interna do próprio provedor;
+    // ela saiu daqui, e o `seed` é agora a forma honesta de chegar ao mesmo
+    // estado.
+    const fiscal = createSimulatedFiscalProvider({
+      now: () => new Date("2026-09-01T15:00:00Z"),
+      randomInt: () => 7,
+      seed: {
+        documents: [
+          {
+            ref: "venda-recusada",
+            model: "nfe",
+            status: "erro_autorizacao",
+            chave: null,
+            numero: null,
+            serie: null,
+            protocolo: null,
+            statusSefaz: "225",
+            mensagemSefaz: "Rejeição: falha no schema XML da NF-e",
+            xml: null,
+            pdf: null,
+            xmlCancelamento: null,
+            qrCodeUrl: null,
+          },
+        ],
+      },
+    });
 
     expect(await fiscal.getXml("nao-existe")).toBeNull();
     expect(await fiscal.getXml("venda-recusada")).toBeNull();

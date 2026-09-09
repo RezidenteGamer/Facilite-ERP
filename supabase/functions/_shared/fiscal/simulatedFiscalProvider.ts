@@ -39,6 +39,22 @@
  * O provedor real não precisa de nada disso — quem guarda o estado dele é a API
  * dele —, e é por isso que o parâmetro é opcional e vive só aqui, não no
  * contrato `FiscalProvider`.
+ *
+ * ## Este provedor **não valida payload** desde A9 (09/09/2026)
+ *
+ * Ele tinha uma `validatePayload` própria, e ela era o único validador local do
+ * sistema. Isso amarrava a validação à escolha de provedor: com
+ * `FISCAL_PROVIDER=focus` (A12) a nota iria para a rede sem passar por crivo
+ * nenhum. Pior, a recusa saía daqui com `statusSefaz: "225"` e "Rejeição: falha
+ * no schema XML da NF-e" — um `cStat` inventado para uma conversa que não
+ * houve, gravado em `fiscal_documents` como se a SEFAZ tivesse respondido.
+ *
+ * A função saiu inteira para `payloadValidation.ts` e passou a rodar em
+ * `handleEmit`, antes de qualquer provedor. **Não ficou cópia aqui**: este
+ * arquivo voltou a ser só transporte, e transporte não opina sobre conteúdo.
+ * Um payload torto entregue direto a `emit()` (o que só acontece em teste, já
+ * que a borda valida antes) vira documento torto, e é a resposta honesta — é
+ * assim que um provedor que não é a SEFAZ se comporta.
  */
 
 import { buildAccessKey, isValidAccessKey, onlyDigits, resolveUfCode } from "./accessKey.ts";
@@ -61,7 +77,6 @@ import type {
   FiscalEventResult,
   FiscalInvalidateRequest,
   FiscalModel,
-  NfePayload,
 } from "./types.ts";
 
 /**
@@ -133,38 +148,6 @@ type StoredInvalidation = {
 
 /** Limite de cartas de correção por NF-e — regra da SEFAZ, não escolha nossa. */
 const MAX_CARTAS_CORRECAO = 20;
-
-/**
- * Validação **estrutural** do payload — só o que impede a nota de existir como
- * documento. Nada de regra tributária: alíquota, CFOP e CST são responsabilidade
- * do módulo Tributações (etapa 7), e esta camada não sabe nada sobre eles.
- *
- * Serve para os módulos consumidores exercitarem o caminho de recusa sem
- * depender de uma API real, que é justamente o caminho que ninguém testa.
- */
-function validatePayload(payload: NfePayload): string[] {
-  const problems: string[] = [];
-  if (!payload.cnpj_emitente || onlyDigits(payload.cnpj_emitente).length !== 14) {
-    problems.push("CNPJ do emitente ausente ou fora do formato de 14 dígitos");
-  }
-  if (!payload.nome_emitente?.trim()) problems.push("Nome do emitente ausente");
-  if (!payload.natureza_operacao?.trim()) problems.push("Natureza da operação ausente");
-  if (!payload.data_emissao?.trim()) problems.push("Data de emissão ausente");
-  if (!payload.items?.length) problems.push("Nota sem itens");
-
-  payload.items?.forEach((item) => {
-    const onde = `item ${item.numero_item}`;
-    if (!item.descricao?.trim()) problems.push(`${onde}: descrição ausente`);
-    if (!item.cfop?.trim()) problems.push(`${onde}: CFOP ausente`);
-    if (!item.codigo_ncm?.trim()) problems.push(`${onde}: NCM ausente`);
-    if (!item.icms_situacao_tributaria?.trim()) {
-      problems.push(`${onde}: situação tributária do ICMS (CST/CSOSN) ausente`);
-    }
-    if (!(item.quantidade_comercial > 0)) problems.push(`${onde}: quantidade deve ser maior que zero`);
-  });
-
-  return problems;
-}
 
 /**
  * Projeta o registro interno no que o contrato promete.
@@ -290,30 +273,6 @@ export function createSimulatedFiscalProvider(
       // consulta do `ref` existente).
       const existing = documents.get(ref);
       if (existing) return toDocument(existing);
-
-      const problems = validatePayload(payload);
-      if (problems.length > 0) {
-        const rejected: StoredDocument = {
-          ref,
-          model,
-          status: "erro_autorizacao",
-          chave: null,
-          numero: null,
-          serie: null,
-          protocolo: null,
-          protocoloNumerico: "",
-          cartasCorrecao: 0,
-          cnpjEmitente: onlyDigits(payload.cnpj_emitente ?? ""),
-          statusSefaz: "225",
-          mensagemSefaz: `Rejeição: falha no schema XML da NF-e — ${problems.join("; ")}`,
-          xml: null,
-          pdf: null,
-          xmlCancelamento: null,
-          qrCodeUrl: null,
-        };
-        documents.set(ref, rejected);
-        return toDocument(rejected);
-      }
 
       const issuedAt = now();
       const cnpj = onlyDigits(payload.cnpj_emitente);

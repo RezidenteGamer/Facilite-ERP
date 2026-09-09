@@ -195,6 +195,52 @@ function isCnpj(document: string): boolean {
   return onlyDigits(document).length === 14;
 }
 
+/**
+ * Os campos `CNPJ`/`CPF` do grupo `dest`, a partir do documento do cadastro
+ * (correção de A9, 09/09/2026).
+ *
+ * **`contacts.document` é `text NOT NULL DEFAULT ''`**, então "cliente sem
+ * documento" chega aqui como string vazia — e a versão anterior mandava
+ * `cpf_destinatario: ""` no payload, um campo presente e vazio, que é
+ * diferente de ausente tanto para o schema da SEFAZ quanto para o validador de
+ * A9. Vazio agora sai do payload: no lugar dele o grupo `dest` fica sem
+ * documento, que é o que "não identificado" significa (e o que a NFC-e de
+ * balcão faz o tempo todo). Numa NF-e, onde o destinatário é obrigatório, é o
+ * validador que recusa — com a mensagem certa, em vez de a SEFAZ recusar um
+ * `<CPF></CPF>`.
+ *
+ * Os dois campos são um `xs:choice`: um ou outro, nunca os dois.
+ */
+function documentoDoDestinatario(documento: string): Pick<NfePayload, "cnpj_destinatario" | "cpf_destinatario"> {
+  const digitos = onlyDigits(documento);
+  if (!digitos) return {};
+  return isCnpj(documento)
+    ? { cnpj_destinatario: digitos }
+    : { cpf_destinatario: digitos };
+}
+
+/**
+ * A inscrição estadual do destinatário **só quando `indIEDest = 1`** (correção
+ * de A9, 09/09/2026).
+ *
+ * Regra `E17` do leiaute: a IE do destinatário é informada somente quando ele é
+ * contribuinte de ICMS. Mandá-la junto do indicador de isento é a **rejeição
+ * 791**, já citada na nota de `resolveConsumidorFinal` — e era o que acontecia:
+ * os três documentos copiavam `contact.inscricaoEstadual` para o payload sem
+ * olhar o indicador, de modo que todo cliente com IE cadastrada e
+ * `indicador_ie` nulo (o padrão da imensa maioria dos contatos) saía com
+ * `indIEDest = 9` **e** IE preenchida na mesma nota.
+ *
+ * A correção é aqui e não no validador de A9 de propósito: um validador que
+ * recusa a nota que o próprio motor monta não é um validador, é um bloqueio.
+ */
+function ieDoDestinatario(
+  indicadorIeCodigo: number | undefined,
+  inscricaoEstadual: string | null,
+): string | undefined {
+  return indicadorIeCodigo === 1 ? (inscricaoEstadual ?? undefined) : undefined;
+}
+
 /** Identifica o item nas mensagens de erro, para quem lê saber qual produto corrigir. */
 function itemLabel(item: SaleForInvoiceItem, index: number): string {
   return `Item ${index + 1} (${item.product.code} — ${item.product.description})`;
@@ -2107,7 +2153,6 @@ export function buildNfePayloadFromSale(
   const branch = sale.branch;
   const contact = sale.contact!;
   const regime = branch.regimeTributario!;
-  const document = onlyDigits(contact.document);
   const tipoCliente = resolveTipoCliente(contact.document, contact.indicadorIe);
   // Um código só para os dois campos que a Rejeição 696 cruza — ver
   // `resolveConsumidorFinal`.
@@ -2189,9 +2234,8 @@ export function buildNfePayloadFromSale(
     regime_tributario_emitente: Number.parseInt(regime, 10),
 
     nome_destinatario: contact.name,
-    cnpj_destinatario: isCnpj(contact.document) ? document : undefined,
-    cpf_destinatario: !isCnpj(contact.document) ? document : undefined,
-    inscricao_estadual_destinatario: contact.inscricaoEstadual ?? undefined,
+    ...documentoDoDestinatario(contact.document),
+    inscricao_estadual_destinatario: ieDoDestinatario(indicadorIeCodigo, contact.inscricaoEstadual),
     indicador_inscricao_estadual_destinatario: indicadorIeCodigo,
     logradouro_destinatario: contact.logradouro ?? undefined,
     numero_destinatario: contact.numero ?? undefined,
@@ -2280,15 +2324,14 @@ function buildFormasPagamento(payments: SaleForInvoicePayment[]): NfePayloadPaga
  */
 function buildNfceDestinatarioFields(contact: SaleForInvoiceContact | null): Partial<NfePayload> {
   if (!contact) return {};
-  const document = onlyDigits(contact.document);
   const cnpj = isCnpj(contact.document);
+  const indicadorIeCodigo = cnpj ? resolveIndicadorIeCodigo(contact.indicadorIe) : undefined;
   return {
     nome_destinatario: contact.name,
-    cnpj_destinatario: cnpj ? document : undefined,
-    cpf_destinatario: !cnpj ? document : undefined,
+    ...documentoDoDestinatario(contact.document),
     telefone_destinatario: contact.phone ?? undefined,
-    inscricao_estadual_destinatario: cnpj ? (contact.inscricaoEstadual ?? undefined) : undefined,
-    indicador_inscricao_estadual_destinatario: cnpj ? resolveIndicadorIeCodigo(contact.indicadorIe) : undefined,
+    inscricao_estadual_destinatario: ieDoDestinatario(indicadorIeCodigo, contact.inscricaoEstadual),
+    indicador_inscricao_estadual_destinatario: indicadorIeCodigo,
     pais_destinatario: "Brasil",
   };
 }
@@ -2536,7 +2579,6 @@ export function buildReturnNfePayload(
   const branch = saleReturn.branch;
   const contact = saleReturn.contact!;
   const regime = branch.regimeTributario!;
-  const document = onlyDigits(contact.document);
   const tipoCliente = resolveTipoCliente(contact.document, contact.indicadorIe);
   const indicadorIeCodigo = resolveIndicadorIeCodigo(contact.indicadorIe);
 
@@ -2621,9 +2663,8 @@ export function buildReturnNfePayload(
     regime_tributario_emitente: Number.parseInt(regime, 10),
 
     nome_destinatario: contact.name,
-    cnpj_destinatario: isCnpj(contact.document) ? document : undefined,
-    cpf_destinatario: !isCnpj(contact.document) ? document : undefined,
-    inscricao_estadual_destinatario: contact.inscricaoEstadual ?? undefined,
+    ...documentoDoDestinatario(contact.document),
+    inscricao_estadual_destinatario: ieDoDestinatario(indicadorIeCodigo, contact.inscricaoEstadual),
     indicador_inscricao_estadual_destinatario: indicadorIeCodigo,
     logradouro_destinatario: contact.logradouro ?? undefined,
     numero_destinatario: contact.numero ?? undefined,
