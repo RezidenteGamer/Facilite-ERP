@@ -768,16 +768,25 @@ export async function persistCancel(admin: SupabaseClient, input: PersistCancelI
 }
 
 /**
- * Quem pediu a reconciliação: o operador que clicou "Consultar status" (A6) ou
- * a varredura agendada (A7).
+ * Quem pediu a reconciliação: o operador que clicou "Consultar status" (A6), a
+ * varredura agendada (A7) ou a notificação da Focus (A8).
  *
  * Vai para `fiscal_document_events.request_payload`. Sem isto, uma transição
  * feita pela fila — que roda **sem usuário**, e portanto grava `created_by`
  * nulo — ficaria indistinguível de um evento cujo autor se perdeu. Numa tabela
  * que existe para auditoria fiscal, "mudou sozinho" e "mudou pela varredura das
  * 03h" não podem ter o mesmo registro.
+ *
+ * `webhook` (A8, 09/09/2026) tem o mesmo `created_by` nulo da fila e precisava,
+ * pelo mesmo motivo, de um nome próprio: "o provedor nos avisou às 03h" e "a
+ * varredura das 03h perguntou" produzem a mesma escrita e são fatos diferentes
+ * — e quando A12 ligar o gatilho de verdade, é por este campo que se descobre
+ * se a notificação está chegando.
+ *
+ * A coluna é `jsonb` (migration de A3) e não tem CHECK sobre o conteúdo:
+ * acrescentar um valor aqui **não** exige migration — conferido, não presumido.
  */
-export type OrigemReconciliacao = "consulta" | "fila";
+export type OrigemReconciliacao = "consulta" | "fila" | "webhook";
 
 export type PersistQueryStatusInput = {
   documentId: string;

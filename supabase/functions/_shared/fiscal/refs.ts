@@ -30,3 +30,21 @@ export function saleFiscalRef(saleId: string): string {
 export function saleReturnFiscalRef(saleReturnId: string): string {
   return `devolucao-${saleReturnId}`;
 }
+
+/**
+ * O caminho de volta: a palavra que descreve a origem, lida da própria `ref`.
+ *
+ * Existe desde A8 (09/09/2026) porque `fiscal-webhook` é o primeiro chamador
+ * que **só tem a `ref`** — a notificação da Focus não traz `saleId` nem
+ * `saleReturnId`, e as outras três ações recebem a origem no corpo da
+ * requisição (`describeOrigin` em `fiscal-emit/index.ts`). A palavra entra nas
+ * mensagens que `decideConsulta` monta ("a nota desta venda…").
+ *
+ * Mora aqui, e não no chamador, porque o prefixo é formato desta função: quem
+ * decide como a `ref` é escrita é quem deve saber lê-la de volta. Uma `ref` de
+ * formato desconhecido cai em "venda", que é o caso comum e não muda decisão
+ * nenhuma — a palavra é texto de mensagem, nunca chave de despacho.
+ */
+export function describeRefOrigin(ref: string): string {
+  return ref.startsWith("devolucao-") ? "devolução" : "venda";
+}

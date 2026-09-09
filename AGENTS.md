@@ -6834,3 +6834,280 @@ Três achados, os três no código novo, e os três corrigidos aqui:
   passa a significar "já é hora da primeira pergunta"; o caminho `aguardando` da
   fila, hoje inalcançável, é o que vai sustentar isso, e o mecanismo (perguntar
   antes de decidir) vale nos dois mundos.
+
+### Decisão arquitetural: o webhook fiscal — o aviso não é o extrato, e a porta nasce trancada (A8) (09/09/2026)
+
+Quinta tarefa da Etapa 3. O plano mestre descrevia A8 como "Edge Function
+pública `fiscal-webhook`, construída e **desligada**, testada contra payload de
+exemplo".
+
+**Nada foi aplicado nem implantado. Nenhuma migration foi escrita** — e a
+ausência foi conferida, não presumida: o único campo novo é o valor `webhook` em
+`OrigemReconciliacao`, que vai para `fiscal_document_events.request_payload`,
+uma coluna `jsonb` sem CHECK sobre o conteúdo (migration de A3). `fiscal-emit` e
+`fiscal-webhook` **não** foram implantadas, nenhum gatilho foi cadastrado na
+Focus (isso é A12), nenhuma regra de cálculo tributário foi tocada, e a fila de
+A7 (`queue.ts`, `fiscal_queue`) e a reserva de A5 ficaram intactas.
+
+#### O que a pesquisa confirmou sobre o mecanismo da Focus
+
+Fontes, todas com acesso em 09/09/2026:
+[Webhooks](https://doc.focusnfe.com.br/reference/webhooks) (`updatedAt`
+10/04/2026), [Criar](https://doc.focusnfe.com.br/reference/criar_webhook),
+[Solicitar reenvio de notificação de NFe](https://doc.focusnfe.com.br/reference/reenviar_hook_nfe),
+[Consultar](https://doc.focusnfe.com.br/reference/consultar_nfe) e o índice
+completo `doc.focusnfe.com.br/llms.txt` (161 linhas).
+
+1. **É `POST` com JSON, um documento por acionamento.** Literalmente: *"os dados
+   do documento são enviados em formato JSON via método POST para uma URL
+   definida por você. Cada acionamento do gatilho contém os dados de apenas um
+   documento."*
+2. **A autenticação é um header escolhido por nós, não uma assinatura.** O
+   cadastro é `POST /v2/hooks` com `event` e `url` obrigatórios e `cnpj`/`cpf`,
+   `authorization` (o **valor**) e `authorization_header` (o **nome do header**)
+   opcionais. A resposta é o objeto `Hook` (`id`, `url`, `authorization`,
+   `authorization_header`, `event`, `cnpj`). Os `event` aceitos: `nfe`, `nfse`,
+   `nfsen`, `nfce_contingencia`, `nfe_recebida`, `nfe_recebida_falha_consulta`,
+   `cte_recebida`, `inutilizacao`, `cte`, `mdfe`, `nfcom`, `nfsen_recebida`,
+   `dce`, `nfce_consulta_automatica`. **É o mesmo desenho que A7 já
+   implementou** para a varredura (`x-fiscal-queue-secret` /
+   `FISCAL_QUEUE_SECRET`), o que confirmou o palpite do enunciado: reaproveitar,
+   não inventar.
+3. **Reenvio automático quando a resposta não é 2xx**: 1 min, 30 min, 1 h, 3 h,
+   24 h — *"depois da última tentativa, o gatilho não é disparado de novo para
+   aquele evento"*. Cinco tentativas e desiste; não é fila eterna.
+4. **`POST /v2/nfe/<ref>/hook` reenvia a notificação à mão**, "para efeitos de
+   teste ou para recuperar notificações perdidas", e devolve a lista de gatilhos
+   acionados. É o que A12 vai usar para exercitar isto contra a conta real sem
+   emitir nota nova.
+5. **E a descoberta que decide o desenho: o corpo da notificação não é
+   documentado.** Nem lista de campos, nem exemplo, em lugar nenhum. Conferido
+   página a página no índice inteiro: as cinco páginas de gatilho (`webhooks`,
+   `criar_webhook`, `listar_webhooks`, `consultar_webhook`, `excluir_webhook`) e
+   as doze de reenvio (`reenviar_hook_*`) descrevem o objeto **Hook** — o
+   cadastro —, nunca o corpo enviado. A documentação antiga
+   (`focusnfe.com.br/doc`) hoje redireciona para a nova e também não o traz.
+
+#### A decisão central: a notificação é um aviso, não um extrato
+
+O enunciado levantou a possibilidade de que "o webhook já traz o resultado,
+então talvez não precise nem chamar o provedor de novo". **Foi recusada**, e não
+por conservadorismo: por duas razões, cada uma suficiente sozinha.
+
+1. **O formato não é documentado** (achado nº 5 acima). Escrever um tradutor a
+   partir do formato da *consulta* — que é documentado — e gravar o resultado em
+   `fiscal_documents` seria escriturar nota fiscal a partir de uma suposição
+   sobre o que chega. É o mesmo tipo de erro que A7 recusou ao não classificar
+   códigos de rejeição que nenhum provedor produz ainda.
+2. **O segredo não assina o corpo** (achado nº 2). Ele é um valor fixo num
+   header: prova que o chamador **conhece o segredo**, nada além disso. Se o
+   corpo fosse a verdade, quem tivesse o segredo poderia declarar qualquer `ref`
+   como `autorizado`, com a chave de acesso que quisesse, num endpoint público.
+   Perguntando ao provedor, o pior que um chamador com o segredo consegue é nos
+   fazer **perguntar** sobre uma `ref` — e a resposta vem de um `GET`
+   autenticado com o nosso token. O raio de estrago de um segredo vazado cai de
+   "escreve qualquer estado fiscal" para "nos faz gastar um crédito".
+
+Então `fiscal-webhook` lê do corpo **só a identidade** do documento (`ref`), e o
+desfecho vem do mesmo `provider.query(ref)` de A6 e A7. Custa uma requisição a
+mais — 1 crédito dos 100 por minuto que a Focus documenta (pesquisa de A7) — e
+tem um efeito colateral bom: **a escada de reenvio da Focus vira a nossa
+retentativa**. Consulta que falha responde 500, e ela volta em 1 minuto. Se ela
+desistir depois de 24 h, a fila de A7 continua perseguindo a reserva a cada 6 h,
+para sempre. As duas se cobrem, e nenhuma foi desenhada para isso.
+
+#### A6 e A7 foram reaproveitados, não duplicados
+
+`decideConsulta` **não foi tocada**, e a razão é a que A6 já tinha escrito: ela
+não sabe se veio de uma consulta manual, de uma varredura agendada ou de um
+webhook — só precisa do `FiscalStatus` que o contrato define.
+
+O que mudou de lugar: `reconciliaComProvedor` (que A7 extraiu de `handleQuery`)
+saiu de `fiscal-emit/index.ts` para **`fiscal-emit/reconcile.ts`**, junto de
+`seedFromRow`, `createProvider`, `toArtifact`, `resolveAmbiente` e o tipo
+`ProviderContext`. **Recorte puro: mesmos corpos, nenhum comportamento novo.** O
+motivo é mecânico e não estético — `fiscal-emit/index.ts` chama `Deno.serve` no
+corpo do módulo, e `fiscal-webhook` é **outro processo**: importá-lo subiria um
+segundo servidor dentro do primeiro.
+
+Os três chamadores, e a única coisa que os diferencia:
+
+| chamador | quem é | `createdBy` | `origem` |
+| --- | --- | --- | --- |
+| `handleQuery` (A6) | o operador clicando "Consultar status" | o usuário | `consulta` |
+| `handleSweep` (A7) | o `pg_cron`, a cada 5 minutos | `null` | `fila` |
+| `fiscal-webhook` (A8) | a Focus avisando que a nota mudou | `null` | `webhook` |
+
+`webhook` precisava de nome próprio pelo mesmo motivo que `fila` precisou: os
+dois gravam `created_by` nulo, e "o provedor nos avisou às 03h" e "a varredura
+das 03h perguntou" produzem a mesma escrita e são fatos diferentes. Quando A12
+ligar o gatilho, é por esse campo que se descobre se a notificação está chegando.
+
+**A fila é limpa pelo caminho que já existe.** Se a notificação resolve uma
+reserva que a varredura também perseguia, `fiscal-webhook` chama
+`clearQueueEntry` — a mesma função de A7, não um caminho paralelo — e só quando
+a linha era reserva e a decisão não foi `manter`.
+
+`segredosIguais` e a decisão de acesso saíram de `fiscal-emit/index.ts` para
+**`_shared/http/sharedSecret.ts`**, usado pelas duas portas. Uma comparação de
+segredo em tempo constante é exatamente o tipo de código que não pode existir em
+duas cópias que divergem.
+
+E `describeRefOrigin` entrou em `_shared/fiscal/refs.ts`: `fiscal-webhook` é o
+primeiro chamador que **só tem a `ref`** (a notificação não traz `saleId` nem
+`saleReturnId`), e quem decide como a `ref` é escrita é quem deve saber lê-la de
+volta. A palavra só entra em texto de mensagem, nunca em despacho.
+
+#### O que "construída e desligada" significa tecnicamente
+
+Três travas independentes, e **cada uma sozinha** já impede que a função faça
+qualquer coisa hoje:
+
+1. **`FISCAL_WEBHOOK_SECRET` não está definida.** Sem ela, toda requisição
+   recebe **503 antes de ler o corpo**, consultar o banco ou falar com o
+   provedor. Mesma disciplina de falha fechada de A7, e é o interruptor: ligar é
+   criar o segredo, desligar é apagá-lo.
+2. **Nenhum gatilho está cadastrado na Focus.** Não há conta real (A12), e esta
+   tarefa não cadastrou nada — ninguém conhece esta URL.
+3. **A função não foi implantada.**
+
+Ordem para quem for ligar (A12): criar o segredo
+(`supabase secrets set FISCAL_WEBHOOK_SECRET=...`), implantar, e só então
+cadastrar o gatilho com `authorization_header` igual a `FISCAL_WEBHOOK_HEADER`
+(padrão `x-fiscal-webhook-secret`) e `authorization` igual ao segredo. Fora de
+ordem nada quebra de forma perigosa: a Focus recebe 503 ou 401 e reenvia.
+
+#### `verify_jwt = false`, e por que ele não abriu as outras três ações
+
+A função é separada, e não uma quinta ação de `fiscal-emit`, por isso mesmo:
+`fiscal-emit` tem `verify_jwt = true` e baixá-lo abriria `emit`, `cancel` e
+`query` junto (A7 já tinha registrado essa restrição no `config.toml`). Quem
+chama aqui é o servidor da Focus — sem usuário, sem sessão do Supabase Auth, e
+sem onde arrumar um JWT. O `Authorization` dela, aliás, é justamente o header
+que o cadastro do gatilho reserva para o **nosso** segredo.
+
+Sem gateway, o porteiro é inteiramente o segredo compartilhado. E **sem CORS**,
+de propósito: nenhum navegador chama esta URL, e um
+`Access-Control-Allow-Origin: *` só serviria para uma página qualquer conseguir
+disparar a porta a partir do navegador de quem a abrisse.
+
+Os códigos de resposta são escolhidos contra a escada de reenvio, e cada um diz
+uma coisa:
+
+| situação | resposta | por quê |
+| --- | --- | --- |
+| segredo não configurado | 503 | é problema nosso; a Focus insiste depois |
+| segredo errado ou ausente | 401 | não é quem devia chamar |
+| corpo ilegível / sem `ref` | 400 | falhar visível é melhor que um 2xx que mente "recebido e tratado" |
+| `ref` que não é nossa | **200** | reenviar não muda nada; um não-2xx gastaria as cinco tentativas para chegar à mesma conclusão |
+| falha ao consultar o provedor | 500 | é transporte, e é o não-2xx que faz a Focus voltar em 1 minuto |
+
+#### O payload de exemplo do teste, e a honestidade sobre ele
+
+Os corpos do teste são **os exemplos literais da documentação**, de
+`doc.focusnfe.com.br/reference/consultar_nfe.md` (definição OpenAPI,
+`components.examples`, `updatedAt` 12/08/2026, acesso em 09/09/2026) — os quatro
+estados da consulta de NF-e. O de nota autorizada, na íntegra:
+
+```json
+{
+  "cnpj_emitente": "12345678000123",
+  "ref": "referencia_000899_nfe",
+  "status": "autorizado",
+  "status_sefaz": "100",
+  "mensagem_sefaz": "Autorizado o uso da NF-e",
+  "chave_nfe": "NFe41190612345678000123550010000000221923094166",
+  "numero": "22",
+  "serie": "1",
+  "caminho_xml_nota_fiscal": "/arquivos/12345678000123/201906/XMLs/41190612345678000123550010000000221923094166-nfe.xml",
+  "caminho_danfe": "/arquivos/12345678000123/201906/DANFEs/41190612345678000123550010000000221923094166.pdf"
+}
+```
+
+**São exemplos da consulta, não da notificação, e o teste diz isso com todas as
+letras.** Como o corpo da notificação não é publicado, usar o corpo documentado
+mais próximo — declarando que é o mais próximo — é mais honesto que inventar um
+e chamá-lo de "payload de exemplo da Focus". O `processando_autorizacao`
+(`{cnpj_emitente, ref, status}`, três campos) tem teste próprio porque é o corpo
+mais magro que existe e é o que A12 vai receber primeiro: a Focus responde 202 na
+emissão e notifica depois. Um leitor que exigisse `chave_nfe` recusaria
+justamente a primeira notificação de toda nota.
+
+**E é essa lacuna que `campos` existe para fechar por observação**: cada
+notificação registra no log os **nomes** das chaves de topo recebidas — nunca os
+valores, que são dado fiscal. Quando A12 ligar o gatilho, essa linha é o que vai
+documentar o formato que a documentação não documenta. É a única forma honesta
+de descobri-lo.
+
+O `statusInformado` também é lido, e **nunca gravado**: ele é comparado com o que
+o provedor responde e a divergência vai para o log. Um gatilho cadastrado no
+evento errado, ou um corpo cujo formato mudou, aparece ali — e é invisível se
+ninguém registrar.
+
+#### Testes
+
+**462 testes passando** em 15 arquivos (eram 444 em 14). Os 18 novos estão em
+`tests/unit/fiscalWebhookPayload.test.ts` e cobrem as **duas** decisões que A8
+acrescenta — quem entra (o segredo) e o que se lê do que entrou (a notificação)
+—, mais `describeRefOrigin`.
+
+O que **não** está lá, e a ausência é a prova de que a tarefa não duplicou
+lógica: **nenhum teste sobre a resposta do provedor**. Se A8 precisasse de um
+caso "reserva + provedor respondeu autorizado", seria sinal de que reimplementou
+`decideConsulta`; ela não precisa, e ele não existe — aquilo é de A6 e está em
+`fiscalEmitReservation.test.ts`.
+
+A asserção que guarda a decisão de escopo é "não devolve nada que se pareça com
+escrituração fiscal": ela fixa as quatro chaves que a leitura produz. Se alguém
+um dia acrescentar `chave`, `numero` ou `protocolo` ali, é porque a notificação
+voltou a ser tratada como fonte da verdade — e é ali que quebra, antes de a nota
+errada ser gravada.
+
+Não há **teste de integração chamando a função local**, e a decisão é a mesma dos
+outros: `index.ts` importa `jsr:@supabase/supabase-js@2` e não é importável de
+dentro do Vitest; exercitá-lo exigiria `supabase functions serve` com banco
+local, que este projeto não tem montado. Foi justamente por isso que a leitura do
+corpo e a decisão de acesso nasceram em arquivos sem I/O — mesmo motivo de
+`reservation.ts` (A5/A6) e `queue.ts` (A7).
+
+As 3 suítes que falham continuam sendo as mesmas de A5, A6 e A7, pela mesma
+condição de ambiente pré-existente: `FACILITE_TEST_EMAIL` /
+`FACILITE_TEST_PASSWORD` e as credenciais de isolamento não estão em `.env.local`.
+
+`npm run build`, `npm run lint` (62 avisos pré-existentes, o mesmo número de A5,
+A6 e A7, nenhum nos arquivos tocados) e `deno check` nas duas Edge Functions
+(`fiscal-emit/index.ts` e `fiscal-webhook/index.ts`) limpos.
+
+#### O que o `/code-review alto` da própria A8 encontrou
+
+Um achado, no código novo, e no lugar mais fácil de deixar passar: **um campo de
+log que mentia sobre a própria procedência**.
+
+A comparação entre o status que a notificação alega e o desfecho da
+reconciliação registrava o segundo como `statusDoProvedor`. Em dois dos três
+ramos isso é verdade; no ramo `manter`, não é: ali `decideConsulta` devolve
+`extra.status = existing.status` — o que o **banco** já dizia —, porque aquele
+ramo, por definição, não escreve nada. Uma notificação alegando `autorizado`
+sobre uma reserva que o provedor ainda está processando produzia a linha
+`statusDoProvedor: "processando_autorizacao"` para um valor que não veio do
+provedor.
+
+Não corrompe dado nenhum, e é por isso que quase não parece um achado. O peso
+está em quem vai ler: **este log é o instrumento de A12** — é por ele que se
+descobre se o gatilho foi cadastrado no evento certo e se o corpo tem os campos
+que a consulta documenta. Um instrumento que rotula errado a origem do número é
+pior que instrumento nenhum, porque mandaria A12 procurar o problema no provedor
+quando ele está no nosso lado. Corrigido para `statusResultante`, com o
+`decisao.kind` junto — que é o que diz de qual dos três ramos o número saiu.
+
+#### Fronteira com A10 e A12
+
+- **A12 (integração com a Focus)** — é onde esta porta liga. O que ela vai
+  encontrar pronto: a função, o segredo, o nome do header configurável, o teste
+  contra o corpo documentado mais próximo, e o log que vai revelar o corpo real.
+  O que ela ainda precisa fazer: implementar `focusProvider.query()` (hoje lança
+  `FiscalNotConfiguredError`), cadastrar o gatilho, e conferir contra o log se o
+  corpo que chega tem os campos que a consulta documenta.
+- **A10 (numeração fiscal atômica)** — intocada, e continua valendo o argumento
+  de A7: nada nesta tarefa emite nem reemite nota. O webhook, como a fila,
+  **termina de perguntar**.

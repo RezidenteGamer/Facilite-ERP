@@ -92,28 +92,19 @@
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import {
   buildNfcePayloadFromSale,
   buildNfePayloadFromSale,
   buildReturnNfePayload,
 } from "../_shared/fiscal/invoiceMapping.ts";
-import { FiscalNotConfiguredError, type FiscalProvider } from "../_shared/fiscal/provider.ts";
+import { FiscalNotConfiguredError } from "../_shared/fiscal/provider.ts";
 import { saleFiscalRef, saleReturnFiscalRef } from "../_shared/fiscal/refs.ts";
-import {
-  createFiscalProvider,
-  resolveFiscalProviderId,
-  type FiscalProviderId,
-} from "../_shared/fiscal/registry.ts";
-import type { SimulatedFiscalProviderSeed } from "../_shared/fiscal/simulatedFiscalProvider.ts";
-import type {
-  FiscalArtifact,
-  FiscalDocument,
-  FiscalModel,
-  FiscalStatus,
-  NfePayload,
-} from "../_shared/fiscal/types.ts";
+import { resolveFiscalProviderId } from "../_shared/fiscal/registry.ts";
+import type { FiscalDocument, FiscalModel, NfePayload } from "../_shared/fiscal/types.ts";
+
+import { decideAcessoPorSegredo } from "../_shared/http/sharedSecret.ts";
 
 import {
   FiscalDataError,
@@ -127,19 +118,14 @@ import {
   clearQueueEntry,
   persistCancel,
   persistEmission,
-  persistQueryStatus,
   readDocumentByRef,
   readLastNumero,
   readQueueEntries,
   readStuckReservations,
   releaseEmission,
-  releaseStuckReservation,
   reserveEmission,
   saveQueueEntry,
-  type FiscalAmbiente,
   type FiscalDocumentOrigin,
-  type FiscalDocumentRow,
-  type OrigemReconciliacao,
   type StuckReservationRow,
 } from "./persist.ts";
 import {
@@ -149,13 +135,17 @@ import {
   corteDeIdade,
   selecionaLote,
 } from "./queue.ts";
+// O núcleo de reconciliação mora em `reconcile.ts` desde A8 (09/09/2026), para
+// que a Edge Function `fiscal-webhook` — outro processo — possa chamar
+// exatamente o mesmo código sem importar este arquivo (que chama `Deno.serve`).
 import {
-  RESERVA_STATUS,
-  decideAposPerderCorrida,
-  decideConsulta,
-  decideEmissao,
-  type ConsultaDecisao,
-} from "./reservation.ts";
+  createProvider,
+  reconciliaComProvedor,
+  resolveAmbiente,
+  seedFromRow,
+  type ProviderContext,
+} from "./reconcile.ts";
+import { decideAposPerderCorrida, decideEmissao } from "./reservation.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -215,93 +205,8 @@ function describeOrigin(origin: FiscalDocumentOrigin): string {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Provedor e ambiente                                                       */
-/* ------------------------------------------------------------------------ */
-
-/**
- * O ambiente declarado na nota (`tpAmb`).
- *
- * Falha fechado em dois eixos: o provedor simulado é **sempre** homologação
- * (um documento que ninguém enviou à SEFAZ nunca tem valor fiscal, por mais que
- * a variável de ambiente diga o contrário), e qualquer valor que não seja
- * exatamente `producao` também vira homologação.
- */
-function resolveAmbiente(providerId: FiscalProviderId): FiscalAmbiente {
-  if (providerId !== "focus-nfe") return "homologacao";
-  return Deno.env.get("FISCAL_AMBIENTE")?.trim() === "producao" ? "producao" : "homologacao";
-}
-
-function toArtifact(content: string | null, path: string | null, contentType: string): FiscalArtifact | null {
-  if (!content && !path) return null;
-  return { content, path, contentType };
-}
-
-/**
- * A nota que já está no banco, no formato que o provedor simulado sabe
- * restaurar.
- *
- * Existe porque o simulado guarda estado em memória e cada requisição desta
- * função pode cair num isolate novo: sem isto, cancelar uma nota emitida
- * ontem responderia `nao_encontrado` para um documento que está `autorizado`
- * no banco. Ver `seed` em `simulatedFiscalProvider.ts`.
- *
- * ## Uma reserva não é documento do provedor (A6, 09/09/2026)
- *
- * Uma linha em `processando_autorizacao` é **escrituração nossa**, feita antes
- * de o provedor ver a `ref`: ela não tem chave, número, protocolo nem XML.
- * Devolvê-la ao simulado o faria afirmar que se lembra de um documento que ele
- * nunca produziu — e, pior, a consulta de A6 responderia `processando_autorizacao`
- * para sempre, tornando a resolução de uma reserva órfã inalcançável justamente
- * no único provedor testável hoje.
- *
- * Sem semear, o simulado responde `nao_encontrado`, que é a verdade: o isolate
- * que emitiu morreu, e a memória dele morreu junto. É também o que um provedor
- * real responde para uma `ref` que nunca chegou a ele.
- *
- * O efeito colateral em `handleCancel` é benigno e foi conferido: cancelar uma
- * reserva passa a receber `nao_encontrado` em vez do 501 "cancelamento só é
- * possível para documento autorizado". As duas são recusas, as duas não gravam
- * nada, e nenhuma tela oferece o botão nesse estado (`canCancel` exige
- * `autorizado`).
- */
-function seedFromRow(row: FiscalDocumentRow): SimulatedFiscalProviderSeed["documents"] {
-  if (row.status === RESERVA_STATUS) return [];
-  return [
-    {
-      ref: row.ref,
-      model: row.model,
-      status: row.status as FiscalStatus,
-      chave: row.chave,
-      numero: row.numero,
-      serie: row.serie,
-      protocolo: row.protocolo,
-      statusSefaz: row.status_sefaz,
-      mensagemSefaz: row.mensagem_sefaz,
-      xml: toArtifact(row.xml_content, row.xml_path, "application/xml"),
-      pdf: toArtifact(row.pdf_content, row.pdf_path, "text/html"),
-      xmlCancelamento: null,
-      qrCodeUrl: row.qr_code_url,
-      cnpjEmitente: row.emitente_cnpj ?? "",
-    },
-  ];
-}
-
-/* ------------------------------------------------------------------------ */
 /* As três ações                                                             */
 /* ------------------------------------------------------------------------ */
-
-/**
- * O que basta para falar com o provedor e reconciliar uma linha.
- *
- * Separado de `Context` porque a varredura de A7 **não tem usuário nem filial**:
- * ela roda sem sessão, por cima de todas as filiais, e um `branchId` inventado
- * ali seria pior que a ausência dele.
- */
-type ProviderContext = {
-  admin: SupabaseClient;
-  providerId: FiscalProviderId;
-  ambiente: FiscalAmbiente;
-};
 
 type Context = ProviderContext & {
   branchId: string;
@@ -533,66 +438,6 @@ async function handleQuery(ctx: Context, origin: FiscalDocumentOrigin): Promise<
   return outcome(decisao.errors, decisao.extra);
 }
 
-/**
- * **Consulta o provedor pela `ref` e aplica `decideConsulta`** — o núcleo que
- * A6 escreveu, agora com dois chamadores.
- *
- * Extraído em A7 (09/09/2026) exatamente para que a varredura agendada **não
- * reimplemente decisão nenhuma**: ela chama isto, com `createdBy: null` e
- * `origemEscrita: "fila"`, e o que decide continua sendo a tabela de
- * `reservation.ts`. Fora daqui, a diferença entre o operador e a fila é só quem
- * assina o evento.
- *
- * `aplicado` é `false` num caso só: `liberar` cujo compare-and-swap não casou —
- * a linha saiu de `processando_autorizacao` entre a consulta e a escrita. Cada
- * chamador decide o que fazer com isso; nenhum deve tratá-lo como erro.
- */
-async function reconciliaComProvedor(
-  ctx: ProviderContext,
-  existing: FiscalDocumentRow,
-  origem: string,
-  autor: { createdBy: string | null; origemEscrita: OrigemReconciliacao },
-): Promise<{ decisao: ConsultaDecisao; aplicado: boolean }> {
-  const provider = createProvider(ctx, { documents: seedFromRow(existing) });
-  const document = await provider.query(existing.ref);
-
-  const decisao = decideConsulta(existing, document, origem);
-
-  if (decisao.kind === "gravar") {
-    await persistQueryStatus(ctx.admin, {
-      documentId: existing.id,
-      branchId: existing.branch_id,
-      ambiente: ctx.ambiente,
-      document,
-      previousStatus: existing.status,
-      createdBy: autor.createdBy,
-      origem: autor.origemEscrita,
-    });
-    return { decisao, aplicado: true };
-  }
-
-  if (decisao.kind === "liberar") {
-    const liberou = await releaseStuckReservation(ctx.admin, {
-      documentId: existing.id,
-      branchId: existing.branch_id,
-      ambiente: ctx.ambiente,
-      mensagem: decisao.mensagemSefaz,
-      createdBy: autor.createdBy,
-      origem: autor.origemEscrita,
-    });
-    return { decisao, aplicado: liberou };
-  }
-
-  return { decisao, aplicado: true };
-}
-
-function createProvider(
-  ctx: Pick<ProviderContext, "providerId">,
-  seed: SimulatedFiscalProviderSeed,
-): FiscalProvider {
-  return createFiscalProvider(ctx.providerId, { simulatedSeed: seed });
-}
-
 /* ------------------------------------------------------------------------ */
 /* A varredura agendada (A7, 09/09/2026)                                     */
 /* ------------------------------------------------------------------------ */
@@ -729,38 +574,20 @@ async function handleSweep(ctx: ProviderContext): Promise<Response> {
  * **Falha fechado**: sem a variável configurada, a varredura não roda. Uma
  * função implantada antes de o segredo existir responde 503 e o agendador
  * registra o erro em `cron.job_run_details`, em vez de rodar sem porteiro.
+ *
+ * A comparação em tempo constante e a decisão em si moram em
+ * `_shared/http/sharedSecret.ts` desde A8 (09/09/2026), porque `fiscal-webhook`
+ * autentica pelo mesmo mecanismo — e uma comparação de segredo é justamente o
+ * tipo de código que não pode existir em duas versões que divergem.
  */
 function recusaVarredura(req: Request): Response | null {
-  const esperado = Deno.env.get("FISCAL_QUEUE_SECRET")?.trim();
-  if (!esperado) {
-    return jsonResponse(
-      { error: "A varredura da fila fiscal não está configurada (FISCAL_QUEUE_SECRET ausente)." },
-      503,
-    );
-  }
-  if (!segredosIguais(req.headers.get("x-fiscal-queue-secret") ?? "", esperado)) {
-    return jsonResponse({ error: "Não autorizado." }, 401);
-  }
-  return null;
+  const recusa = decideAcessoPorSegredo(
+    req.headers.get("x-fiscal-queue-secret"),
+    Deno.env.get("FISCAL_QUEUE_SECRET"),
+    { porta: "A varredura da fila fiscal", variavel: "FISCAL_QUEUE_SECRET" },
+  );
+  return recusa ? jsonResponse({ error: recusa.error }, recusa.status) : null;
 }
-
-/**
- * Comparação de tempo constante.
- *
- * `a === b` sai no primeiro byte diferente, e a diferença de tempo entre "errou
- * no primeiro caractere" e "errou no último" é mensurável. Custa cinco linhas
- * fechar isso, e é a única defesa que um segredo estático tem contra quem pode
- * chamar o endpoint à vontade.
- */
-function segredosIguais(recebido: string, esperado: string): boolean {
-  const a = new TextEncoder().encode(recebido);
-  const b = new TextEncoder().encode(esperado);
-  if (a.length !== b.length) return false;
-  let diferenca = 0;
-  for (let i = 0; i < a.length; i += 1) diferenca |= a[i] ^ b[i];
-  return diferenca === 0;
-}
-
 
 /* ------------------------------------------------------------------------ */
 /* Borda HTTP                                                                */

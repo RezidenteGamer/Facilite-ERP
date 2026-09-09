@@ -39,3 +39,24 @@ verify_jwt = false
 # ver `recusaVarredura` em `index.ts`. `verify_jwt` continua `true`: baixá-lo
 # abriria as outras três ações junto.
 verify_jwt = true
+
+[functions.fiscal-webhook]
+# Recebe a notificação da Focus quando um documento muda de estado (tarefa A8,
+# 09/09/2026). É `verify_jwt = false` pelo motivo oposto ao de `fiscal-emit`:
+# quem chama é o servidor da Focus, que não tem usuário, não tem sessão do
+# Supabase Auth e não tem onde arrumar um JWT. O `Authorization` dela, aliás, é
+# justamente o header que o cadastro do gatilho reserva para o **nosso** segredo
+# (`authorization_header` / `authorization` em `POST /v2/hooks`).
+#
+# Baixar o gateway **nesta** função é o que permitiu não baixá-lo em
+# `fiscal-emit`: a alternativa seria uma quinta ação lá dentro, e aí `emit`,
+# `cancel` e `query` perderiam a verificação junto.
+#
+# Sem gateway, o porteiro é inteiramente o segredo compartilhado
+# `FISCAL_WEBHOOK_SECRET`, no header `FISCAL_WEBHOOK_HEADER` (padrão
+# `x-fiscal-webhook-secret`), comparado em tempo constante — ver
+# `_shared/http/sharedSecret.ts`. **Falha fechada**: sem o segredo configurado
+# ela responde 503 antes de ler o corpo, e é assim que A8 a entrega
+# **desligada**. Nenhum gatilho está cadastrado na Focus (isso é A12) e esta
+# função não foi implantada.
+verify_jwt = false
