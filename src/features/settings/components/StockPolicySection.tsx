@@ -3,12 +3,17 @@ import { fetchBranchAllowsNegativeStock, updateBranchAllowsNegativeStock } from 
 import { useAuth } from "../../auth/AuthContext";
 
 /**
- * Primeiro parâmetro real de Configurações (as demais ações do painel ainda
- * são decorativas) — escopado pela filial ativa, não uma tela de
- * administração de Filiais própria (essa continua só por SQL). Gated por
+ * Primeiro parâmetro real de Configurações (a busca e os dois botões do topo
+ * do painel continuam decorativos) — escopado pela **filial ativa**. Gated por
  * `can_manage_branches`, a mesma flag que já protege `branches update` no
  * RLS: sem ela o toggle aparece desabilitado, não escondido, para deixar
  * claro que o parâmetro existe mesmo sem permissão de mudá-lo.
+ *
+ * Desde D1 (09/09/2026) existe cadastro de filiais em `/configuracoes/filiais`,
+ * e o mesmo campo é editável **em qualquer filial** por lá. Este atalho
+ * continua aqui de propósito: é o parâmetro do dia a dia de quem está
+ * trabalhando numa filial, e quem o mexe não é necessariamente quem abre o
+ * cadastro. Os dois gravam a mesma coluna e leem do mesmo lugar.
  */
 export default function StockPolicySection() {
   const { currentBranchId, profile } = useAuth();

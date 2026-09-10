@@ -64,7 +64,8 @@ O que **não** muda por causa disso:
   - `/modulos` — construtor de módulos: cria um módulo (rota, tile, campos, CRUD) sem deploy, edita os campos de módulos que já rodam no motor genérico, e configura o **workflow** deles (situações, transições e ações automáticas). **Ferramenta interna da Facilite, não recurso do cliente**: desde 28/08/2026 o portão de entrada é `profiles.is_facilite_developer` (flag de pessoa, ligada só por SQL), não mais a flag de papel `can_manage_modules` — ver a decisão de produto no fim deste arquivo, além das decisões de M3 e M4 abaixo. O `access_gate` da linha continua sendo `manage_modules` (o nome diz o que o portão protege; quem passa por ele é que mudou);
   - `/condicionais` e `/condicionais/nova` — condicionais: peças enviadas ao cliente para experimentar em casa (real: grava em `conditionals`/`conditional_items` via `create_conditional`, que já baixa estoque na hora; devolução e conversão em venda resolvem o saldo aos poucos por item — ver decisão abaixo);
   - `/relatorios` — relatórios: grade de 12 blocos, cada um com filtro + tabela + resumo, lendo de views/tabelas de outros módulos, sem escrever nada (real: tela própria sobre views com `security_invoker` — ver decisão abaixo);
-  - `/configuracoes` — configurações.
+  - `/configuracoes` — configurações;
+  - `/configuracoes/filiais` — cadastro de filiais (real: lista, cria e edita `branches`, com tela própria e não pelo motor genérico — ver a decisão de D1 no fim deste arquivo). É **sub-rota** do módulo `configuracoes`, não linha do catálogo: ver a decisão 2 de D1 para o porquê.
 - **As rotas acima não são mais escritas à mão**: desde 18/08/2026 elas vêm do catálogo na tabela `modules` (só `/` e `/inicio` continuam declaradas em `src/App.tsx`). Um módulo novo passa a existir inserindo uma linha nessa tabela — e, se não tiver componente próprio registrado, abre pelo motor genérico assim mesmo. Ver a decisão "catálogo de módulos no banco + roteador dirigido por metadados" abaixo.
 - A navegação e a maioria das telas ainda são de front-end (arrays mockados) — exceção feita a Clientes/Fornecedores, Produtos, Realizar Venda, Ajuste de estoque, Pedidos de venda, Financeiro, Compras, Controle de caixa, Ponto de venda, Tributações, Grupos tributários, Notas Emitidas, Devolução de venda, Condicionais e Relatórios, que já são reais.
 - Existe agora um projeto Supabase real (`Facilite-ERP`, id `ifmdedruuetbbqjbnrkd`, região sa-east-1), configurado em `.env.local` (não versionado). `src/lib/supabaseClient.ts` usa `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` de lá. Não crie, exponha ou invente credenciais.
@@ -106,7 +107,7 @@ Decisão do usuário: aprofundar módulos é a prioridade (não refinar login), 
 - **Módulo Produtos** (`src/features/products/`) é o segundo módulo sobre o motor genérico (`modules.id = 'produtos'`), com tabela `products` própria (`branch_id`, preços numéricos de verdade — corrigindo uma inconsistência do mock antigo que tratava preço como string). Repositório/hook seguem o mesmo padrão de `contactsRepository.ts`/`useContactsData.ts`. Ação "Clonar" reaproveita o modal de criação com `initialValues` do produto selecionado.
 - Testado e confirmado: dois usuários sem vínculo com a mesma filial não enxergam os produtos um do outro, mesmo tentando ler via console diretamente (RLS bloqueia no banco, não só a UI).
 - **Lição aplicada desta vez**: as policies de gerência (`manage X`) já nasceram separadas por `insert`/`update`/`delete` (em vez de `for all`), evitando duplicar a cobertura de `SELECT` que a policy `read X` já dá — rodada anterior gerou avisos de "multiple permissive policies" que precisaram ser corrigidos depois; desta vez não apareceu nenhum.
-- **Fora de escopo por enquanto**: tela de administração de filiais (criar/editar filial, vincular usuários a filiais ainda só é feito via SQL — não há UI); demais módulos (compras, vendas, estoque etc.) continuam mock. Upload de imagem de produto foi resolvido em 25/08/2026 — ver decisão no fim do arquivo.
+- **Fora de escopo por enquanto**: ~~tela de administração de filiais (criar/editar filial, vincular usuários a filiais ainda só é feito via SQL — não há UI)~~ — **metade resolvida em D1 (09/09/2026)**: criar e editar filial agora tem tela (`/configuracoes/filiais`); **vincular usuários a filiais (`user_branches`) continua só por SQL**. Ver a decisão de D1 no fim deste arquivo. Demais módulos (compras, vendas, estoque etc.) continuam mock. Upload de imagem de produto foi resolvido em 25/08/2026 — ver decisão no fim do arquivo.
 
 ### Decisão arquitetural: upload de foto do contato (13/08/2026, noite)
 
@@ -7588,3 +7589,311 @@ nenhum nos arquivos tocados) e
   numeração local nunca colide com a que já está gravada.
 - **A inutilização com tela** — o que falta é a ação HTTP em `fiscal-emit`, a
   escrita do evento e a tela. O banco e a numeração já estão prontos para ela.
+
+### Decisão arquitetural: Filiais ganham tela — por que ela não passa pelo motor genérico, e o que ficou de fora das outras cinco frentes de Configurações (D1) (09/09/2026)
+
+Primeira tarefa da Etapa D, **invertida para vir antes de A11** por decisão do
+usuário: D1 constrói a casa onde o cadastro de certificado digital de A11 vai
+morar.
+
+O plano lista seis coisas em "Configurações": cadastro de filiais, série e
+numeração, casas decimais e arredondamento, teto de desconto por perfil, e-mail
+de envio e padrões de cadastro. **Uma delas era a tarefa inteira** — as outras
+cinco foram pesquisadas uma a uma e cada uma recebeu a resposta que o tamanho
+real dela pedia, que em três casos foi "não faça agora, e aqui está o porquê".
+
+#### O núcleo: `branches` deixa de ser cadastro só por SQL
+
+Era a lacuna mais antiga registrada neste arquivo. A decisão de multiempresa
+(13/08/2026) já anotava "tela de administração de filiais ... ainda só é feito
+via SQL — não há UI", `StockPolicySection` (20/08) e `SimplesCreditSection`
+(B8, 03/09) repetem no comentário do próprio arquivo que existem onde existem
+**porque não havia módulo de Filiais**, e o README da bateria de isolamento
+manda criar a segunda filial por `insert` manual, citando D1 pelo nome.
+
+Agora existe `/configuracoes/filiais`: lista, criação e edição de código, nome,
+CNPJ, situação, inscrição estadual, CRT, CNAE, código IBGE do município,
+endereço completo e o padrão de estoque negativo.
+
+#### Decisão 1: tela própria, **não** o motor genérico — e o motivo é o portão
+
+Esta era a pergunta explícita da tarefa, e a resposta não é estética. O motor
+genérico (`GenericModulePage`) decide quem pode criar, editar e excluir com
+`hasPermission(module.id, ação)`, que lê `role_permissions`. A RLS de `branches`
+decide com `can_manage_branches()`, que lê uma **flag global do papel**. São dois
+portões que não se encontram, e ligá-los custaria uma das duas coisas:
+
+1. **afrouxar a RLS de `branches`** para aceitar também `has_permission` do
+   módulo. `branches` é a tabela que ancora `has_branch_access` para as **12**
+   tabelas isoladas por filial — mexer no portão dela para ganhar uma tela é
+   trocar o eixo de isolamento inteiro por conveniência de UI; ou
+2. **semear linhas em `role_permissions` que o banco ignora**. A tela mostraria
+   "Novo" habilitado para quem o `insert` vai recusar, ou pior: desabilitado para
+   o administrador que **pode**, porque ninguém semeou a linha. Sem semear nada,
+   é exatamente esse o resultado — a permissão de criar seria `false` para todo
+   mundo, inclusive para quem tem a flag.
+
+Somam-se três razões menores, cada uma verificada e não presumida:
+
+- **`module_fields` não valida dígito verificador.** O motor genérico tem
+  `data_type: 'text'` e obrigatoriedade, e é só isso. CNPJ com DV errado, CRT
+  fora do vocabulário de quatro valores, UF inexistente e CEP de 7 dígitos
+  passariam pelo cadastro e só apareceriam como rejeição na emissão — que é a
+  classe de erro que A9 existe para não deixar acontecer.
+- **`branch_scoped` não se aplica.** O filtro do motor é `eq('branch_id', ...)`,
+  e `branches` não tem `branch_id` — a chave dela **é** `id`.
+- **`module_fields` numa tabela de segurança é uma alavanca.** Um módulo no
+  catálogo pode ter seus campos reconfigurados pelo construtor (M3/M4), e os
+  campos decidem quais colunas o formulário escreve. A RLS continuaria segurando
+  o acesso, mas dar ao construtor uma alavanca sobre a forma de escrita de
+  `branches` não paga o que economiza.
+
+A tela segue o desenho de `/usuarios-operadores` e `/permissoes` — as outras
+duas telas administrativas gated por flag global: `AppShell` +
+`RegistryLayout`/`RegistryActions`/`RegistryTable`/`RegistryDetails` + modal de
+formulário + hook de dados. **Nada de componente novo de baixo nível**; o que
+existe de novo é `src/features/settings/branches.ts` (tipos, vocabulários e
+validação, puros e testáveis sem React nem banco).
+
+**Não há botão "Excluir", de propósito.** A policy `manage branches delete`
+existe, mas apagar filial deixa órfã toda linha operacional que aponta para ela.
+Desativar é a operação que o cadastro precisa; apagar continua sendo SQL
+deliberado.
+
+#### Decisão 2: sub-rota de Configurações, não linha nova no catálogo
+
+Um módulo `filiais` seria um `insert` em `modules`, ou seja uma migration — e
+esta sessão está proibida de aplicar migration. A tela nasceria **inalcançável**,
+justamente a que A11 precisa alcançar. Então ela entrou em `MODULE_SUBROUTES`
+como `/configuracoes/filiais`, o mesmo mecanismo de `/compras/nova` e
+`/pedidos-venda/novo`, que é código e não catálogo.
+
+O portão herdado é o de `configuracoes` (`authenticated`), frouxo de propósito:
+quem decide é a RLS, e a própria tela mostra a porta fechada para quem não tem
+`can_manage_branches`. Promovê-la a módulo de primeiro nível depois é um `insert`
+de uma linha e a troca de um id em `moduleComponents.ts` — nada mais.
+
+O ponto de entrada é uma seção nova no painel de Configurações
+(`BranchesSection`), no mesmo formato das duas que já estavam lá, e **as duas
+continuam onde estavam**: parâmetro do dia a dia da filial ativa é outra coisa de
+cadastro de filial. A busca e os dois botões do topo do painel (`Parâmetros`,
+`Configurações do sistema`) **continuam decorativos** — nenhum `onChange`,
+nenhum `onClick` —; mexer neles não fazia parte de D1.
+
+#### O que D1 acrescentou fora da tela
+
+- **`AuthContext.refreshBranches`**, gêmeo de `refreshPermissions` (que M3 criou
+  pelo mesmo motivo): a lista de filiais é carregada uma vez na sessão, e agora
+  há uma tela que muda código, nome e CNPJ dela. Sem isto, renomear a filial
+  ativa só apareceria no próximo F5. Ele **não** troca a filial ativa enquanto
+  ela continuar acessível — trocar por causa de uma edição de cadastro faria o
+  operador lançar na filial errada sem perceber.
+- **Sondagem de coluna em `branchesRepository`** — ver a área 4 abaixo.
+
+#### As cinco áreas secundárias: o que entrou, o que ficou, e por quê
+
+**1. Série de numeração — FORA, e é a decisão mais importante das cinco.**
+
+A série é hoje `SERIE_SIMULADA = 1`, uma constante de
+`simulatedFiscalProvider.ts` lida em `fiscal-emit/index.ts`. Torná-la cadastrável
+exige **editar aquele arquivo** — e esta sessão está proibida de implantar
+`fiscal-emit`. O resultado seria o repositório dizendo "série da filial" enquanto
+a função em produção continua emitindo na série 1: uma divergência silenciosa
+entre código versionado e código que roda, que é pior que a lacuna documentada.
+
+E há a razão que valeria mesmo sem a proibição: `serie` faz parte da **chave
+primária** de `fiscal_numbering` (A10). Mudar a série de uma filial não muda um
+rótulo — começa uma sequência nova em zero, e a antiga fica congelada. Isso é
+decisão operacional (combinada com o contador, feita na virada de período), não
+campo de cadastro que se edita entre um CEP e um CNAE. Quando existir, ela vem
+com aviso, confirmação e provavelmente histórico — tarefa própria.
+
+`SERIE_SIMULADA`, `fiscal_numbering`, `fiscal_numbering_next` e a reserva de
+A5-A10 **não foram tocados**. O formulário de filial diz na tela que a série é
+fixa em 1 e não é cadastrável, para o operador não procurar o campo.
+
+**2. Casas decimais e arredondamento — FORA, sem nada de baixo risco a fazer.**
+
+A pesquisa não encontrou onde encaixar uma preferência honesta:
+
+- **Cálculo** é `Math.round(x * 100) / 100` espalhado pelo motor tributário
+  (B1-B10). Não é convenção nossa: é o leiaute — `vICMS`, `vBC`, `vProd` e
+  companhia são `Decimal[13v2]`, duas casas, e o próprio `types.ts` documenta que
+  as somas partem dos valores **já arredondados** dos itens porque declarar
+  diferente é rejeição certa. Reescrever isso para casas configuráveis é uma
+  tarefa própria, enorme, e regressão em tudo que já foi fechado. O enunciado já
+  dizia isso, e a pesquisa confirmou.
+- **Exibição** de dinheiro é `toLocaleString('pt-BR', { style: 'currency' })` —
+  duas casas porque o real tem duas. Um campo "casas decimais" aqui produziria
+  uma tela mostrando `R$ 12,345`.
+- **Quantidade** já tem o parâmetro que faz sentido, e ele não é um número de
+  casas: é `units_of_measure.allows_fraction`, cadastrável em `/unidades-medida`
+  desde 26/08/2026.
+
+Nada entrou. A pesquisa está aqui para a próxima tarefa não refazê-la.
+
+**3. Teto de desconto por perfil — JÁ EXISTIA; entrou só a placa.**
+
+C3 pôs `roles.max_discount_percent` editável na grade de `/permissoes`, ao lado
+das outras capacidades do papel, que é onde ele pertence: é atributo do papel,
+não da filial nem do sistema. Reconstruí-lo em Configurações criaria duas telas
+gravando a mesma coluna, e a primeira divergência entre elas seria um desconto
+aprovado numa e recusado na outra.
+
+O que entrou é `DiscountCapSection`: uma seção que diz onde o teto mora e leva
+até lá. Resolve o problema real que a duplicação tentaria resolver — quem procura
+o teto de desconto procura em Configurações.
+
+**4. E-mail de envio — ENTROU como cadastro, com uma correção de escopo.**
+
+Confirmado por varredura no repositório inteiro: **zero** ocorrência de SMTP,
+Resend, SendGrid, Nodemailer, Mailgun ou Postmark. Não há infraestrutura de
+envio, e construí-la é tarefa própria.
+
+A correção de escopo está no nome da coluna: `email_copia_nota_fiscal`, não
+`email_envio`. "E-mail de envio" é ambíguo entre destinatário e remetente, e os
+dois têm destinos diferentes:
+
+- o **destinatário por filial** que faz sentido é o contador, que recebe cópia de
+  tudo que a filial emite. O e-mail do cliente já existe e não é aqui:
+  `contacts.email`, por nota;
+- o **remetente** seria conta de SMTP, ou seja credencial — e credencial não pode
+  morar em `branches`, que **todo** usuário com acesso à filial lê (policy `read
+  accessible branches`). Quando o envio existir, o remetente vai para os segredos
+  da Edge Function, como a chave da Focus.
+
+Como a coluna vem de uma migration que esta sessão não pode aplicar, o
+repositório **sonda**: tenta o `select` com a coluna e, se o Postgres responder
+`42703` (ou o PostgREST `PGRST204`), refaz sem ela e marca a ausência. Custo zero
+no caminho feliz — a sondagem é o próprio `select`. Sem isso a tela inteira, que
+é o núcleo de D1, não listaria nada neste banco. O campo aparece **desabilitado
+com a explicação**, não escondido. Verificado ao vivo: dois `400` no console
+(React StrictMode monta o efeito duas vezes em dev), dois `select` de fallback
+com sucesso, lista renderizada, ficha dizendo "Indisponível (migration de D1 não
+aplicada)".
+
+**5. Padrões de cadastro — FORA; a pesquisa não achou nada concreto e de baixo
+risco.**
+
+Era o mais vago dos cinco, e a varredura mostrou por quê. O único "padrão de
+cadastro" que existe de verdade neste sistema é `branches.allow_negative_stock`
+— e ele já estava em Configurações desde 20/08/2026, com o "usar padrão da
+filial" no cadastro de produto. D1 o alargou de graça: agora ele é editável em
+**qualquer** filial pelo formulário, não só na ativa.
+
+O resto que parece padrão não é configuração, é valor inicial de tela hardcoded
+em cinco lugares diferentes (`"dinheiro"` em `useSaleDraft`, `usePosSale`,
+`useSaleOrderDraft`, `ConditionalResolveModal` e `PurchaseFormPage`) ou regra
+dentro de RPC (o intervalo de 30 dias entre parcelas mora em `create_sale`).
+Tornar qualquer um deles configurável é mudar cinco rascunhos de venda/compra ou
+uma função do banco — não é uma seção de Configurações, é uma tarefa por padrão.
+Forçar um formulário artificial aqui só criaria campo que ninguém lê.
+
+#### Migration escrita, **não aplicada**
+
+`supabase/migrations/00000000000014_d1_filiais_ganham_tela.sql`, duas coisas e
+só elas:
+
+1. `branches.email_copia_nota_fiscal text` — a área 4 acima;
+2. CHECK em `branches.regime_tributario` (`null` ou `'1'`/`'2'`/`'3'`/`'4'`),
+   o mesmo vocabulário que `payloadValidation.ts` já valida. Até aqui **nada**
+   conferia o conteúdo dessa coluna: ela aceitava `"9"` ou `"simples"`, e o erro
+   só apareceria na emissão. Conferido antes de escrever: a única filial deste
+   banco tem `'3'`, então o constraint não trava nada.
+
+A RLS de `branches` **não foi tocada** — ela já estava certa, e essa foi uma
+conclusão da pesquisa, não uma omissão.
+
+**Achado adjacente, não corrigido**: o catálogo de referência
+`regimes_tributarios` tem só as chaves 1, 2 e 3 — falta o 4 (MEI, NT 2024.001),
+que `payloadValidation.ts` aceita desde A9. Como aquele catálogo é editável pela
+própria tela genérica em `/regimes-tributarios`, corrigi-lo é cadastro, não
+migration. O formulário de filial não lê aquela tabela: ele usa o vocabulário do
+validador, que é quem recusa a emissão.
+
+#### Testes
+
+- **`tests/unit/branchForm.test.ts`** (52 casos, novos, passando): obrigatórios,
+  CNPJ com e sem máscara, DV errado, sequência repetida, tamanho errado, CNPJ
+  vazio permitido, os quatro CRTs válidos e os inválidos, as 27 UFs, CEP/IBGE/
+  CNAE por tamanho, e-mail, vários problemas de uma vez, avisos fiscais, a
+  tradução formulário → colunas (inclusive vazio virando `null` e a coluna de
+  e-mail entrando ou não), a classificação dos erros do banco, formatação
+  guardada e o ida-e-volta banco → formulário. **O dígito verificador não é
+  reimplementado**: quem valida é `isValidCnpj` do núcleo compartilhado (A9), o
+  mesmo que `payloadValidation.ts` usa — e os testes provam essa amarração, não
+  uma cópia dela.
+- **`tests/isolation/branchIsolation.test.ts`** ganhou o bloco "cadastro de
+  filiais (D1)": A não tem `can_manage_branches` (a premissa), A só enxerga a
+  própria filial, A não cria filial, A não edita a **própria** filial (ver ≠
+  poder mudar), A não edita nem apaga a filial de B, A não se vincula à filial de
+  B por `user_branches`. **Não foi executado**: faltam
+  `FACILITE_ISOLATION_A_EMAIL`/`_B_` no `.env.local` deste ambiente, a mesma
+  condição pré-existente que a bateria já registrava. Continuam **4 suítes**
+  falhando por ambiente — as mesmas de A10, nenhuma nova.
+- O lado **positivo** (quem tem a flag consegue) não cabe naquela bateria, que só
+  conhece dois atores sem flag nenhuma; está registrado no README dela e foi
+  verificado à mão no navegador.
+
+`npm run build` limpo. `npm run lint` com **63 avisos** — 62 pré-existentes (o
+mesmo número de A9 e A10) mais um novo em `useBranchesAdmin`, do
+`set-state-in-effect` que todo hook de dados deste projeto tem
+(`useContactsData`, `useUsersData`, `useConditionalsData`, …); é convenção do
+código, não regressão. `deno check supabase/functions/fiscal-emit/index.ts`
+limpo — rodado por conferência, já que D1 **não tocou** em nada de numeração.
+
+#### O que a revisão de código mudou depois da primeira versão
+
+Registrado porque três dos achados eram bugs de verdade, e o raciocínio errado
+que os produziu é o tipo de coisa que se repete:
+
+1. **`branchFiscalWarnings` estava incompleto.** A primeira versão checava CNPJ,
+   CRT, IE, UF e município — os campos "óbvios" — e ficava **calada** diante de
+   uma filial sem logradouro, número, bairro ou CEP, que
+   `validaEndereco(..., "emitente", true)` recusa do mesmo jeito. Um aviso que
+   afirma "está pronta" quando não está é pior que aviso nenhum. Agora a lista
+   espelha `validaEmitente` campo por campo, e há um teste por campo travando
+   isso.
+2. **A sondagem de coluna aceitava o texto da mensagem.** Além dos códigos
+   `42703`/`PGRST204`, ela tratava como "coluna ausente" qualquer erro cuja
+   mensagem citasse o nome da coluna. Como a conclusão fica **em cache** pela
+   sessão, um erro de constraint ou de policy que mencionasse a coluna
+   desligaria o campo de vez, com a tela afirmando que a migration não foi
+   aplicada quando ela foi. Agora é só por código — conferido ao vivo que este
+   banco devolve exatamente `42703`.
+3. **`toColunas` lia um tri-estado como booleano.** Com a sondagem em `null`
+   (listagem falhou, ninguém sondou), o campo de e-mail aparecia habilitado e o
+   valor digitado era descartado em silêncio. Agora só é omitido quando a
+   ausência é **conhecida** (`!== false`): diante de "não sei", tentar gravar e
+   receber erro visível é melhor que perder o dado.
+
+Mais: código de filial duplicado deixou de vazar o texto cru do Postgres e virou
+mensagem em português; a lógica pura (tradução formulário → colunas,
+classificação de erro) saiu do repositório para `branches.ts` — o repositório
+importa `supabaseClient`, que lê `import.meta.env` e não carrega em Node, e
+lógica que decide o que vai para o banco tem de ser testável; `useBranchesAdmin`
+ganhou guarda contra leituras fora de ordem; `BranchesSection` e
+`DiscountCapSection` viraram duas chamadas de `SettingsLinkSection` em vez de
+duas cópias; e a asserção "a filial fantasma não existe" saiu da bateria de
+isolamento por ser **vazia** — nenhum dos dois atores enxergaria a linha mesmo
+que ela nascesse, então ela passaria de qualquer jeito. O erro do `insert` é a
+prova inteira, e o comentário no teste agora diz isso.
+
+#### Verificação no navegador (feita)
+
+Login com a conta de testes, `/configuracoes` mostrando as quatro seções, "Abrir"
+levando a `/configuracoes/filiais`, a filial listada com ficha completa, o
+formulário de edição preenchido, CNPJ com DV errado **recusado** na tela, edição
+real gravada e conferida no banco, campo limpo virando `null`, "Nova filial"
+recusando formulário vazio, e o layout em 375px. A filial existente foi
+devolvida ao estado exato em que estava.
+
+#### O que continua fora depois de D1
+
+- **Vincular usuário a filial** (`user_branches`) ainda é SQL. A tela diz isso
+  em voz alta, porque uma filial recém-criada não aparece no seletor de ninguém
+  até o vínculo existir. É a outra metade natural de um módulo de Filiais.
+- **`certificado_digital_ref`** não entrou no formulário: é A11, e o bloco
+  "Fiscal" da tela é a casa pronta esperando por ele.
+- Excluir filial, série cadastrável, envio de e-mail de verdade, e um módulo
+  `filiais` de primeiro nível no catálogo.

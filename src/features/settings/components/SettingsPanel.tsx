@@ -1,4 +1,6 @@
 import { SearchIcon } from "../../../components/icons";
+import BranchesSection from "./BranchesSection";
+import DiscountCapSection from "./DiscountCapSection";
 import SimplesCreditSection from "./SimplesCreditSection";
 import StockPolicySection from "./StockPolicySection";
 import "./SettingsPanel.css";
@@ -30,8 +32,14 @@ export default function SettingsPanel() {
         ))}
       </div>
 
+      {/* Seções reais do painel. A busca e os dois botões acima continuam
+          decorativos (nenhum `onChange`/`onClick`) — mexer neles não faz parte
+          de D1, e a separação "botão de cima = enfeite, seção de baixo =
+          coisa que funciona" é hoje a única pista visível disso. */}
+      <BranchesSection />
       <StockPolicySection />
       <SimplesCreditSection />
+      <DiscountCapSection />
     </div>
   );
 }

@@ -12,13 +12,16 @@ sobrevive a um deploy apressado.
 Hoje o projeto tem **uma filial só**, então a bateria ainda não tem o que
 comparar. Para ligá-la:
 
-1. **Criar uma segunda filial.** Ainda não há tela para isso (é a tarefa D1);
-   por enquanto é `insert` em `branches` via SQL.
+1. **Criar uma segunda filial.** Desde D1 (09/09/2026) há tela:
+   `/configuracoes/filiais` (o botão "Filiais" em Configurações), com uma conta
+   que tenha `can_manage_branches`. `insert` em `branches` via SQL continua
+   funcionando, mas não é mais o único caminho.
 2. **Criar duas contas** em `/usuarios-operadores`, com um papel que tenha
    `can_view`/`can_create`/`can_edit`/`can_delete` em Produtos. Nenhuma das
    duas pode ter as flags globais (`can_manage_branches` em especial — quem
    gerencia filiais enxerga todas por definição, e a bateria não provaria nada).
-3. **Vincular cada conta a exatamente uma filial** em `user_branches` — sem
+3. **Vincular cada conta a exatamente uma filial** em `user_branches` (ainda
+   só por SQL — a tela de D1 cadastra a filial, não o vínculo) — sem
    nenhuma filial em comum. A bateria recusa rodar se as duas caírem na mesma.
 4. **Cadastrar ao menos um produto em cada filial** (os testes de `update` e
    `delete` precisam de uma linha real de cada lado).
@@ -45,6 +48,12 @@ quando não está configurada é pior que não ter bateria: ela dá um verde fal
   outro (o `WITH CHECK` do RLS), e apagar linha do outro.
 - **RPC**: `adjust_stock_batch` apontando para a filial do outro, e
   `has_branch_access` respondendo `false`.
+- **Cadastro de filiais** (D1, 09/09/2026): `branches` é a tabela que ancora
+  todas as outras — quem cria ou renomeia filial mexe no eixo de isolamento em
+  si, não numa linha dentro dele. Cobertos: A só enxerga a própria filial na
+  listagem; A não cria filial; A não edita a **própria** filial (ver ≠ poder
+  mudar); A não edita nem apaga a filial de B; A não se vincula à filial de B
+  por `user_branches`.
 - **Escalação de papel**: trocar o próprio `role_id` (trigger
   `prevent_role_escalation`).
 
@@ -54,3 +63,10 @@ quando não está configurada é pior que não ter bateria: ela dá um verde fal
 - **Preço vindo do banco** (C3) — `unit_price` forjado no payload de
   `create_sale` tem de ser ignorado.
 - ~~**Concorrência** (C4)~~ — feito em `tests/concurrency/stockConcurrency.test.ts`.
+- **O lado positivo do cadastro de filiais**: os dois atores desta bateria não
+  têm flag global nenhuma (é o que a torna útil), então ela só prova o que a
+  RLS **recusa**. Provar que quem tem `can_manage_branches` de fato consegue
+  criar e editar exigiria um terceiro ator com a flag — e um ator assim
+  enxerga todas as filiais, o que enfraqueceria as outras asserções se fosse
+  reaproveitado por engano. A validação do formulário está coberta sem banco em
+  `tests/unit/branchForm.test.ts`.

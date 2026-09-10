@@ -1,0 +1,114 @@
+/*
+ * Complemento do `RegistryFormModal.css` (que continua sendo a moldura: fundo
+ * acrílico, título, rodapé de botões). O que muda aqui é só o **miolo**: o
+ * cadastro de filial tem 16 campos, e uma coluna única de 16 cápsulas viraria
+ * um formulário mais alto que a tela em qualquer monitor.
+ */
+
+.branch-form__section {
+  margin: 0 0 2px;
+  padding-top: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.branch-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* Campos que não cabem em meia largura sem cortar o conteúdo (nome da filial,
+   logradouro, e-mail). */
+.branch-form__grid > .branch-form__wide {
+  grid-column: 1 / -1;
+}
+
+.branch-form__toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.branch-form__toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.branch-form__toggle input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--amber);
+  cursor: pointer;
+}
+
+.branch-form__toggle-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.7;
+}
+
+.branch-form__lookup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.branch-form__lookup-btn {
+  height: 34px;
+  padding: 0 16px;
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--white);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+
+.branch-form__lookup-btn:hover:not(:disabled) {
+  border-color: var(--white);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.branch-form__lookup-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.branch-form__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+
+/* Aviso, não erro: o que falta impede emitir nota, mas não impede salvar. */
+.branch-form__warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .branch-form__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -74,6 +74,17 @@ type AuthContextValue = {
    */
   refreshPermissions: () => Promise<void>;
   branches: Branch[];
+  /**
+   * Relê as filiais do usuário. Mesmo motivo de `refreshPermissions`: a lista
+   * é carregada uma vez, na sessão, e a tela de Filiais (D1) muda código, nome
+   * e CNPJ **dela** — sem isto o seletor de filial e a faixa do cabeçalho
+   * continuariam mostrando o nome antigo até o próximo F5.
+   *
+   * Não mexe na filial ativa enquanto ela continuar acessível: trocar a filial
+   * ativa por causa de uma edição de cadastro seria um efeito colateral que
+   * ninguém pediu, e o operador poderia lançar na filial errada sem perceber.
+   */
+  refreshBranches: () => Promise<void>;
   currentBranchId: string | null;
   setCurrentBranch: (branchId: string) => void;
 };
@@ -249,6 +260,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissions(map);
   }, [profile?.roleId]);
 
+  const refreshBranches = useCallback(async () => {
+    if (!supabase) return;
+    const userId = session?.user?.id;
+    if (!userId) return;
+
+    const { data } = await supabase
+      .from("user_branches")
+      .select("branches(id, code, name, cnpj)")
+      .eq("user_id", userId);
+
+    const accessibleBranches: Branch[] = (data ?? [])
+      .map((link) => link.branches as unknown as Branch | null)
+      .filter((branch): branch is Branch => branch !== null);
+
+    setBranches(accessibleBranches);
+    setCurrentBranchId((current) =>
+      current && accessibleBranches.some((branch) => branch.id === current)
+        ? current
+        : (accessibleBranches[0]?.id ?? null),
+    );
+  }, [session?.user?.id]);
+
   const hasPermission = useCallback(
     (moduleId: string, action: PermissionAction): boolean => {
       const perm = permissions[moduleId];
@@ -273,6 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasPermission,
       refreshPermissions,
       branches,
+      refreshBranches,
       currentBranchId,
       setCurrentBranch,
     }),
@@ -284,6 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasPermission,
       refreshPermissions,
       branches,
+      refreshBranches,
       currentBranchId,
     ],
   );

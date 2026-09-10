@@ -137,6 +137,126 @@ describe("RPC entre filiais", () => {
   });
 });
 
+/**
+ * D1 (09/09/2026) — o cadastro de filiais ganhou tela
+ * (`/configuracoes/filiais`), e com ela a primeira forma de criar e editar
+ * `branches` que não é `insert` manual de administrador.
+ *
+ * `branches` é a tabela que **ancora** todas as outras deste arquivo: é
+ * `has_branch_access(branch_id)` que decide o que cada operador enxerga nas 12
+ * tabelas acima. Uma tela que deixasse alguém sem `can_manage_branches` criar
+ * filial, ou renomear a filial de outro, não vazaria um produto — vazaria o
+ * eixo de isolamento inteiro.
+ *
+ * A e B **não têm** as flags globais (o preparo da bateria exige isso, e
+ * `can_manage_branches` em especial — ver o README), então tudo aqui é o lado
+ * negativo: o que a RLS tem de recusar. O lado positivo (quem **tem** a flag
+ * consegue) não cabe nesta bateria, que só conhece dois atores sem flag
+ * nenhuma; ele está coberto pelos testes de formulário em
+ * `tests/unit/branchForm.test.ts` e pelo uso real da tela.
+ */
+describe("cadastro de filiais (D1)", () => {
+  it("A não tem can_manage_branches — a premissa do resto deste bloco", async () => {
+    const { data, error } = await a.client.rpc("can_manage_branches");
+    expect(error).toBeNull();
+    expect(
+      data,
+      "a conta A tem can_manage_branches; a bateria não provaria nada assim — ver tests/isolation/README.md",
+    ).toBe(false);
+  });
+
+  it("A enxerga só a própria filial, nunca a de B", async () => {
+    const { data, error } = await a.client.from("branches").select("id");
+    expect(error).toBeNull();
+
+    const ids = (data ?? []).map((row) => row.id);
+    expect(ids).toContain(a.branchId);
+    expect(ids, "A enxergou a filial de B na listagem de filiais").not.toContain(b.branchId);
+  });
+
+  it("A não consegue criar filial", async () => {
+    const { data, error } = await a.client
+      .from("branches")
+      .insert({ code: `ISO-${Date.now()}`, name: "filial de teste de isolamento — não deveria existir" })
+      .select("id");
+
+    // O erro do `insert` é a prova inteira, e é por uma limitação real: nenhum
+    // dos dois atores desta bateria conseguiria **ver** a filial fantasma se
+    // ela nascesse (A não teria vínculo em `user_branches` com ela, B muito
+    // menos), então uma consulta de conferência aqui voltaria vazia mesmo com o
+    // insert tendo passado — pareceria corroboração e não seria nenhuma.
+    // Confirmar a ausência exigiria uma conta com `can_manage_branches`, que
+    // esta bateria não tem de propósito.
+    expect(error, "o banco deixou A criar uma filial").not.toBeNull();
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it("A não consegue editar a própria filial", async () => {
+    const { data: antes } = await a.client
+      .from("branches")
+      .select("name")
+      .eq("id", a.branchId)
+      .maybeSingle();
+
+    await a.client.from("branches").update({ name: "renomeada sem permissão" }).eq("id", a.branchId);
+
+    const { data: depois } = await a.client
+      .from("branches")
+      .select("name")
+      .eq("id", a.branchId)
+      .maybeSingle();
+
+    // Ver a própria filial (has_branch_access) não é o mesmo que poder mudá-la
+    // (can_manage_branches) — é a distinção que a tela de D1 desabilita no
+    // botão e que o banco tem de impor de verdade.
+    expect(depois?.name, "A renomeou a própria filial sem can_manage_branches").toBe(antes?.name);
+  });
+
+  it("A não consegue editar a filial de B", async () => {
+    const { data: antes } = await b.client
+      .from("branches")
+      .select("name, code")
+      .eq("id", b.branchId)
+      .maybeSingle();
+
+    await a.client
+      .from("branches")
+      .update({ name: "sequestrada pela filial A" })
+      .eq("id", b.branchId);
+
+    const { data: depois } = await b.client
+      .from("branches")
+      .select("name, code")
+      .eq("id", b.branchId)
+      .maybeSingle();
+
+    expect(depois?.name, "A renomeou a filial de B").toBe(antes?.name);
+  });
+
+  it("A não consegue apagar a filial de B", async () => {
+    await a.client.from("branches").delete().eq("id", b.branchId);
+
+    const { data: aindaExiste } = await b.client
+      .from("branches")
+      .select("id")
+      .eq("id", b.branchId)
+      .maybeSingle();
+
+    expect(aindaExiste?.id, "A apagou a filial de B").toBe(b.branchId);
+  });
+
+  it("A não consegue se vincular à filial de B por user_branches", async () => {
+    const { error } = await a.client
+      .from("user_branches")
+      .insert({ user_id: a.userId, branch_id: b.branchId });
+
+    expect(error, "A conseguiu se dar acesso à filial de B").not.toBeNull();
+
+    const { data } = await a.client.rpc("has_branch_access", { p_branch_id: b.branchId });
+    expect(data).toBe(false);
+  });
+});
+
 describe("escalação de papel", () => {
   it("A não consegue trocar o próprio papel", async () => {
     const { data: perfil } = await a.client

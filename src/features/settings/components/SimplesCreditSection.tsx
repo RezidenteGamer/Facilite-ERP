@@ -10,9 +10,12 @@ import { useAuth } from "../../auth/AuthContext";
  * O `pCredSN` da filial ativa — a alíquota de crédito de ICMS do Simples
  * Nacional (B8, 03/09/2026).
  *
- * Mora em Configurações, e não num módulo de Filiais, porque **não existe**
- * módulo de Filiais: `branches` é cadastro só por SQL, com RLS própria, e a
- * única tela que a toca é o seletor de filial (que só lê). O desenho aqui é
+ * Nasceu em Configurações porque, em 03/09/2026, **não existia** módulo de
+ * Filiais: `branches` era cadastro só por SQL. D1 (09/09/2026) deu tela ao
+ * cadastro (`/configuracoes/filiais`), e este campo **não foi para lá**: a
+ * alíquota muda a cada virada de faixa de RBT12 — mensal, na prática —,
+ * enquanto o cadastro de filial se abre uma vez por ano. Enfiar um número
+ * mensal dentro de um formulário de 16 campos é escondê-lo. O desenho aqui é
  * literalmente o de `StockPolicySection` — parâmetro por filial ativa, gated
  * por `can_manage_branches` (a mesma flag do RLS de `branches update`),
  * desabilitado em vez de escondido quando falta permissão.

@@ -53,6 +53,27 @@ export type ModuleSubroute = {
  */
 export const MODULE_SUBROUTES: ModuleSubroute[] = [
   {
+    /*
+     * Cadastro de filiais (D1, 09/09/2026) — sub-rota de Configurações, e não
+     * módulo próprio no catálogo.
+     *
+     * Um módulo `filiais` seria uma linha nova em `modules`, ou seja uma
+     * migration; a sessão que construiu esta tela não podia aplicar migration
+     * nenhuma, e a tela nasceria inalcançável — justamente a que A11 (cadastro
+     * de certificado digital) precisa alcançar. Sub-rota resolve isso sem
+     * tocar no banco, e é o mesmo mecanismo de `/compras/nova`.
+     *
+     * O portão herdado daqui é o de `configuracoes` (`authenticated`), que é
+     * frouxo de propósito: quem decide de verdade é a RLS de `branches`
+     * (`can_manage_branches()`), e a própria tela mostra a porta fechada para
+     * quem não tem a flag. Promover a módulo de primeiro nível depois é um
+     * `insert` de uma linha — e nenhuma mudança neste arquivo além do id.
+     */
+    moduleId: "configuracoes",
+    path: "/configuracoes/filiais",
+    component: lazy(() => import("../settings/BranchesAdminPage")),
+  },
+  {
     moduleId: "pedidos-venda",
     path: "/pedidos-venda/novo",
     component: lazy(() => import("../sales/SaleOrderFormPage")),
