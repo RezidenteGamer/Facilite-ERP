@@ -8270,3 +8270,165 @@ O que A12 herda pronto, e o que ela ainda decide:
   `FiscalNotConfiguredError` nas sete operações. A11 não tocou nele, nem em
   `fiscal_numbering`/`fiscal_queue`/reserva de A5-A10, nem em regra de cálculo
   tributário.
+
+### Decisão arquitetural: custo médio ponderado — os três custos, por que `replacement_cost` não é redundante, e a resposta simplificada de `create_purchase` no meio do caminho (D3) (10/09/2026)
+
+#### O que existia antes
+
+`products.cost_price` ("Preço custo") era a única coluna de custo. Só
+`create_purchase` a escreve (a cada item, `cost_price := unit_cost`, só se o
+checkbox "Atualizar o preço de custo dos produtos comprados no cadastro"
+estiver marcado). Nenhuma outra RPC de venda/devolução/pedido/condicional
+toca `cost_price`, e `adjust_stock_batch`/`stock_adjustments` não têm coluna
+de custo nenhuma — confirmado por leitura direta do código, não repetido
+aqui em detalhe porque já estava correto na pesquisa prévia desta tarefa.
+
+O único relatório de custo hoje, "Custo médio de compras"
+(`report_purchase_items_by_product_day`), é uma média ponderada de
+`purchase_items.unit_cost` dentro de um período filtrado — "quanto paguei em
+média nas compras deste período". Pergunta diferente de "qual o custo médio
+do que está em estoque agora", que é o que D3 constrói. Os dois convivem;
+nenhum substitui o outro.
+
+#### Os três custos: a recomendação foi CONFIRMADA, com uma peça a mais
+
+A tarefa trouxe uma leitura recomendada para "custo de reposição" e pediu
+para confirmá-la ou refutá-la com raciocínio próprio. Confirmada: este
+sistema não tem nenhuma fonte de preço de fornecedor além do histórico de
+compras já realizadas — sem tabela de preços, sem cotação, sem integração de
+catálogo de fornecedor. Um "custo de reposição" derivado automaticamente
+seria idêntico a `cost_price` (o último preço pago), não um terceiro
+conceito — só um apelido a mais para o primeiro.
+
+Por isso `replacement_cost` é sempre digitado pelo operador, e
+`average_cost` é sempre calculado pelo sistema — nenhum formulário grava
+`average_cost` (`module_fields.show_in_form = false`), e nada calcula
+`replacement_cost`. Essa é a fronteira que torna os três custos
+independentes:
+
+1. `cost_price` — último preço pago (inalterado).
+2. `average_cost` — média ponderada do que está fisicamente em estoque
+   agora, recalculada por `create_purchase` a cada compra.
+3. `replacement_cost` — estimativa do operador para a PRÓXIMA compra, útil
+   quando o fornecedor já avisou reajuste mas a compra ainda não aconteceu
+   (nesse intervalo `cost_price` e `average_cost` ainda refletem o preço
+   antigo).
+
+A peça a mais em relação à recomendação: ela não dizia o que fazer no
+produto novo, criado direto no cadastro (com `stock`/`cost_price` de
+abertura, sem passar por `create_purchase` — o caminho que este sistema já
+usa para saldo inicial). Decisão: `productsRepository.ts` grava
+`average_cost := costPrice` na criação, mesma leitura do backfill da
+migration (item abaixo) — é o único dado de custo que existe naquele
+momento. Testado contra o caso degenerado: produto criado com `stock = 0` e
+`costPrice` preenchido grava `average_cost` não-nulo mesmo sem estoque
+físico; a primeira compra seguinte recalcula do zero porque a fórmula
+ignora `average_cost` quando `stock` (antes da compra) é 0 — o termo
+`estoque_antes × médio_antes` some sozinho. Não é um bug à espreita, é a
+mesma fórmula resolvendo o caso sem precisar de um `if` a mais.
+
+#### Migration escrita, **NÃO aplicada**
+
+`supabase/migrations/00000000000016_d3_custo_medio_ponderado.sql`, pela
+mesma regra de D1/A11 (sessão sem autorização para aplicar migration):
+
+1. `products.average_cost`/`products.replacement_cost` (`numeric`,
+   nullable, mesmo padrão de `cost_price`/`wholesale_price`), com
+   `comment on column` explicando os três custos.
+2. Backfill: `average_cost := cost_price` para as 49 linhas existentes (48
+   com `cost_price` e estoque positivo, número reconferido ao vivo e batendo
+   com o que a pesquisa prévia já tinha achado). Única fonte defensável —
+   reconstruir a partir de `purchase_items` histórico exigiria separar, por
+   produto, o que já foi vendido do que ainda está em estoque ao longo de
+   toda a história de compras, complexidade real sem ganho perceptível para
+   49 linhas.
+3. `create_purchase`: `average_cost` recalculado a cada item, sempre,
+   independente do checkbox `update_cost_price` — divergência deliberada do
+   campo irmão `cost_price` na mesma função (`cost_price` é preferência de
+   precificação; `average_cost` é fato contábil sobre o que fisicamente
+   entrou no estoque, não pode ficar errado por causa de uma preferência).
+   Guarda contra `estoque_antes + quantidade_comprada <= 0` (só possível com
+   estoque negativo habilitado): nesse caso não há proporção positiva para
+   calcular média, e o novo custo unitário vira a média — único fato
+   disponível.
+4. Duas linhas em `module_fields` (`produtos`), `sort_order` 20/21 — depois
+   de `minimum_stock` (19), não intercaladas perto de `cost_price` (7),
+   porque não havia número livre entre 7 e 8 sem renumerar campo existente
+   (diferente da lacuna que B5 tinha entre alíquotas). `average_cost` com
+   `show_in_form = false`; `replacement_cost` com `show_in_form = true`,
+   mesmo formato de `cost_price`.
+
+#### O que deliberadamente NÃO entrou
+
+- **`adjust_stock_batch`/`stock_adjustments`**: sem coluna de custo, sem
+  dado para recalcular média com. Um ajuste de contagem não é evento de
+  compra.
+- **Nenhuma RPC de venda, devolução, pedido ou condicional**: consumir
+  estoque não move a média do que sobra — custo médio ponderado só se move
+  quando entra material novo a um preço diferente.
+- **Relatório de margem**: o plano fala dessa obrigação condicional a um
+  relatório de margem existir. Nenhum existe (`src/features/reports/reports.ts`,
+  11 relatórios, nenhum cruza custo × venda) — inventar um está fora do que
+  D3 pede. Declinado, com a mesma disciplina de D1 recusando as áreas sem
+  achado concreto.
+- **Editar `cost_price`/`stock` direto no cadastro não sincroniza
+  `average_cost`**: reconhecido, não resolvido — Produtos é cadastro, não
+  ledger, e uma correção manual nunca precisou avisar campo nenhum. Não é
+  lacuna nova que D3 introduz.
+- **RLS de `products`**: sem mudança — as colunas novas são metadado do
+  mesmo produto, a policy existente já cobre.
+
+#### `/code-review alto`: um achado, corrigido
+
+O review pegou que `productsRepository.ts` `create()` incluía
+`average_cost`/`replacement_cost` incondicionalmente no `insert` — ou seja,
+se este código chegar a rodar contra um banco onde a migration acima ainda
+não foi aplicada, criar qualquer produto novo (não só os dois campos novos)
+falharia com `PGRST204` (coluna fora do cache de schema do PostgREST). É
+exatamente a classe de problema que `branchesRepository.ts` já resolveu
+duas vezes (D1, e depois A11 generalizando para dois grupos) com
+sondagem/fallback de coluna ausente — e este repositório de produtos usa
+`select("*")` (então a LEITURA já era imune, PostgREST não precisa nomear
+coluna ausente num wildcard), mas o `insert`/`update` nomeiam coluna
+explicitamente, e esses não tinham a mesma proteção.
+
+Corrigido: `create()` agora tenta gravar com os dois campos novos e, só se o
+erro for `42703`/`PGRST204`, refaz sem eles (`isMissingProductColumnError`,
+mesmo critério de `isMissingColumnError` em `branches.ts`, duplicado aqui em
+vez de importado — são dois módulos de domínio diferentes, e a função é três
+linhas). `update()` ganhou o mesmo fallback, mas só entra em jogo quando o
+patch de fato tocava `replacement_cost` (nunca toca `average_cost`, que o
+cliente nunca escreve via update). Custo zero no caminho feliz — é a mesma
+filosofia de D1/A11.
+
+Por que isto não apareceu na pesquisa prévia da tarefa nem no escopo
+original: a tarefa não pedia esse padrão para D3, e a pesquisa prévia não
+tinha comparado `productsRepository.ts` (que grava campo novo
+incondicionalmente) com `branchesRepository.ts` (que sonda). Vale registrar
+para a próxima migration que adicionar coluna gravada por `create()`/
+`update()` de um repositório existente: o problema não é exclusivo de
+`branches`, é de qualquer tabela cujo `insert`/`update` cite a coluna nova
+por nome antes da migration ser aplicada. `branches` precisou do padrão
+primeiro só porque o `select` dela também era explícito (o de `products` é
+`"*"`, por isso a leitura nunca teve esse risco).
+
+#### `npm run build`/`lint`/`test:unit`
+
+Limpos. `npm test` (bateria completa) tem 4 arquivos que falham por
+condição de ambiente pré-existente — `FACILITE_TEST_EMAIL`/
+`FACILITE_TEST_PASSWORD`/`FACILITE_ISOLATION_A_EMAIL` ausentes em
+`.env.local` (testes de concorrência/isolamento que exigem Supabase real),
+documentada em várias entradas anteriores deste arquivo — não relacionado a
+D3. `npm run test:unit`: 616 passando, incluindo os 6 novos casos de
+`tests/unit/averageCost.test.ts` (espelho testável da fórmula que
+`create_purchase` grava em SQL — o SQL não roda em Vitest).
+
+#### Fronteira com quem aplicar a migration
+
+A sessão de coordenação precisa, além de aplicar
+`00000000000016_d3_custo_medio_ponderado.sql`: nada mais — não há Edge
+Function tocada, não há segredo novo, não há deploy pendente. Depois de
+aplicada, o fallback de `isMissingProductColumnError` em
+`productsRepository.ts` simplesmente para de disparar (nunca mais recebe
+`42703`/`PGRST204` para essas duas colunas) — não precisa ser removido, é
+código morto barato, não lixo.

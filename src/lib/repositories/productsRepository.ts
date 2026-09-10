@@ -23,6 +23,20 @@ function assertSupabase() {
   return supabase;
 }
 
+/**
+ * `42703`/`PGRST204` — a coluna não existe neste banco. Mesmo critério de
+ * `isMissingColumnError` em `branches.ts` (D1/A11): serve para `create`/
+ * `update` degradarem sem os dois campos de D3 (`average_cost`,
+ * `replacement_cost`) enquanto a migration `00000000000016` não foi
+ * aplicada — sem isto, criar OU editar qualquer produto falharia por
+ * inteiro (não só os campos novos) até a migration ser aplicada, porque
+ * `insert`/`update` do PostgREST recusa o payload inteiro quando ele cita
+ * uma coluna que o cache de schema não conhece.
+ */
+function isMissingProductColumnError(error: { code?: string } | null | undefined): boolean {
+  return error?.code === "42703" || error?.code === "PGRST204";
+}
+
 function toProduct(row: ProductRow): Product {
   return {
     id: row.id,
@@ -34,6 +48,8 @@ function toProduct(row: ProductRow): Product {
     type: row.type ?? undefined,
     costPrice: row.cost_price ?? undefined,
     wholesalePrice: row.wholesale_price ?? undefined,
+    averageCost: row.average_cost ?? undefined,
+    replacementCost: row.replacement_cost ?? undefined,
     ncm: row.ncm ?? undefined,
     location: row.location ?? undefined,
     subLocation: row.sub_location ?? undefined,
@@ -61,6 +77,9 @@ function toUpdateRow(patch: Partial<Product>): TablesUpdate<"products"> {
     ...(patch.type !== undefined && { type: patch.type || null }),
     ...(patch.costPrice !== undefined && { cost_price: patch.costPrice ?? null }),
     ...(patch.wholesalePrice !== undefined && { wholesale_price: patch.wholesalePrice ?? null }),
+    // `average_cost` não entra aqui de propósito: é calculado por
+    // `create_purchase`, nunca gravado pelo cliente via update — ver D3.
+    ...(patch.replacementCost !== undefined && { replacement_cost: patch.replacementCost ?? null }),
     ...(patch.ncm !== undefined && { ncm: patch.ncm || null }),
     ...(patch.location !== undefined && { location: patch.location || null }),
     ...(patch.subLocation !== undefined && { sub_location: patch.subLocation || null }),
@@ -114,7 +133,7 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
     async create(input) {
       const client = assertSupabase();
       const code = await nextProductCode(branchId);
-      const row: TablesInsert<"products"> = {
+      const baseRow: TablesInsert<"products"> = {
         branch_id: branchId,
         code,
         description: input.description,
@@ -136,19 +155,54 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
         allow_negative_stock: input.allowNegativeStock ?? null,
         tax_group_id: input.taxGroupId || null,
       };
+      // Produto novo nunca passou por create_purchase, então não tem
+      // histórico de compra para calcular uma média — cost_price é o único
+      // dado de custo que existe neste momento, mesma leitura do backfill
+      // da migration de D3. Fica nulo se costPrice também vier vazio.
+      const row: TablesInsert<"products"> = {
+        ...baseRow,
+        average_cost: input.costPrice ?? null,
+        replacement_cost: input.replacementCost ?? null,
+      };
       const { data, error } = await client.from("products").insert(row).select(PRODUCT_SELECT).single();
+      if (error && isMissingProductColumnError(error)) {
+        // Migration de D3 ainda não aplicada neste banco — cria sem os dois
+        // campos novos em vez de falhar a criação do produto inteiro (mesmo
+        // padrão de degradação de branchesRepository.ts para D1/A11).
+        const { data: fallbackData, error: fallbackError } = await client
+          .from("products")
+          .insert(baseRow)
+          .select(PRODUCT_SELECT)
+          .single();
+        if (fallbackError) throw fallbackError;
+        return toProduct(fallbackData);
+      }
       if (error) throw error;
       return toProduct(data);
     },
 
     async update(id, patch) {
       const client = assertSupabase();
+      const updateRow = toUpdateRow(patch);
       const { data, error } = await client
         .from("products")
-        .update(toUpdateRow(patch))
+        .update(updateRow)
         .eq("id", id)
         .select(PRODUCT_SELECT)
         .single();
+      if (error && isMissingProductColumnError(error) && "replacement_cost" in updateRow) {
+        // Mesmo fallback de create(): só entra aqui quando o patch tocava
+        // replacement_cost e a migration de D3 ainda não foi aplicada.
+        const { replacement_cost: _replacementCost, ...fallbackRow } = updateRow;
+        const { data: fallbackData, error: fallbackError } = await client
+          .from("products")
+          .update(fallbackRow)
+          .eq("id", id)
+          .select(PRODUCT_SELECT)
+          .single();
+        if (fallbackError) throw fallbackError;
+        return toProduct(fallbackData);
+      }
       if (error) throw error;
       return toProduct(data);
     },

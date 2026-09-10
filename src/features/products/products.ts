@@ -10,6 +10,20 @@ export type Product = {
   type?: string;
   costPrice?: number;
   wholesalePrice?: number;
+  /**
+   * Custo médio PONDERADO do que está em estoque agora — calculado e mantido
+   * pelo próprio sistema a cada compra (`create_purchase`, D3). Somente
+   * leitura: nenhum formulário grava este campo
+   * (`module_fields.show_in_form = false`). Ver a migration de D3 para os
+   * três custos deste sistema e a fronteira entre eles.
+   */
+  averageCost?: number;
+  /**
+   * Estimativa de custo para a PRÓXIMA compra, digitada pelo operador (D3) —
+   * ao contrário de `averageCost`, não é calculada por nada aqui. Útil
+   * quando o fornecedor já avisou reajuste mas a compra ainda não aconteceu.
+   */
+  replacementCost?: number;
   ncm?: string;
   location?: string;
   subLocation?: string;
@@ -88,6 +102,8 @@ export function validateProductFormValues(values: Record<string, string>): strin
   if (costPriceError) errors.push(costPriceError);
   const wholesalePriceError = priceFieldError(values.wholesalePrice, "Preço Atacado");
   if (wholesalePriceError) errors.push(wholesalePriceError);
+  const replacementCostError = priceFieldError(values.replacementCost, "Custo de reposição");
+  if (replacementCostError) errors.push(replacementCostError);
   return errors;
 }
 
@@ -134,6 +150,7 @@ export function buildProductInput(
     type: values.type || undefined,
     costPrice: parseAmount(values.costPrice) ?? undefined,
     wholesalePrice: parseAmount(values.wholesalePrice) ?? undefined,
+    replacementCost: parseAmount(values.replacementCost) ?? undefined,
     ncm: ncm || undefined,
     location: values.location || undefined,
     subLocation: values.subLocation || undefined,

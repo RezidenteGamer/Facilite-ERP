@@ -36,6 +36,18 @@ const ALLOW_NEGATIVE_STOCK_OPTIONS: { value: AllowNegativeStockOption; label: st
 
 const MODULE_ID = "produtos";
 
+/**
+ * Rótulos de `module_fields` que são dinheiro — a engine genérica não sabe
+ * disso, então a formatação `formatPrice` entra por override local, tanto na
+ * tabela ("Valor venda", acima) quanto na ficha (`detailFields`, abaixo).
+ */
+const PRICE_DETAIL_LABELS = new Set([
+  "Preço custo",
+  "Preço Atacado",
+  "Custo médio (ponderado)",
+  "Custo de reposição",
+]);
+
 type ModalState = "none" | "new" | "edit" | "clone";
 
 /** O que o formulário precisa saber do grupo escolhido: o id que ele grava e o nome que ele mostra. */
@@ -164,7 +176,7 @@ export default function ProductsPage() {
     if (!definition) return [];
     const fields = buildDetailFields<Product>(definition.fields, selected);
     const priced = fields.map((field) =>
-      (field.label === "Preço custo" || field.label === "Preço Atacado") && field.value
+      PRICE_DETAIL_LABELS.has(field.label) && field.value
         ? { ...field, value: formatPrice(Number(field.value)) }
         : field,
     );
@@ -534,6 +546,7 @@ export default function ProductsPage() {
             type: selected.type ?? "",
             costPrice: selected.costPrice !== undefined ? String(selected.costPrice) : "",
             wholesalePrice: selected.wholesalePrice !== undefined ? String(selected.wholesalePrice) : "",
+            replacementCost: selected.replacementCost !== undefined ? String(selected.replacementCost) : "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",
@@ -566,6 +579,7 @@ export default function ProductsPage() {
             type: selected.type ?? "",
             costPrice: selected.costPrice !== undefined ? String(selected.costPrice) : "",
             wholesalePrice: selected.wholesalePrice !== undefined ? String(selected.wholesalePrice) : "",
+            replacementCost: selected.replacementCost !== undefined ? String(selected.replacementCost) : "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",

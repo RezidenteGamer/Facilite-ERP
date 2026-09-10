@@ -1575,6 +1575,7 @@ export type Database = {
         Row: {
           active: boolean
           allow_negative_stock: boolean | null
+          average_cost: number | null
           branch_id: string
           cest: string | null
           code: string
@@ -1588,6 +1589,7 @@ export type Database = {
           ncm: string | null
           origem_mercadoria: string | null
           photo_url: string | null
+          replacement_cost: number | null
           sale_price: number
           stock: number
           sub_location: string | null
@@ -1601,6 +1603,7 @@ export type Database = {
         Insert: {
           active?: boolean
           allow_negative_stock?: boolean | null
+          average_cost?: number | null
           branch_id: string
           cest?: string | null
           code: string
@@ -1614,6 +1617,7 @@ export type Database = {
           ncm?: string | null
           origem_mercadoria?: string | null
           photo_url?: string | null
+          replacement_cost?: number | null
           sale_price?: number
           stock?: number
           sub_location?: string | null
@@ -1627,6 +1631,7 @@ export type Database = {
         Update: {
           active?: boolean
           allow_negative_stock?: boolean | null
+          average_cost?: number | null
           branch_id?: string
           cest?: string | null
           code?: string
@@ -1640,6 +1645,7 @@ export type Database = {
           ncm?: string | null
           origem_mercadoria?: string | null
           photo_url?: string | null
+          replacement_cost?: number | null
           sale_price?: number
           stock?: number
           sub_location?: string | null
