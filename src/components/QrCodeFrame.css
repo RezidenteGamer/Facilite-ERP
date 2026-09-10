@@ -1,0 +1,12 @@
+/*
+ * A moldura clara em volta do QR Code — ver o comentário em QrCodeFrame.tsx
+ * sobre por que ela é requisito de leitura, e não enfeite.
+ */
+.qr-frame {
+  display: inline-block;
+  padding: 12px;
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  /* `line-height: 0` tira a folga que a linha de texto deixaria embaixo do SVG. */
+  line-height: 0;
+}

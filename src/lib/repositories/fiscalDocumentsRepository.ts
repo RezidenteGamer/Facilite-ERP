@@ -20,6 +20,7 @@
  */
 import { supabase } from "../supabaseClient";
 import type { Tables } from "../../types/supabase";
+import { DANFE_CONTENT_TYPE, XML_CONTENT_TYPE } from "../fiscal/artifactContentTypes";
 import type { FiscalArtifact } from "../fiscal/types";
 import { requestFiscalEmit } from "./fiscalEmitApi";
 
@@ -81,8 +82,8 @@ export function toInvoiceDocument(row: FiscalDocumentRow): InvoiceDocument {
     protocolo: row.protocolo,
     statusSefaz: row.status_sefaz,
     mensagemSefaz: row.mensagem_sefaz,
-    xml: toArtifact(row.xml_content, row.xml_path, "application/xml"),
-    pdf: toArtifact(row.pdf_content, row.pdf_path, "text/html"),
+    xml: toArtifact(row.xml_content, row.xml_path, XML_CONTENT_TYPE),
+    pdf: toArtifact(row.pdf_content, row.pdf_path, DANFE_CONTENT_TYPE),
     // O XML de cancelamento saiu daqui em A1: ele é uma linha de
     // `fiscal_document_events` (tipo `cancelamento`), e as colunas `cancel_*`
     // de `fiscal_documents` são removidas pela migration desta tarefa. Nenhuma

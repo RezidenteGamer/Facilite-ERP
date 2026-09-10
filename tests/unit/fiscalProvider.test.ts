@@ -81,7 +81,10 @@ describe("SimulatedFiscalProvider — os três métodos originais", () => {
     expect(document.chave).not.toBeNull();
     expect(isValidAccessKey(document.chave!)).toBe(true);
     expect(document.xml?.content).toContain("<chNFe>");
-    expect(document.pdf?.contentType).toBe("text/html");
+    // D13: o DANFE virou PDF de verdade, guardado em base64 (ver
+    // `artifactContentTypes.ts`). A conferência dos bytes está em
+    // `fiscalArtifact.test.ts`; aqui basta o provedor declarar o tipo certo.
+    expect(document.pdf?.contentType).toBe("application/pdf");
   });
 
   it("não vaza o estado interno do provedor no documento devolvido", async () => {
@@ -270,7 +273,7 @@ describe("SimulatedFiscalProvider — getXml / getDanfe (A2)", () => {
     await fiscal.emit({ ref: "venda-1", model: "nfe", payload: payload() });
 
     expect((await fiscal.getXml("venda-1"))?.contentType).toBe("application/xml");
-    expect((await fiscal.getDanfe("venda-1"))?.contentType).toBe("text/html");
+    expect((await fiscal.getDanfe("venda-1"))?.contentType).toBe("application/pdf");
   });
 
   it("devolve null (e não exceção) quando não há artefato para a referência", async () => {

@@ -1,4 +1,4 @@
-import { QRCodeSVG } from "qrcode.react";
+import QrCodeFrame from "./QrCodeFrame";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import "./PixQrCode.css";
 
@@ -20,15 +20,17 @@ type PixQrCodeProps = {
  * `qrcode.react` foi a lib escolhida para gerar o QR (ver a decisão em
  * AGENTS.md): renderiza em SVG puro no cliente, sem chamada de rede
  * nenhuma, e é a opção mais usada especificamente em projetos React.
+ *
+ * Desde D13 (10/09/2026) a moldura branca saiu daqui para `QrCodeFrame`, que
+ * Notas Emitidas também usa — ver o comentário lá. O que sobrou neste arquivo
+ * é o que só o PIX tem: o "copia e cola" por extenso e o botão de copiar.
  */
 export default function PixQrCode({ payload }: PixQrCodeProps) {
   const { copied, error, copy } = useCopyToClipboard();
 
   return (
     <div className="pix-qrcode">
-      <div className="pix-qrcode__frame">
-        <QRCodeSVG value={payload} size={220} level="M" />
-      </div>
+      <QrCodeFrame value={payload} size={220} title="QR Code da cobrança PIX" />
 
       <p className="pix-qrcode__code">{payload}</p>
 

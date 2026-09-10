@@ -29,6 +29,7 @@
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
+import { DANFE_CONTENT_TYPE, XML_CONTENT_TYPE } from "../_shared/fiscal/artifactContentTypes.ts";
 import type { FiscalProvider } from "../_shared/fiscal/provider.ts";
 import {
   createFiscalProvider,
@@ -105,8 +106,8 @@ export function seedFromRow(row: FiscalDocumentRow): SimulatedFiscalProviderSeed
       protocolo: row.protocolo,
       statusSefaz: row.status_sefaz,
       mensagemSefaz: row.mensagem_sefaz,
-      xml: toArtifact(row.xml_content, row.xml_path, "application/xml"),
-      pdf: toArtifact(row.pdf_content, row.pdf_path, "text/html"),
+      xml: toArtifact(row.xml_content, row.xml_path, XML_CONTENT_TYPE),
+      pdf: toArtifact(row.pdf_content, row.pdf_path, DANFE_CONTENT_TYPE),
       xmlCancelamento: null,
       qrCodeUrl: row.qr_code_url,
       cnpjEmitente: row.emitente_cnpj ?? "",

@@ -6,9 +6,11 @@ import { useOpenWindows } from "../../components/openWindows";
 import { RegistryActions, RegistryLayout, RegistryTable, type RegistryColumn } from "../../components/registry";
 import { useAuth } from "../auth/AuthContext";
 import { InvoicesIcon } from "../home/icons";
+import QrCodeFrame from "../../components/QrCodeFrame";
 import CancelInvoiceModal from "./CancelInvoiceModal";
 import { formatInvoiceTotal, invoiceStatusColor, invoiceStatusLabel, openFiscalArtifact } from "./invoices";
 import { extractErrorMessage, useInvoicesData } from "./useInvoicesData";
+import "./InvoicesPage.css";
 import type { InvoiceSaleRow } from "../../lib/repositories/fiscalDocumentsRepository";
 
 const MODULE_ID = "notas-emitidas";
@@ -218,7 +220,11 @@ export default function InvoicesPage() {
                   { label: "Modelo", value: document.model === "nfce" ? "NFC-e" : "NF-e" },
                   { label: "Chave de acesso", value: document.chave ?? "—" },
                   { label: "Protocolo", value: document.protocolo ?? "—" },
-                  ...(document.qrCodeUrl ? [{ label: "QR Code", value: document.qrCodeUrl }] : []),
+                  // O QR Code saiu daqui em D13: `fields` só sabe renderizar
+                  // `value: string`, e uma URL de 150 caracteres em texto solto
+                  // não é um QR Code. Ele virou o bloco próprio abaixo do
+                  // layout — mesmo padrão que Filiais usa para o aviso de
+                  // certificado (A11).
                   { label: "Mensagem da SEFAZ", value: document.mensagemSefaz ?? "—" },
                 ]
               : selected
@@ -275,6 +281,23 @@ export default function InvoicesPage() {
           ]}
         />
       </RegistryLayout>
+
+      {/* O QR Code da NFC-e, como imagem (D13). Só existe em NFC-e: a NF-e não
+          tem consulta por QR, e por isso o bloco inteiro some em vez de
+          aparecer vazio. */}
+      {document?.qrCodeUrl && (
+        <div className="invoices-qrcode">
+          <QrCodeFrame value={document.qrCodeUrl} size={150} title="QR Code de consulta da NFC-e" />
+          <div className="invoices-qrcode__text">
+            <p className="invoices-qrcode__title">Consulta da NFC-e por QR Code</p>
+            <p className="invoices-qrcode__hint">
+              Aponte a câmera para o código, ou use o endereço abaixo. O mesmo QR Code está impresso
+              no DANFE em PDF, no botão "Visualizar".
+            </p>
+            <p className="invoices-qrcode__url">{document.qrCodeUrl}</p>
+          </div>
+        </div>
+      )}
 
       {actionErrors.length > 0 && (
         <div style={{ padding: "0 24px" }}>

@@ -1,3 +1,4 @@
+import { decodeArtifactContent, isBinaryArtifact } from "../../lib/fiscal/artifactContentTypes";
 import type { FiscalArtifact } from "../../lib/fiscal/types";
 import type { InvoiceDocument } from "../../lib/repositories/fiscalDocumentsRepository";
 
@@ -35,6 +36,27 @@ export function invoiceStatusColor(document: FiscalStatusHolder | null): string 
 }
 
 /**
+ * Monta o `Blob` de um artefato — separado de `openFiscalArtifact` para poder
+ * ser testado sem `window` (ver `tests/unit/fiscalArtifact.test.ts`).
+ *
+ * **O `decodeArtifactContent` aqui não é detalhe** (D13, 10/09/2026): desde que
+ * o DANFE virou PDF, `content` chega em base64, e `new Blob([string])` gravaria
+ * os caracteres da string base64 dentro de um arquivo rotulado
+ * `application/pdf`. A tela não daria erro nenhum — a aba abriria, o arquivo
+ * baixaria, e só um leitor de PDF descobriria o problema.
+ */
+export function fiscalArtifactBlob(artifact: FiscalArtifact & { content: string }): Blob {
+  const decoded = decodeArtifactContent(artifact.content, artifact.contentType);
+  // Tipo binário que mesmo assim voltou como string = o conteúdo não era
+  // base64. Isso é o DANFE em HTML de uma nota emitida **antes de D13**, que a
+  // leitura rotula como PDF porque a coluna `pdf_content` não distingue os
+  // dois. Rotular esse `Blob` de `application/pdf` entregaria um "PDF" que
+  // nenhum leitor abre; rotulado como HTML, ele abre como sempre abriu.
+  const legado = isBinaryArtifact(artifact.contentType) && typeof decoded === "string";
+  return new Blob([decoded], { type: legado ? "text/html" : artifact.contentType });
+}
+
+/**
  * Abre um artefato (DANFE/XML) numa aba nova — serve tanto `content`
  * (provedor simulado, gera localmente) quanto `path` (provedor real, guarda
  * no servidor dele). Sem esse helper único, a troca de provedor quebraria a
@@ -47,8 +69,7 @@ export function openFiscalArtifact(artifact: FiscalArtifact | null): void {
     return;
   }
   if (artifact.content) {
-    const blob = new Blob([artifact.content], { type: artifact.contentType });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(fiscalArtifactBlob({ ...artifact, content: artifact.content }));
     window.open(url, "_blank", "noopener,noreferrer");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }

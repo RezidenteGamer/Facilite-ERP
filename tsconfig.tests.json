@@ -2,9 +2,19 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tests.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
+    /*
+     * "DOM" e "vite/client" entraram em D13 (10/09/2026), quando as baterias
+     * passaram a cobrir código do front que legitimamente fala com o
+     * navegador: `fiscalArtifact.test.ts` monta um `Blob` (`invoices.ts`) e
+     * carrega `fiscalDocumentsRepository`, que puxa `supabaseClient` e o
+     * `import.meta.env` do Vite. Sem isso, `tsc -b` acusava `Blob` e
+     * `import.meta.env` como inexistentes num código que roda.
+     * O runtime dos testes continua sendo Node (`environment: "node"` em
+     * vitest.config.ts) — o que muda aqui é só o que o compilador conhece.
+     */
+    "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["node", "vitest/globals"],
+    "types": ["node", "vitest/globals", "vite/client"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

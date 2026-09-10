@@ -1,0 +1,54 @@
+/*
+ * O bloco do QR Code da NFC-e (D13, 10/09/2026).
+ *
+ * Fica fora do `RegistryLayout`, abaixo dele, porque `RegistryActions` só
+ * renderiza campos de texto (`value: string`) — o mesmo motivo pelo qual o
+ * aviso de certificado de Filiais (A11) mora fora dos campos genéricos.
+ */
+.invoices-qrcode {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 24px 4px;
+}
+
+.invoices-qrcode__text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.invoices-qrcode__title {
+  margin: 0;
+  color: var(--white);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.invoices-qrcode__hint {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--white);
+  opacity: 0.72;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.invoices-qrcode__url {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--white);
+  opacity: 0.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+@media (max-width: 700px) {
+  .invoices-qrcode {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

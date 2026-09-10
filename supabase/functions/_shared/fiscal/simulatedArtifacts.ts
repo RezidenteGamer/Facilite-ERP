@@ -10,7 +10,10 @@
  * uma tag hoje continua lendo a mesma tag depois da troca.
  */
 
+import { bytesToBase64 } from "../pdf/pdfDocument.ts";
 import { MODEL_CODES, onlyDigits } from "./accessKey.ts";
+import { DANFE_CONTENT_TYPE, XML_CONTENT_TYPE } from "./artifactContentTypes.ts";
+import { buildDanfePdfBytes } from "./danfePdf.ts";
 import type { FiscalArtifact, FiscalModel, NfePayload } from "./types.ts";
 
 function escapeXml(value: string): string {
@@ -172,71 +175,34 @@ export function buildSimulatedXml(issue: SimulatedIssue): FiscalArtifact {
   </protNFe>
 </nfeProc>`;
 
-  return { content, path: null, contentType: "application/xml" };
+  return { content, path: null, contentType: XML_CONTENT_TYPE };
 }
 
 /**
- * "DANFE" simulado em HTML. HTML e não PDF de propósito: gerar PDF de verdade
- * exigiria uma biblioteca só para um arquivo descartável, e o provedor real
- * devolve o PDF pronto (`caminho_danfe`) — quem consome já vai ter que lidar
- * com `contentType` variável de qualquer jeito.
+ * DANFE / DANFE NFC-e simulado, em **PDF** (D13, 10/09/2026).
+ *
+ * Até D13 esta função devolvia uma página HTML, e o comentário que estava aqui
+ * dizia por quê: "gerar PDF de verdade exigiria uma biblioteca só para um
+ * arquivo descartável". A premissa caiu — `_shared/pdf/` escreve PDF sem
+ * biblioteca nenhuma —, e com ela a justificativa. O layout mora em
+ * `danfePdf.ts`; aqui fica só a fronteira entre "bytes de um PDF" e "o que
+ * cabe num `FiscalArtifact`".
+ *
+ * ## Por que `content` vai em base64
+ *
+ * `FiscalArtifact.content` é `string`, e a coluna `fiscal_documents.pdf_content`
+ * é `text` — nenhum dos dois guarda byte cru. Base64 é a única forma de um PDF
+ * atravessar os dois sem perder byte. **O `contentType` é o que avisa quem lê**:
+ * `application/pdf` significa "isto está em base64, decodifique antes de usar"
+ * (ver `openFiscalArtifact`, no front). O XML continua viajando como texto, que
+ * é o que ele é.
  */
 export function buildSimulatedDanfe(issue: SimulatedIssue): FiscalArtifact {
-  const { payload } = issue;
-  const linhas = payload.items
-    .map(
-      (item) => `<tr>
-      <td>${escapeXml(item.codigo_produto)}</td>
-      <td>${escapeXml(item.descricao)}</td>
-      <td class="num">${item.quantidade_comercial}</td>
-      <td class="num">${money(item.valor_unitario_comercial)}</td>
-      <td class="num">${money(item.valor_bruto)}</td>
-    </tr>`,
-    )
-    .join("\n");
-
-  const chaveFormatada = issue.chave.replace(/(\d{4})(?=\d)/g, "$1 ");
-  const rotulo = issue.model === "nfce" ? "DANFCE (NFC-e)" : "DANFE (NF-e)";
-
-  const content = `<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8" />
-<title>${rotulo} ${issue.numero} — simulado</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 24px; color: #1a1a1a; }
-  .aviso { background: #fff4e5; border: 1px solid #f0b357; padding: 8px 12px; margin-bottom: 16px; }
-  .chave { font-family: ui-monospace, monospace; letter-spacing: .04em; font-size: 13px; }
-  table { border-collapse: collapse; width: 100%; margin-top: 12px; font-size: 14px; }
-  th, td { border: 1px solid #d4d4d4; padding: 6px 8px; text-align: left; }
-  .num { text-align: right; }
-  .total { margin-top: 12px; font-size: 18px; font-weight: 600; }
-</style>
-</head>
-<body>
-  <p class="aviso"><strong>Documento simulado.</strong> Gerado localmente, sem
-  assinatura digital e sem valor fiscal.</p>
-  <h1>${rotulo}</h1>
-  <p>Nº ${issue.numero} · Série ${issue.serie} · Emissão ${escapeXml(payload.data_emissao)}</p>
-  <p class="chave">Chave de acesso: ${chaveFormatada}</p>
-  <p>Protocolo de autorização: ${escapeXml(issue.protocolo)}</p>
-  ${issue.qrCodeUrl ? `<p>Consulta por QR Code: <a href="${escapeXml(issue.qrCodeUrl)}">${escapeXml(issue.qrCodeUrl)}</a></p>` : ""}
-  <h2>Emitente</h2>
-  <p>${escapeXml(payload.nome_emitente)} — CNPJ ${escapeXml(payload.cnpj_emitente)}</p>
-  <h2>Destinatário</h2>
-  <p>${escapeXml(payload.nome_destinatario ?? "Consumidor não identificado")}</p>
-  <h2>Produtos</h2>
-  <table>
-    <thead><tr><th>Código</th><th>Descrição</th><th class="num">Qtd.</th><th class="num">Unit.</th><th class="num">Total</th></tr></thead>
-    <tbody>
-${linhas}
-    </tbody>
-  </table>
-  <p class="total">Total da nota: R$ ${money(payload.valor_total)}</p>
-</body>
-</html>`;
-
-  return { content, path: null, contentType: "text/html" };
+  return {
+    content: bytesToBase64(buildDanfePdfBytes(issue)),
+    path: null,
+    contentType: DANFE_CONTENT_TYPE,
+  };
 }
 
 /**
@@ -282,7 +248,7 @@ export function buildSimulatedCorrectionXml(input: {
   </retEvento>
 </procEventoNFe>`;
 
-  return { content, path: null, contentType: "application/xml" };
+  return { content, path: null, contentType: XML_CONTENT_TYPE };
 }
 
 /**
@@ -338,7 +304,7 @@ export function buildSimulatedInvalidationXml(input: {
   </retInutNFe>
 </procInutNFe>`;
 
-  return { content, path: null, contentType: "application/xml" };
+  return { content, path: null, contentType: XML_CONTENT_TYPE };
 }
 
 export function buildSimulatedCancelXml(input: {
@@ -371,5 +337,5 @@ export function buildSimulatedCancelXml(input: {
   </retEvento>
 </procEventoNFe>`;
 
-  return { content, path: null, contentType: "application/xml" };
+  return { content, path: null, contentType: XML_CONTENT_TYPE };
 }

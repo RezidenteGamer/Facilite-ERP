@@ -8,8 +8,23 @@ testes — **testes ficam em `tests/`, rodam com `npm test` e falham o build.**
 | `fiscal-cycle-check.mjs` | Ciclo emitir → consultar → cancelar → consultar do `FiscalProvider` |
 | `nfce-emission-check.mjs` | NFC-e do PDV ponta a ponta |
 | `wizard-invoice-check.mjs` | Prova que "Gerar Nota Fiscal" do wizard emite de verdade |
+| `danfe-pdf-preview.ts` | **Roda em Deno**, não em Node — gera um DANFE e um DANFE NFC-e de exemplo em `.pdf` |
 | `import-module-icons.mjs` | Build helper — importa os ícones dos módulos |
 | `optimize-images.mjs` | Build helper — otimiza imagens |
+
+## `danfe-pdf-preview.ts` é a exceção do diretório (D13, 10/09/2026)
+
+Todos os outros rodam com `node scripts/<nome>.mjs`. Este roda com
+
+```
+deno run --allow-write=. scripts/danfe-pdf-preview.ts [pasta-de-saida]
+```
+
+porque ele carrega o mesmo código que a Edge Function `fiscal-emit` carrega,
+no mesmo runtime. Ele **não** fala com o banco, não autentica e não escreve
+nada além dos dois `.pdf` — é a única verificação local possível do gerador de
+PDF sem implantar a função. O que ele não prova: nada sobre a Edge Function em
+si (roteamento, permissão, banco).
 
 ## Antes de rodar
 

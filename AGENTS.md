@@ -8688,3 +8688,279 @@ sem segredo novo, sem deploy pendente. Depois de aplicada: o `CHECK` de
 já escrevem só os 6 rótulos, então nada muda para elas), e as filiais
 passam a poder cadastrar `pix_key` — sem ela, "Cobrar via PIX" mostra a
 mensagem de chave ausente em vez de dar erro.
+
+### D13 — DANFE e cupom em PDF no servidor: escritor de PDF próprio, QR e Code 128 sem dependência (10/09/2026)
+
+Fecha a Etapa 4 do plano "Mínimo pra vender". O relatório que originou a
+tarefa dizia "HTML montado no cliente"; a pesquisa prévia corrigiu metade
+disso — `buildSimulatedDanfe` **já rodava no servidor**, dentro da Edge
+Function `fiscal-emit`. O que mudou não foi onde roda, e sim o que sai: uma
+string HTML virou os bytes de um PDF de verdade.
+
+#### A decisão central: escrever o PDF à mão, sem `pdf-lib` nem `npm:`
+
+O ponto de partida sugerido era `pdf-lib`, e a pesquisa começou por ele. O que
+matou a ideia **não** foi o Deno — `pdf-lib` roda em Deno sem problema. Foi
+onde o arquivo que gera o DANFE mora:
+
+`_shared/fiscal/simulatedArtifacts.ts` é importado por **três bordas**, não uma:
+
+1. Deno, na Edge Function `fiscal-emit` (o caminho que realmente emite);
+2. Vite, pelo alias `@fiscal-core` — `src/lib/fiscal/simulatedArtifacts.ts` é
+   um `export *` dele, e `registry.ts` → `simulatedFiscalProvider.ts` →
+   `simulatedArtifacts.ts` é uma cadeia que o front resolve em tempo de build;
+3. Node, no Vitest, que cobre o provedor simulado desde a etapa F1.
+
+Uma dependência `npm:` teria que resolver nas três. `npm:pdf-lib` é sintaxe que
+só o Deno entende: o Vite e o `tsc -b` quebrariam. A saída seria criar um import
+map novo (`supabase/functions/deno.json`, que **não existe hoje** — conferido)
+mapeando o especificador nu `pdf-lib` para `npm:pdf-lib@…`, e instalar o pacote
+no `package.json` para as outras duas bordas. Isso é: um mecanismo de resolução
+novo no projeto, um pacote de ~1,4 MB, e **nenhuma forma de verificar antes do
+deploy** que o bundler da Supabase aceita o arranjo — esta sessão não implanta
+nada (regra permanente), então a primeira execução real seria em produção.
+
+O peso disso, para um artefato que o provedor real substitui (`caminho_danfe`,
+tarefa A12) no dia em que A12 ligar, não se paga. Um `.ts` local resolve nas
+três bordas pelo mecanismo que **todo o resto do núcleo fiscal já usa** —
+caminho relativo com extensão explícita — e não pede infraestrutura nova.
+
+O que nasceu daí, em `supabase/functions/_shared/pdf/` (diretório novo, mesmo
+critério de `_shared/http/`: infraestrutura genérica, não regra fiscal):
+
+| Arquivo | O que é |
+|---|---|
+| `pdfDocument.ts` | Escritor de PDF: páginas A4, texto, retângulos, linhas |
+| `helveticaMetrics.ts` | Larguras do AFM da Helvetica + codificação WinAnsi |
+| `qrMatrix.ts` | Codificador de QR Code (modo byte) → matriz de módulos |
+| `code128.ts` | Code 128C → larguras de barra |
+
+O layout do DANFE em si ficou em `_shared/fiscal/danfePdf.ts`, porque **isso**
+é regra fiscal.
+
+**O detalhe que faz um PDF ser válido**: a tabela `xref` no fim do arquivo
+lista o *offset em bytes* de cada objeto. Por isso o arquivo é montado como uma
+string em que todo caractere tem code unit de 0 a 255 (texto já convertido para
+WinAnsi), onde `string.length === bytes.length`; a conversão para `Uint8Array`
+é a última coisa que acontece, sem `TextEncoder`. Usar UTF-8 em qualquer ponto
+desalinharia a `xref` inteira — e o sintoma seria um arquivo que abre num leitor
+tolerante e falha em outro. `tests/unit/fiscalArtifact.test.ts` confere os
+offsets um a um.
+
+#### O QR Code: matriz escrita aqui, conferida contra o `qrcode.react`
+
+`qrcode.react` (que D11 trouxe para o PIX) não serve no servidor — é um
+componente React que desenha no DOM. O que o escritor de PDF precisa é da
+**matriz** de módulos, para pintar um retângulo por módulo escuro.
+
+Nenhuma lib mínima de "só a matriz" compatível com Deno valeria a mesma
+discussão de bundling acima, então o codificador foi escrito em `qrMatrix.ts`
+(ISO/IEC 18004, só modo byte — que é o que uma URL usa).
+
+**Mas ele não é conferido contra si mesmo.** `tests/unit/qrMatrix.test.ts` usa
+o próprio `qrcode.react` como oráculo: ele empacota o `qrcodegen` do Nayuki
+(confirmado no bundle), renderiza via `react-dom/server`, e o teste lê a matriz
+de volta do `<path>` do SVG e compara **módulo a módulo** com a nossa — nos
+quatro níveis de correção, em versões de 1 a ~16, com acento, e na URL de
+consulta da NFC-e que o sistema realmente gera. Mesmo espírito do CRC16 de D11.
+
+Duas armadilhas do oráculo, descobertas fazendo o teste falhar primeiro, e
+documentadas no arquivo de teste:
+
+- `boostLevel: false` é obrigatório — por padrão o `qrcode.react` **sobe** o
+  nível de correção quando sobra espaço na versão.
+- **Toda entrada de teste precisa cair no modo byte.** O `qrcodegen` escolhe o
+  modo mais compacto sozinho: `"HELLO WORLD"` e `"AAAA…"` viram modo
+  alfanumérico e produzem uma matriz legitimamente diferente da nossa. As
+  entradas do teste têm minúscula ou pontuação — como a URL da NFC-e.
+
+#### O código de barras Code 128: incluído, e o teste estrutural pagou por si
+
+Todo DANFE real tem um Code-128 da chave de 44 dígitos. Era desejável, não
+obrigatório — e coube. Subconjunto C só (dois dígitos por símbolo), que é o que
+a chave exige; A e B trariam regras de troca de subconjunto que nunca rodariam.
+
+`tests/unit/code128.test.ts` confere as invariantes estruturais da tabela de
+padrões da norma: 107 símbolos, todo padrão de dado somando 11 módulos em seis
+larguras de 1 a 4, o `Stop` com 13 módulos em sete, e nenhum padrão repetido.
+**Isso não foi cerimônia**: na primeira execução o teste reprovou a tabela —
+havia duas linhas espúrias, e o deslocamento que elas causavam teria trocado
+todos os padrões de valor ≥ 83.
+
+#### Verificação: o arquivo foi aberto, e o QR e o código de barras foram lidos
+
+Não dá para testar a Edge Function sem implantar. O que **deu** para fazer,
+sem deploy e sem banco, foi rodar a geração isolada e olhar o resultado:
+
+- `scripts/danfe-pdf-preview.ts` (novo) roda **em Deno** — o mesmo runtime da
+  Edge Function — e grava `danfe-nfe-exemplo.pdf` e `danfe-nfce-exemplo.pdf`.
+  É a única verificação local possível da cadeia `_shared/pdf/*` + `danfePdf.ts`
+  no runtime de destino.
+- Os dois arquivos foram abertos e renderizados pelo **pdf.js da Mozilla**
+  (o motor do Firefox), num navegador de verdade: layout correto, acento
+  correto (`São João`, `Conceição`, `Cálculo`), alinhamento das colunas de
+  valor correto.
+- O **QR Code foi decodificado de dentro do PDF renderizado**, pelo `jsQR`, e
+  devolveu exatamente a URL de consulta da NFC-e. Não é "o QR parece um QR": é
+  um leitor independente lendo o que foi desenhado.
+- O **código de barras também foi decodificado**, pelo `Code128Reader` do
+  ZXing, e devolveu os 44 dígitos da chave de acesso.
+
+**Uma correção real saiu dessa verificação**: com as barras ocupando a largura
+toda do quadro, o ZXing **não decodificava** o código de barras em resolução
+nenhuma — nem a 11 pixels por módulo. Faltava a **zona de silêncio**: a norma
+exige 10 módulos de branco antes do padrão de início e depois do de parada, e
+leitores de verdade recusam sem ela. `drawBarcode` passou a reservar essa folga
+dentro da largura que recebe (`CODE128_QUIET_MODULES`). Sem abrir o arquivo num
+leitor real, esse defeito teria passado: o código de barras *aparece* na tela
+igual dos dois jeitos.
+
+Fica registrado o limite: a leitura do código de barras dentro do PDF só
+funcionou com a imagem binarizada com limiar duro — o `HybridBinarizer` do ZXing
+tropeça no antialiasing do pdf.js nessa densidade (módulo de 0,62 mm). Em papel
+impresso, com tinta de verdade, isso não se aplica; num leitor de tela, pode.
+
+#### `application/pdf` significa base64 — e a armadilha dos três lugares
+
+`fiscal_documents.pdf_content` é `text` e `FiscalArtifact.content` é `string`.
+Um PDF é binário. **Nenhuma migration foi necessária** (`text` guarda base64 de
+qualquer tamanho, conforme a tarefa antecipava), mas o contrato de quem lê a
+coluna mudou: `content` do DANFE agora vem em base64.
+
+O tipo do artefato estava escrito à mão em **três** arquivos, e os três
+precisavam mudar juntos. A falha se eles divergissem é específica e silenciosa:
+um documento **nasceria** PDF e, depois de qualquer reconciliação (botão
+"Consultar status" de A6, varredura de A7, webhook de A8), voltaria a ser
+**rotulado** HTML — sem erro nenhum na tela.
+
+A saída não foi mudar as três strings: foi apagá-las. `_shared/fiscal/artifactContentTypes.ts`
+(novo) tem `DANFE_CONTENT_TYPE`, `XML_CONTENT_TYPE`, `isBinaryArtifact` e
+`decodeArtifactContent`; os três leem de lá, e `src/lib/fiscal/artifactContentTypes.ts`
+é o reexport fino para o front, como os irmãos dele.
+
+**Só o DANFE viaja em base64; o XML continua texto.** Mandar tudo em base64
+tiraria o `if` da leitura, mas o XML é justamente o artefato que alguém abre
+num editor e lê — na tabela e no banco. O ramo mora numa função só, testada.
+
+#### `openFiscalArtifact`: o bug que abre uma aba e não dá erro
+
+`new Blob([content])` trata a string como texto UTF-8. Com `content` em base64
+e sem decodificar, o `Blob` gravaria os **caracteres** `JVBERi0…` dentro de um
+arquivo rotulado `application/pdf`: a aba abre, o download acontece, e o PDF
+está corrompido. A tela nunca reclama.
+
+`fiscalArtifactBlob` (extraída de `openFiscalArtifact` para poder ser testada
+sem `window`) chama `decodeArtifactContent` antes de montar o `Blob`. O teste
+confere os **bytes** do `Blob` — que ele tem 9 bytes e começa em `%PDF-`, e não
+12 bytes começando em `JVBER`.
+
+#### QR Code na tela de Notas Emitidas
+
+A linha `{ label: "QR Code", value: document.qrCodeUrl }` saiu do array
+`fields` de `RegistryActions`: aquele array só sabe renderizar `value: string`,
+e uma URL de 150 caracteres em texto solto não é um QR Code. Virou um bloco
+próprio abaixo do `RegistryLayout` — mesmo padrão que Filiais usa para o aviso
+de certificado (A11).
+
+A parte comum com o PIX foi extraída para `src/components/QrCodeFrame.tsx`: a
+moldura branca em volta do QR **não é enfeite** — as telas internas têm fundo
+escuro, e um QR precisa de zona de silêncio clara para ser lido (a mesma classe
+de exigência do Code 128 acima). Deixar essa regra escrita em cada tela seria
+convidar a próxima a esquecer. `PixQrCode` passou a usá-la; o que é específico
+do PIX (copia e cola, botão "Copiar") continua lá.
+
+#### Um layout A4 só, para NF-e e NFC-e
+
+Não existe formato de bobina de 80 mm aqui. Impressão térmica é ESC/POS por
+WebUSB/WebSerial (tarefa E1), tecnologia sem relação nenhuma com gerar PDF —
+enquanto E1 não existir, um "cupom" seria visualizado no navegador como
+qualquer outro PDF, e um papel estreito não entregaria nada além de uma página
+estranha. O que muda entre os dois modelos é o rótulo, o quadro de
+entrada/saída (só NF-e) e o bloco do QR Code (só NFC-e).
+
+Fidelidade ao MOC: a ordem e o conteúdo dos quadros, não o milímetro. Duas
+razões que não mudam com esforço — este documento não é o documento fiscal de
+ninguém (o provedor real devolve o dele, homologado), e ele deixa de existir no
+dia em que A12 ligar.
+
+#### Testes e verificação
+
+`tests/unit/qrMatrix.test.ts` (6 casos), `tests/unit/code128.test.ts` (8) e
+`tests/unit/fiscalArtifact.test.ts` (15) são novos.
+`tests/unit/fiscalProvider.test.ts` teve as duas asserções de `"text/html"`
+trocadas por `"application/pdf"`.
+
+O caso "2)" de `fiscalArtifact.test.ts` é uma conferência de **código-fonte**, e
+não de comportamento, por um motivo declarado no arquivo: `reconcile.ts` importa
+`jsr:@supabase/supabase-js` e usa `Deno.env`, que não existem no Vitest —
+importá-lo quebraria `tsc -b` por ser de outro runtime. A conferência garante o
+que interessa: que nenhum dos três arquivos escreva o tipo à mão. Ela foi
+validada injetando a regressão (`"text/html"` de volta no repositório do front)
+e vendo os casos 2 e 3 reprovarem.
+
+`tsconfig.tests.json` ganhou `"DOM"` em `lib` e `"vite/client"` em `types`: as
+baterias passaram a cobrir código do front que fala com o navegador (`Blob`) e
+com o `import.meta.env` do Vite. O runtime dos testes continua sendo Node.
+
+`npm run build`, `npm run lint` e `tsc -b` limpos. 671 testes unitários passando
+(639 antes + 32 novos). `npm test` (bateria completa) mantém os mesmos 4
+arquivos de concorrência/isolamento falhando por falta de
+`FACILITE_TEST_EMAIL`/`FACILITE_ISOLATION_A_EMAIL` em `.env.local` — condição de
+ambiente pré-existente, não relacionada a D13.
+
+`deno check` limpo nas três Edge Functions (`fiscal-emit`, `fiscal-webhook`,
+`admin-users`) e no script novo — conferido com atenção porque era a primeira
+vez que se cogitava dependência externa no bundle; como nenhuma entrou, o grafo
+de módulos continua sendo só `jsr:@supabase/*` e caminhos relativos.
+
+Conferido também que o núcleo de PDF **não entra no bundle do front**: nenhum
+arquivo de `dist/assets/` contém `WinAnsiEncoding`, `%PDF-1.4` ou a tabela do
+Code 128. Nenhuma tela importa `getFiscalProvider()` desde A1, então a cadeia
+que levaria a `simulatedArtifacts.ts` não é alcançada — o custo do escritor de
+PDF fica inteiramente na Edge Function.
+
+**UI não verificada ao vivo**: o bloco novo de QR Code em Notas Emitidas não foi
+aberto no navegador com login — esta sessão não tinha credenciais de teste em
+`.env.local`. O que foi verificado no navegador foi o **PDF** (ver acima), por
+uma página descartável servida pelo dev server, já removida.
+
+#### O que a revisão (`/code-review alto`) achou, e o que foi corrigido
+
+Três defeitos reais, todos com teste de regressão validado (a correção foi
+revertida e o teste reprovou antes de valer):
+
+1. **O bloco final descia por cima do rodapé.** A checagem de quebra de página
+   media só a altura da caixa, e não a do bloco inteiro (o respiro de 6 pt e a
+   faixa de título ficavam de fora). Numa NFC-e com 21 ou 22 itens, o quadro do
+   QR Code invadia a linha do rodapé em ~12 pt. `SECTION_TITLE_HEIGHT` deixou
+   de ser número solto e entra na conta.
+2. **A nota emitida antes de D13 fazia o botão "Visualizar" não fazer nada.**
+   `pdf_content` das notas antigas guarda HTML, e a leitura passou a rotular
+   toda linha como `application/pdf` — `atob` levantaria `InvalidCharacterError`
+   no `<`, dentro do `onClick`. Erro em manipulador de evento do React **não é
+   pego por `ErrorBoundary`**: o clique seria um silêncio. `decodeArtifactContent`
+   passou a devolver o conteúdo como texto quando a decodificação falha, e
+   `fiscalArtifactBlob` rotula esse `Blob` de `text/html` — a nota antiga volta
+   a abrir exatamente como abria antes.
+3. **Quebra de linha em campo livre virava glifo vazio.**
+   `informacoes_adicionais_contribuinte` é texto do operador, e um `Tj` desenha
+   uma linha só: o byte 0x0A não quebrava linha, desenhava o `.notdef` da fonte
+   no meio da frase. `toPdfLiteral` converte caractere de controle em espaço —
+   **antes** do `?` de fallback, e não depois (a primeira tentativa de correção
+   ficou inalcançável exatamente por essa ordem, e o teste pegou).
+
+#### Fronteira com quem for implantar
+
+**`fiscal-emit` precisa ser reimplantada** — é a primeira tarefa desde A11/D1
+que mexe no código dela. Sem o deploy, notas novas continuam nascendo com o
+DANFE em HTML, mas **rotuladas** `application/pdf` pelo front (que já mudou):
+a tela tentaria decodificar HTML como base64 e abriria um arquivo quebrado.
+Front e Edge Function precisam subir juntos, ou a Edge Function primeiro.
+
+Sem migration, sem segredo novo. `fiscal-webhook` e `admin-users` não mudaram
+(o `deno check` nelas foi conferência, não necessidade).
+
+Documentos **já emitidos** continuam com HTML em `pdf_content` e passarão a ser
+rotulados `application/pdf` — vão abrir corrompidos. São dados de teste de um
+sistema sem cliente real (ver "Fase do projeto"); a saída, se incomodar, é
+emitir de novo, não migrar.

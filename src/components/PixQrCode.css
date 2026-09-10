@@ -6,13 +6,6 @@
   text-align: center;
 }
 
-.pix-qrcode__frame {
-  padding: 12px;
-  background: var(--white);
-  border-radius: var(--radius-lg);
-  line-height: 0;
-}
-
 .pix-qrcode__code {
   width: 100%;
   max-height: 90px;
