@@ -2,7 +2,11 @@ import { supabase } from "../supabaseClient";
 import type { TablesInsert, TablesUpdate } from "../../types/supabase";
 import {
   branchColumnsFromForm,
+  COLUNA_CERT_CNPJ,
+  COLUNA_CERT_VALIDO_ATE,
+  COLUNA_CERT_VALIDO_DE,
   COLUNA_EMAIL_COPIA_NOTA,
+  COLUNAS_CERTIFICADO,
   isDuplicateBranchCodeError,
   isMissingColumnError,
   type BranchAdmin,
@@ -88,28 +92,66 @@ const COLUNAS_BASE =
   "codigo_ibge_municipio, logradouro, numero, bairro, municipio, uf, cep, allow_negative_stock";
 
 /**
- * A coluna `email_copia_nota_fiscal` existe neste banco?
+ * Colunas que podem ou não existir neste banco, **agrupadas pela migration que
+ * as cria**.
  *
- * `null` = ainda não sondado. **Isto não é paranoia genérica sobre schema**: a
- * migration que cria a coluna faz parte de D1 e a sessão que a escreveu não
- * tinha permissão de aplicá-la, então o estado normal deste código é rodar
- * contra um banco onde ela ainda não existe. Sem a sondagem, o `select` inteiro
- * falharia e a tela de Filiais — o núcleo de D1 — não listaria nada.
+ * **Isto não é paranoia genérica sobre schema**: são duas migrations escritas
+ * por sessões sem permissão de aplicá-las (D1 e A11), então o estado normal
+ * deste código é rodar contra um banco onde nenhuma das duas existe. Sem a
+ * sondagem, o `select` inteiro falharia e a tela de Filiais não listaria nada.
  *
- * A sondagem custa zero requisição no caminho feliz: ela é o próprio `select`.
+ * **Por que grupos, e não um booleano como em D1.** Um `42703` diz "alguma
+ * coluna deste `select` não existe" — e não diz qual. Com uma migration
+ * pendente só, dava para deduzir; com duas, que podem ser aplicadas em ordens
+ * diferentes, deduzir vira chute: marcar as duas como ausentes esconderia o
+ * certificado num banco que já tem a coluna dele, e marcar as duas como
+ * presentes deixaria a tela sem listar nada. Por isso, diante do `42703`, o
+ * código pergunta grupo a grupo em vez de adivinhar.
  *
- * **Condição de remoção**: quando
- * `supabase/migrations/00000000000014_d1_filiais_ganham_tela.sql` estiver
- * aplicada em todos os ambientes, este estado, os dois caminhos de
- * `fetchBranchesForAdmin` e o `emailColumnAvailable` que atravessa o hook, a
- * tela e a ficha saem juntos — `COLUNAS_BASE` passa a incluir a coluna e
+ * **Condição de remoção**: quando as duas migrations estiverem aplicadas em
+ * todos os ambientes, este estado, o caminho de sondagem de
+ * `fetchBranchesForAdmin` e os dois `...ColumnsAvailable` que atravessam o
+ * hook, a tela e a ficha saem juntos — as colunas entram em `COLUNAS_BASE` e
  * pronto. Não é para ficar.
  */
-let colunaEmailDisponivel: boolean | null = null;
+const GRUPOS_OPCIONAIS = {
+  /** `00000000000014_d1_filiais_ganham_tela.sql` */
+  email: [COLUNA_EMAIL_COPIA_NOTA] as readonly string[],
+  /** `00000000000015_a11_certificado_digital_validade.sql` */
+  certificado: COLUNAS_CERTIFICADO as readonly string[],
+} as const;
+
+type GrupoOpcional = keyof typeof GRUPOS_OPCIONAIS;
+
+const GRUPOS = Object.keys(GRUPOS_OPCIONAIS) as GrupoOpcional[];
+
+/** `null` = ainda não sondado; `true`/`false` = existe / não existe. */
+const disponibilidade: Record<GrupoOpcional, boolean | null> = {
+  email: null,
+  certificado: null,
+};
 
 /** A coluna de e-mail está disponível? `null` enquanto ninguém listou ainda. */
 export function branchEmailColumnAvailable(): boolean | null {
-  return colunaEmailDisponivel;
+  return disponibilidade.email;
+}
+
+/**
+ * As três colunas de certificado digital (A11) estão disponíveis? `null`
+ * enquanto ninguém listou ainda.
+ */
+export function branchCertificadoColumnsAvailable(): boolean | null {
+  return disponibilidade.certificado;
+}
+
+/** Os grupos que vale a pena tentar — os que não são sabidamente ausentes. */
+function gruposCandidatos(): GrupoOpcional[] {
+  return GRUPOS.filter((grupo) => disponibilidade[grupo] !== false);
+}
+
+/** `COLUNAS_BASE` mais as colunas dos grupos pedidos. */
+function selectCom(grupos: GrupoOpcional[]): string {
+  return [COLUNAS_BASE, ...grupos.flatMap((grupo) => GRUPOS_OPCIONAIS[grupo])].join(", ");
 }
 
 type LinhaFilial = Record<string, unknown>;
@@ -133,6 +175,9 @@ function toBranchAdmin(row: LinhaFilial): BranchAdmin {
     cep: (row.cep as string | null) ?? null,
     allowNegativeStock: Boolean(row.allow_negative_stock),
     emailCopiaNotaFiscal: (row[COLUNA_EMAIL_COPIA_NOTA] as string | null) ?? null,
+    certificadoValidoDe: (row[COLUNA_CERT_VALIDO_DE] as string | null) ?? null,
+    certificadoValidoAte: (row[COLUNA_CERT_VALIDO_ATE] as string | null) ?? null,
+    certificadoCnpj: (row[COLUNA_CERT_CNPJ] as string | null) ?? null,
   };
 }
 
@@ -146,7 +191,7 @@ function toBranchAdmin(row: LinhaFilial): BranchAdmin {
  * digitou num campo que estava habilitado.
  */
 function toColunas(values: BranchFormValues): Record<string, unknown> {
-  return branchColumnsFromForm(values, { includeEmail: colunaEmailDisponivel !== false });
+  return branchColumnsFromForm(values, { includeEmail: disponibilidade.email !== false });
 }
 
 /** Mensagem do banco traduzida quando dá para dizer algo melhor que o texto cru. */
@@ -166,23 +211,47 @@ function erroDeEscrita(error: { code?: string; message?: string }): Error {
 export async function fetchBranchesForAdmin(): Promise<BranchAdmin[]> {
   const client = assertSupabase();
 
-  if (colunaEmailDisponivel !== false) {
+  const candidatos = gruposCandidatos();
+  if (candidatos.length > 0) {
+    /* Caminho feliz e caminho já sondado: uma requisição só, e ela é a própria
+       sondagem — custo zero quando o schema está em dia. */
     const { data, error } = await client
       .from("branches")
-      .select(`${COLUNAS_BASE}, ${COLUNA_EMAIL_COPIA_NOTA}`)
+      .select(selectCom(candidatos))
       .order("code", { ascending: true });
 
     if (!error) {
-      colunaEmailDisponivel = true;
+      for (const grupo of candidatos) disponibilidade[grupo] = true;
       return ((data ?? []) as unknown as LinhaFilial[]).map(toBranchAdmin);
     }
     if (!isMissingColumnError(error)) throw error;
-    colunaEmailDisponivel = false;
+
+    /* Alguma coluna opcional não existe, e o erro não diz qual. Uma pergunta
+       por grupo — em paralelo, porque são independentes — e uma única vez na
+       sessão. */
+    const sondas = await Promise.all(
+      candidatos.map(async (grupo) => ({
+        grupo,
+        error: (await client.from("branches").select(GRUPOS_OPCIONAIS[grupo].join(", ")).limit(1))
+          .error,
+      })),
+    );
+    for (const sonda of sondas) {
+      if (sonda.error && !isMissingColumnError(sonda.error)) throw sonda.error;
+      disponibilidade[sonda.grupo] = !sonda.error;
+    }
+
+    /* Todas as sondas passaram, mas o `select` com elas falhou: quem não
+       existe é uma coluna de `COLUNAS_BASE`, e não uma das opcionais. Repetir
+       o mesmo `select` só gastaria mais uma ida ao banco para receber o mesmo
+       erro — melhor devolver o original, que é o que descreve o problema de
+       verdade. */
+    if (gruposCandidatos().length === candidatos.length) throw error;
   }
 
   const { data, error } = await client
     .from("branches")
-    .select(COLUNAS_BASE)
+    .select(selectCom(gruposCandidatos()))
     .order("code", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as unknown as LinhaFilial[]).map(toBranchAdmin);

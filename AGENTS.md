@@ -7897,3 +7897,376 @@ devolvida ao estado exato em que estava.
   "Fiscal" da tela é a casa pronta esperando por ele.
 - Excluir filial, série cadastrável, envio de e-mail de verdade, e um módulo
   `filiais` de primeiro nível no catálogo.
+
+### Decisão arquitetural: certificado digital A1 — a validade entra no cadastro, o certificado não (A11) (09/09/2026)
+
+Última tarefa da Etapa 3 (infraestrutura fiscal), e ela fecha a etapa. Entra na
+casa que D1 construiu quatro dias — na verdade, horas — antes: o bloco "Fiscal"
+do formulário de filial estava explicitamente esperando por isto (`D1` registrou
+"`certificado_digital_ref` não entrou no formulário: é A11").
+
+**A tarefa é sobre o dado mais sensível que este sistema já tocou.** Um
+certificado A1 é a chave privada da empresa perante a SEFAZ: quem o tem assina
+nota em nome dela. Por isso a decisão central de A11 não é sobre tela nem sobre
+coluna — é sobre o que **não** existe.
+
+#### A pesquisa: como a Focus trata certificado
+
+Conferido ao vivo em `doc.focusnfe.com.br/reference/criar_empresa` e
+`doc.focusnfe.com.br/reference/atualizar_empresa` (acesso em 09/09/2026):
+
+| campo                        | onde | o que é |
+| ---------------------------- | ---- | ------- |
+| `arquivo_certificado_base64` | requisição | "Arquivo PFX/P12 em base64" |
+| `senha_certificado`          | requisição | "Senha do certificado digital. Obrigatória apenas se informado `arquivo_certificado_base64`." |
+| `certificado_especifico`     | requisição e resposta | se o certificado vale só para esta empresa; sem ele, "atualização de certificado é propagada para todas empresas com o mesmo CNPJ base (matriz e filiais)" |
+| `certificado_valido_de`      | resposta | início da validade |
+| `certificado_valido_ate`     | resposta | fim da validade |
+| `certificado_cnpj`           | resposta | o CNPJ contido no certificado |
+
+**O achado que decide o desenho**: o certificado é atributo do **cadastro da
+empresa** na Focus (`POST`/`PUT /v2/empresas`) — não é parte do payload de uma
+nota. `NfePayload` não tem nada de certificado, e não vai ter. Ou seja: **quem
+guarda certificado, no desenho da Focus, é a Focus.** Guardá-lo aqui também
+seria duplicar o ativo mais sensível do cliente sem ganhar nada com isso.
+
+#### Confirmação explícita: o certificado não é persistido nem enviado
+
+Vale escrito por extenso, porque é a afirmação que a próxima sessão vai querer
+poder confiar sem reauditar:
+
+- **Nenhuma coluna** guarda o arquivo `.pfx`/`.p12` ou a senha — nem `bytea`,
+  nem `text` com base64, nem hash, nem "criptografado com pgsodium". A migration
+  de A11 diz isso na cara, no bloco "o que esta migration deliberadamente NÃO
+  faz".
+- **Nenhum bucket de Storage** foi criado. "Guardar no Storage por enquanto"
+  seria a mesma coisa com outro nome, e com a agravante de o arquivo passar a
+  existir num lugar cujo controle de acesso é outro sistema.
+- **Nenhuma requisição** leva certificado a lugar nenhum — não há chamada à
+  Focus (é A12), e `createFocusProvider` continua lançando
+  `FiscalNotConfiguredError` nas sete operações, intocado.
+- **Nenhum estado de React** guarda arquivo ou senha. `BranchFormValues` não
+  ganhou campo nenhum de certificado, e `branchColumnsFromForm` não escreve
+  nenhuma coluna de certificado — os dois têm teste travando isso.
+- **Nem transitoriamente**: o conteúdo do arquivo nunca é lido. Não existe
+  `FileReader`, `arrayBuffer`, `btoa`, `createObjectURL`, `FormData` nem `fetch`
+  nos dois arquivos da tela — há teste que lê o fonte e reprova se qualquer um
+  aparecer (ver "Testes").
+
+E há a razão prática que soma à de confiança: **não existe conta na Focus**
+(A12 não aconteceu). Não há para onde mandar o arquivo. Isso põe A11 no mesmo
+balde de A8 (`fiscal-webhook`): **construída e desligada**.
+
+#### Decisão 1: os campos de envio nascem **desabilitados**, não "aceitos e recusados no confirmar"
+
+O enunciado descrevia o caminho "aceita o arquivo e a senha, e recusa ao
+confirmar", e convidava a avaliar algo mais conservador. Avaliado, e o mais
+conservador ganhou:
+
+As duas opções deixam o operador sem enviar o certificado — não há destino. A
+diferença está no que acontece com a senha nesse meio-tempo. No caminho
+"habilitado" ela é digitada e passa a existir em memória do navegador, no
+gerenciador de senhas se ele se oferecer para guardá-la, e em qualquer lugar
+para onde a memória do processo possa ir — **em troca de função zero**, porque a
+confirmação recusa de qualquer jeito. É risco sem contrapartida.
+
+Desabilitado, a propriedade "a senha do certificado nunca entra neste sistema"
+deixa de depender de cuidado (limpar estado, cuidar do desmonte, não logar) e
+passa a ser **estrutural**: não há estado para vazar porque não há como digitar,
+e o `<input type="file">` não tem `onChange` — não existe função capaz de
+receber um `File`.
+
+**Esconder os campos seria pior**, e essa decisão não é nova: D1 enfrentou a
+mesma escolha com o e-mail de cópia da nota e resolveu igual — "aparece
+desabilitado com a explicação, não escondido", porque sumir seria a tela
+escondendo do operador que o cadastro tem essa casa. O texto ao lado dos campos
+(`MOTIVO_CERTIFICADO_DESLIGADO`) diz o porquê e diz também o que vai acontecer
+quando A12 existir: arquivo e senha vão do navegador **direto** para a Focus.
+
+#### Decisão 2: o vocabulário de status, e por que ele **não** é coluna
+
+`sem_certificado` · `nao_vigente` · `valido` · `vencendo` · `vencido`
+(`CertificadoStatus`, em `branches.ts`; rótulos: "Não cadastrado", "Ainda não
+vigente", "Válido", "Vence em breve", "Vencido").
+
+**Não virou coluna, e isso era a pegadinha do enunciado** (que o listava entre
+as colunas novas): "vencendo" vira "vencido" **sozinho**, com o tempo, sem
+ninguém escrever nada. Uma coluna guardando isso estaria errada no dia seguinte
+ao que foi gravada, a menos que algo a reescrevesse todo dia — e construir esse
+"todo dia" é agendamento, exatamente a infraestrutura que A7 fez para outra
+coisa e que A11 não deve construir. O status é **calculado das datas** toda vez
+que a tela pinta.
+
+Notas sobre o vocabulário:
+
+- **`validoAte` é a âncora.** Sem ela o status é `sem_certificado`, mesmo com as
+  outras duas colunas preenchidas: é a única sobre a qual dá para agir.
+- **Data ilegível também cai em `sem_certificado`**, e essa é a direção segura —
+  "não cadastrado" empurra para a ação certa; "válido" em cima de dado corrompido
+  é que seria perigoso.
+- **`nao_vigente` existe** porque `validoDe` é coluna real, e uma função que
+  recebe uma data e a ignora é pior que uma que a usa. É raro; dizer "ainda não
+  vigente" nunca é errado, e dizer "válido" sobre um certificado que ainda não
+  começou seria.
+- **No dia do vencimento o status é `vencendo`, não `vencido`** — o prazo é o
+  dia todo.
+
+#### Decisão 3: o limiar do aviso é **30 dias**
+
+Não é convenção copiada — é o tamanho do ciclo de renovação de um A1:
+
+1. **Renovar não é baixar um arquivo.** É comprar na Autoridade Certificadora,
+   **agendar** a validação (presencial ou por videoconferência, exigida pelo
+   ICP-Brasil), passar por ela, emitir, baixar, e depois ainda cadastrar na
+   Focus. O agendamento é o gargalo: marca-se com dias de antecedência.
+2. **A assimetria de custo é brutal.** Avisar cedo demais custa uma faixa de
+   texto. Avisar tarde demais custa a operação: sem certificado válido a filial
+   **para** de emitir nota — não é funcionalidade degradada, é faturamento
+   parado. Diante disso, errar para o lado generoso é a escolha óbvia.
+3. **30 dias é ~8% da vida de um A1** (que vale 1 ano). Curto o bastante para o
+   aviso significar algo quando aparece — 90 dias deixaria a faixa acesa um
+   trimestre, e faixa sempre acesa vira papel de parede. Longo o bastante para
+   sobreviver a duas semanas de férias do único operador da loja, que 7 ou 15
+   dias não sobrevivem.
+
+Não há um segundo limiar mais gritante antes do vencimento: `vencido` já é o
+segundo nível, e três tons de aviso para uma decisão que só tem duas respostas
+(renovar agora ou não) é ruído.
+
+**O aviso é visual e só isso** — faixa no topo da tela de Filiais, destaque na
+coluna da lista, bloco no formulário. Nenhum e-mail, nenhum `pg_cron`, nenhuma
+fila: isso seria infraestrutura nova, e não é o que A11 pede.
+
+#### Decisão 4: o CNPJ do certificado compara pela **raiz**, não pelos 14 dígitos
+
+Este é o achado que evitou um bug embutido. A comparação óbvia — CNPJ do
+certificado × CNPJ da filial, 14 dígitos — **daria alarme falso em toda filial
+não-matriz**: um certificado e-CNPJ da matriz assina nota das filiais, e o que
+se exige é que a **raiz** (8 primeiros dígitos) bata.
+
+A própria Focus documenta esse desenho ao explicar `certificado_especifico`: sem
+ele, "atualização de certificado é propagada para todas empresas com o mesmo
+CNPJ base (matriz e filiais)" — o que só faz sentido porque o mesmo certificado
+serve as duas. `relacaoCnpjCertificado` devolve quatro resultados
+(`indeterminada`, `mesma_empresa`, `mesma_raiz`, `divergente`) e **só
+`divergente` gera aviso**.
+
+O aviso de CNPJ é **acumulado** com o de vencimento, não excludente: um
+certificado pode estar vencido *e* ser de outra empresa, e mostrar só um dos
+dois esconderia metade do problema de quem está tentando consertá-lo.
+
+#### `certificado_digital_ref`: pesquisada, mantida vazia, e agora explicada
+
+A coluna nasceu na etapa 0 dos campos fiscais (14/08/2026) como "placeholder de
+referência ao certificado digital — sem upload nem lógica de certificado, isso é
+de uma etapa de ativação fiscal futura". A etapa futura é esta, e a pesquisa
+mostrou que **a premissa dela não se confirma**: no desenho da Focus não existe
+"referência ao certificado" para guardar. O certificado é atributo da empresa
+cadastrada lá, identificada pelo CNPJ — não há handle, id de arquivo ou token
+por certificado.
+
+Três caminhos, e o escolhido é o terceiro:
+
+1. **reaproveitá-la** para uma das datas ou para o CNPJ do certificado —
+   recusado: o nome diria "ref" e o conteúdo seria outra coisa, que é como
+   nasce a próxima confusão;
+2. **derrubá-la** — recusado: `drop column` é irreversível, esta sessão não pode
+   aplicar migration nenhuma (a remoção ficaria pendente por tempo
+   indeterminado, com o repositório afirmando algo que o banco não fez), e ela
+   não custa nada onde está — ninguém escreve, ninguém lê, e a única filial
+   deste banco a tem nula;
+3. **deixá-la parada e escrever o que se sabe sobre ela** — feito, como
+   `comment on column`. Se A12 precisar guardar alguma referência da empresa do
+   lado da Focus, a casa está pronta; se não, a remoção é uma linha, tomada com
+   informação completa.
+
+#### O que entrou no banco (migration escrita, **não aplicada**)
+
+`supabase/migrations/00000000000015_a11_certificado_digital_validade.sql`, três
+colunas e um comentário:
+
+1. `branches.certificado_valido_de date`
+2. `branches.certificado_valido_ate date`
+3. `branches.certificado_cnpj text`
+4. `comment on column branches.certificado_digital_ref` — o item acima.
+
+**`date` e não `timestamptz`, de propósito.** O que a tela faz é uma conta de
+dias inteiros contra um limiar de 30. Hora e fuso trariam precisão que ninguém
+usa e uma classe de bug que morde: a diferença entre dois instantes atravessa
+horário de verão e vira 29,96 dias onde deveria ser 30 — bem em cima do limiar.
+Pelo mesmo motivo `diasAteVencimento` faz a conta em **UTC**, e há teste
+atravessando a virada do horário de verão nos dois sentidos.
+
+**Fora de propósito**: coluna de arquivo, coluna de senha, bucket de Storage,
+coluna de status, job de aviso, `certificado_especifico` (é comportamento da
+conta na Focus, decidido no envio — nasce com A12 ou não nasce). A RLS de
+`branches` **não foi tocada**: as três colunas novas são metadado público (CNPJ
+e datas), e é justamente por não serem segredo que podem morar numa tabela que
+todo usuário com acesso à filial lê. É o mesmo argumento que D1 usou para não
+pôr credencial de SMTP ali — e um certificado é pior que uma senha de e-mail.
+
+**Nada escreve nessas três colunas hoje.** Elas são preenchidas pela resposta da
+Focus, o que é A12. Na prática, todas as filiais estão em `sem_certificado` até
+lá — e a tela diz isso, em vez de fingir.
+
+#### O que entrou no código
+
+- **`branches.ts`** ganhou o bloco de certificado: `BranchCertificado`,
+  `CertificadoStatus`, `LIMIAR_AVISO_VENCIMENTO_DIAS`, `diasAteVencimento`,
+  `certificadoStatus`, `relacaoCnpjCertificado`, `resumoCertificado` e
+  `MOTIVO_CERTIFICADO_DESLIGADO` — tudo puro, sem React e sem rede, no mesmo
+  padrão que D1 estabeleceu e pelo mesmo motivo (a bateria exercita sem subir
+  navegador nem banco). Toda função de data recebe o "hoje" como parâmetro, para
+  um teste de limiar não virar um teste que passa hoje e reprova em março.
+- **`BranchCertificateSection.tsx`** (novo): o bloco da tela. Arquivo próprio, e
+  não mais um trecho de `BranchFormModal`, porque é o **único** lugar do sistema
+  com campo de certificado — concentrá-lo torna a auditoria uma leitura de um
+  arquivo, e é esse arquivo que o teste de fonte varre.
+- **`BranchesAdminPage.tsx`**: linha "Certificado digital" na ficha, faixa de
+  aviso no topo, e **coluna "Certificado" na lista**. A coluna paga o espaço que
+  ocupa por uma razão que nenhum outro campo do cadastro tem: o vencimento é a
+  única coisa desta tela que **estraga sozinha**, e quem administra várias
+  filiais precisa ver qual está para parar de emitir sem clicar uma a uma.
+- **`branchesRepository.ts`**: a sondagem de coluna de D1 virou **sondagem por
+  grupos**. Com uma migration pendente dava para deduzir qual coluna faltava
+  num `42703`; com duas, que podem ser aplicadas em ordens diferentes, deduzir
+  vira chute — e chutar errado ou esconde o certificado num banco que já tem a
+  coluna, ou deixa a tela sem listar nada. Agora, diante do `42703`, o código
+  **pergunta grupo a grupo**, uma vez por sessão. A condição de remoção
+  continua registrada: quando as duas migrations estiverem aplicadas em todos os
+  ambientes, isto sai inteiro.
+
+#### Testes
+
+- **`tests/unit/branchCertificate.test.ts`** (44 casos, novos, passando), em
+  duas metades muito diferentes:
+  1. **O vocabulário** — as cinco situações, as bordas exatas do limiar (lidas
+     da constante, não repetidas como número), o dia do vencimento sendo
+     `vencendo` e não `vencido`, `vencido` ganhando de `nao_vigente` quando os
+     dois se aplicariam, data que não existe no calendário (`2026-02-31`, que
+     `Date.UTC` normalizaria em silêncio) recusada em vez de virar número
+     plausível, a virada do horário de verão nos dois sentidos, e a relação de
+     CNPJ com o caso da matriz servindo a filial **não** gerando aviso.
+  2. **A garantia de que o certificado não entra no sistema** — e essa não se
+     prova chamando função, porque a garantia é a *ausência* de código. Então
+     ela é provada lendo o fonte: nenhuma API de leitura de arquivo, de rede ou
+     de armazenamento nos dois arquivos da tela; o `<input type="file">`
+     existindo, desabilitado e **sem `onChange`**; o campo de senha
+     desabilitado, sem `value` e com `autoComplete="new-password"`; nenhum
+     `useState` no bloco; e, do outro lado, `branchColumnsFromForm` não
+     escrevendo nenhuma coluna de certificado.
+     **Pegadinha que valeu a pena registrar**: a primeira versão desse teste
+     reprovou o próprio arquivo que ele protege — o comentário de cabeçalho de
+     `BranchCertificateSection.tsx` **lista** `FileReader`, `arrayBuffer`,
+     `btoa` e companhia para dizer que eles não estão lá, e a varredura os
+     encontrou nessa frase. A varredura passou a ignorar comentários; a
+     alternativa seria apagar a documentação da decisão mais importante de A11
+     para ter um teste mais fácil de escrever.
+- **`tests/unit/branchForm.test.ts`** (de 52 para 53 casos): o fixture de
+  `BranchAdmin` ganhou as três colunas novas, e junto veio a asserção da
+  fronteira pelo lado do formulário — o que a filial carrega sobre o
+  certificado **não** atravessa para `BranchFormValues`.
+
+`npm run build` limpo. `npm run lint` com **63 avisos**, o mesmo número de D1,
+nenhum novo (o único nos arquivos tocados é o `set-state-in-effect` que D1 já
+tinha em `useBranchesAdmin`, convenção de todo hook de dados deste projeto).
+`npm test`: **610 passando**, 28 pulados, e as **mesmas 4 suítes** falhando por
+ambiente que A10 e D1 já registravam (`FACILITE_TEST_*` e
+`FACILITE_ISOLATION_*` ausentes do `.env.local`) — nenhuma nova.
+
+#### Verificação no navegador (parcial, e o porquê)
+
+**A tela de Filiais autenticada não foi verificada nesta sessão**: a rota exige
+login e este ambiente não tem conta de testes (o `.env.local` só tem
+`VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` — as credenciais que D1 usou não
+estão aqui). Fica registrado como pendência de verificação, não como verificado.
+
+O que **foi** verificado, montando o bloco fora da rota com um HTML temporário
+(criado, usado e removido; `git status` limpo depois): as seis situações
+renderizando com o texto certo — filial nova, colunas de A11 ausentes,
+certificado válido, vencendo dentro dos 30 dias, vencido somando com o aviso de
+CNPJ divergente, e o certificado da matriz servindo a filial **sem** gerar
+aviso; os dois campos com `disabled = true` e `FileList` vazio conferidos no
+DOM; `autocomplete="new-password"` aplicado; o tom vermelho do aviso resolvendo
+para `rgba(220, 53, 69, 0.16)`; e o layout em 375px caindo para uma coluna sem
+rolagem horizontal. Nenhum erro no console.
+
+Refeita depois da revisão de código, com um sétimo caso — certificado **sem
+validade mas com CNPJ de outra empresa** —, que confirma o que a reestruturação
+de `resumoCertificado` preservou de propósito: o aviso de CNPJ continua
+aparecendo mesmo quando não há data para avaliar.
+
+#### O que a revisão de código mudou depois da primeira versão
+
+Registrado porque dois dos achados eram bugs de verdade, e os dois nasceram do
+mesmo erro de raciocínio: **afirmar na tela um fato que o sistema não tem.**
+
+1. **A coluna "Certificado" da lista ignorava `certificadoColumnsAvailable`.**
+   Ela era uma constante de módulo, sem acesso ao estado do hook, e por isso
+   dizia "Não cadastrado" para toda filial enquanto a migration de A11 não
+   estivesse aplicada — que é o estado de **hoje, em todo ambiente**. A ficha,
+   a dois centímetros dali, dizia "Indisponível (migration de A11 não
+   aplicada)" sobre a mesma filial. Uma tela que se contradiz sobre o mesmo
+   fato é pior que uma que diz menos. `COLUNAS` virou `colunasDaLista(...)`,
+   memoizada na página, e a coluna mostra "—" quando não há como saber.
+2. **O teste de guarda afirmava algo falso sobre `BranchFormModal.tsx`.** Ele
+   cobrava do arquivo "nenhuma API de rede" — e aquele arquivo **faz** uma
+   chamada de rede legítima e antiga, `fetchCnpjData`, a busca de dados
+   públicos do CNPJ. O teste passava por acidente de substring (`fetch(` não é
+   substring de `fetchCnpjData(`). Uma asserção falsa que passa é pior que
+   asserção nenhuma, porque quem a lê conclui algo que não é verdade. A
+   cobrança de rede/armazenamento ficou onde é estrutural
+   (`BranchCertificateSection`, que não tem outra razão para tocar em rede), e
+   do modal se cobra o que de fato importa e é verdade: nenhuma leitura de
+   arquivo, nenhum campo de arquivo ou senha próprio, nada guardado no
+   navegador.
+
+Mais, do mesmo passe:
+
+- **`frasePrazo(dias ?? 0)` aparecia quatro vezes** num caminho onde `dias`
+  nunca é nulo — código morto que, se a invariante quebrasse, imprimiria "vence
+  hoje" (a mensagem mais alarmante possível) para um certificado cuja data não
+  deu para ler. `resumoCertificado` passou a sair cedo em `dias === null`, o
+  que estreita o tipo e apaga a armadilha. O aviso de CNPJ divergente
+  **continua valendo nesse caminho**, de propósito: um `certificado_cnpj`
+  gravado sem data é dado editado à mão, e apontar a empresa errada continua
+  sendo a informação mais útil que dá para dar sobre ele.
+- **As sondas de coluna corriam em série**; agora vão em `Promise.all`, que é o
+  que elas sempre foram — independentes. E se todas passarem enquanto o
+  `select` combinado falhou, quem não existe é uma coluna de `COLUNAS_BASE`: o
+  código devolve o **erro original** em vez de repetir a mesma consulta para
+  receber o mesmo erro.
+- **`resumoCertificado` era calculado duas vezes para a filial selecionada** —
+  uma para a faixa, outra para a ficha. Agora é uma só, e as duas leem dela: as
+  duas dizem a mesma coisa por construção, não por coincidência de expressões
+  iguais.
+- **As classes da lista moravam em `BranchFormModal.css`**, obrigando a página
+  a importar a folha do modal só para se pintar — uma dependência de trás para
+  frente. Saíram para `BranchesAdminPage.css`.
+- **O teste do timestamp** ganhou o aviso que faltava: a truncagem para a parte
+  de data é correta **porque as colunas são `date`**; se A12 as transformar em
+  `timestamptz`, ela passa a errar por um dia (`2026-09-20T02:00:00Z` é 19/09
+  às 23h em São Paulo).
+
+**A guarda foi testada contra sabotagem**, e não só escrita: com um
+`onChange={async (e) => { … await f.arrayBuffer() … }}` colocado de propósito no
+campo de arquivo, três asserções reprovaram — a de API de leitura, a de
+manipulador de mudança e a da forma do campo. O arquivo foi restaurado em
+seguida. Uma guarda que nunca foi vista falhando não é guarda, é decoração.
+
+#### Fronteira com A12
+
+O que A12 herda pronto, e o que ela ainda decide:
+
+- **Pronto**: as três colunas, o status derivado, o aviso de vencimento, a
+  comparação de CNPJ por raiz, e a tela com os dois campos no lugar certo —
+  ligá-los é trocar `disabled` por um `onChange` que manda o arquivo **direto
+  para a Focus**, sem passar por coluna, Storage ou Edge Function deste sistema.
+- **A decidir em A12**: se `certificado_especifico` vira coluna; o que fazer com
+  `certificado_digital_ref` (virar referência da empresa na Focus, ou sair); e
+  quem escreve as três colunas — o caminho natural é a resposta do
+  `POST`/`PUT /v2/empresas` ser gravada logo depois do envio.
+- **Não mexer**: `createFocusProvider` continua lançando
+  `FiscalNotConfiguredError` nas sete operações. A11 não tocou nele, nem em
+  `fiscal_numbering`/`fiscal_queue`/reserva de A5-A10, nem em regra de cálculo
+  tributário.

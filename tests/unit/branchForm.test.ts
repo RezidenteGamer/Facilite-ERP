@@ -256,7 +256,25 @@ describe("branchFormValuesFrom", () => {
     cep: "01310-100",
     allowNegativeStock: true,
     emailCopiaNotaFiscal: null,
+    /* A11: a filial lida carrega a validade do certificado, e o formulário
+       ignora as três — ver o teste do fim deste bloco. */
+    certificadoValidoDe: "2026-09-01",
+    certificadoValidoAte: "2027-09-01",
+    certificadoCnpj: "00.000.000/0001-91",
   };
+
+  /*
+   * A11: `BranchFormValues` não tem — e não pode ter — campo de certificado.
+   * Este teste trava a fronteira pelo lado do formulário: o que a filial
+   * carrega sobre o certificado não atravessa para os valores editáveis, então
+   * não existe caminho de volta até as colunas.
+   */
+  it("não traz nada de certificado para os valores do formulário", () => {
+    const values = branchFormValuesFrom(branch);
+    const chaves = Object.keys(values);
+    expect(chaves.filter((chave) => /certificad|senha|arquivo/i.test(chave))).toEqual([]);
+    expect(Object.values(values)).not.toContain("2027-09-01");
+  });
 
   it("transforma nulo em campo vazio, nunca na string 'null'", () => {
     const values = branchFormValuesFrom(branch);

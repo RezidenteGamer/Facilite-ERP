@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  branchCertificadoColumnsAvailable,
   branchEmailColumnAvailable,
   createBranch,
   fetchBranchesForAdmin,
@@ -23,6 +24,10 @@ export function useBranchesAdmin(enabled: boolean) {
   const [error, setError] = useState<string | null>(null);
   /** `null` até a primeira leitura — ver `branchEmailColumnAvailable`. */
   const [emailColumnAvailable, setEmailColumnAvailable] = useState<boolean | null>(null);
+  /** Idem, para as três colunas de certificado digital (A11). */
+  const [certificadoColumnsAvailable, setCertificadoColumnsAvailable] = useState<boolean | null>(
+    null,
+  );
 
   /**
    * Número da leitura mais recente. Duas leituras podem estar no ar ao mesmo
@@ -53,6 +58,7 @@ export function useBranchesAdmin(enabled: boolean) {
       if (!aindaVale()) return;
       setBranches(rows);
       setEmailColumnAvailable(branchEmailColumnAvailable());
+      setCertificadoColumnsAvailable(branchCertificadoColumnsAvailable());
     } catch (err) {
       if (!aindaVale()) return;
       setError(extractErrorMessage(err, "Erro ao carregar as filiais."));
@@ -81,5 +87,14 @@ export function useBranchesAdmin(enabled: boolean) {
     [reload],
   );
 
-  return { branches, loading, error, emailColumnAvailable, reload, create, update };
+  return {
+    branches,
+    loading,
+    error,
+    emailColumnAvailable,
+    certificadoColumnsAvailable,
+    reload,
+    create,
+    update,
+  };
 }

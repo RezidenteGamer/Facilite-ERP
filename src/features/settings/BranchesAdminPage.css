@@ -1,0 +1,22 @@
+/*
+ * Tela de Filiais (D1) — o que é da página, e não do formulário: o aviso de
+ * vencimento do certificado digital (A11) em faixa no topo, e o destaque dele
+ * na coluna da lista.
+ *
+ * Tudo o que é do modal continua em `BranchFormModal.css`. Estas duas classes
+ * moraram lá por um tempo, e o preço foi a página ter de importar a folha do
+ * modal só para se pintar — que é uma dependência de trás para frente.
+ */
+
+.branch-list__cert-banner {
+  margin: 0;
+  padding: 10px 24px 0;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.branch-list__cert-alert {
+  color: var(--danger);
+  font-weight: 600;
+}

@@ -4,12 +4,14 @@ import FormField from "../../components/form/FormField";
 import { fetchCnpjData } from "../../lib/repositories/cnpjLookup";
 import { extractErrorMessage } from "../../lib/errorMessage";
 import { onlyDigits } from "../../lib/fiscal/accessKey";
+import BranchCertificateSection from "./BranchCertificateSection";
 import {
   branchFiscalWarnings,
   EMPTY_BRANCH_FORM,
   REGIMES_TRIBUTARIOS_CRT,
   UF_SIGLAS,
   validateBranchForm,
+  type BranchCertificado,
   type BranchFormValues,
 } from "./branches";
 import "../registry-engine/RegistryFormModal.css";
@@ -25,6 +27,14 @@ type BranchFormModalProps = {
    * escondendo do operador que o cadastro tem essa casa.
    */
   emailColumnAvailable: boolean | null;
+  /**
+   * O certificado digital **gravado** desta filial (A11). `null` em "Nova
+   * filial": não há nada gravado ainda. Só leitura — nada neste formulário
+   * escreve certificado, e nem existe campo para isso em `BranchFormValues`.
+   */
+  certificado: BranchCertificado | null;
+  /** As três colunas de certificado existem neste banco? Ver `emailColumnAvailable`. */
+  certificadoColumnsAvailable: boolean | null;
   saving: boolean;
   onSubmit: (values: BranchFormValues) => void;
   onCancel: () => void;
@@ -43,16 +53,24 @@ function Wide({ children }: { children: ReactNode }) {
 /**
  * Criação e edição de filial (D1, 09/09/2026).
  *
- * O formulário é agrupado em três blocos — identificação, fiscal e endereço —
- * porque os campos fiscais só fazem sentido juntos: é o conjunto deles que a
- * Edge Function `fiscal-emit` lê para montar o emitente da nota, e é a
- * ausência de qualquer um deles que vira rejeição na SEFAZ. Deixá-los
- * espalhados entre "nome" e "CEP" esconderia essa unidade.
+ * O formulário é agrupado em blocos — identificação, fiscal, certificado
+ * digital e endereço — porque os campos fiscais só fazem sentido juntos: é o
+ * conjunto deles que a Edge Function `fiscal-emit` lê para montar o emitente
+ * da nota, e é a ausência de qualquer um deles que vira rejeição na SEFAZ.
+ * Deixá-los espalhados entre "nome" e "CEP" esconderia essa unidade.
+ *
+ * O bloco **Certificado digital** (A11, 09/09/2026) é o único que não é
+ * cadastro: ele mostra a validade que a Focus devolveu e avisa do vencimento,
+ * e os dois campos de envio nascem desabilitados. O arquivo `.pfx` e a senha
+ * não entram neste sistema — ver `BranchCertificateSection`, onde a decisão e
+ * as garantias estão por extenso.
  */
 export default function BranchFormModal({
   title,
   initialValues,
   emailColumnAvailable,
+  certificado,
+  certificadoColumnsAvailable,
   saving,
   onSubmit,
   onCancel,
@@ -220,6 +238,12 @@ export default function BranchFormModal({
               ver a decisão de D1 no AGENTS.md. A <strong>alíquota de crédito do Simples</strong>{" "}
               (<code>pCredSN</code>) continua em Configurações, escopada pela filial ativa.
             </p>
+
+            <BranchCertificateSection
+              certificado={certificado}
+              cnpjFilial={values.cnpj}
+              columnsAvailable={certificadoColumnsAvailable}
+            />
 
             <p className="branch-form__section">Endereço</p>
             <div className="branch-form__grid">

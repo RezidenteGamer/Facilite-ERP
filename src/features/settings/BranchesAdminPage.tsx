@@ -14,26 +14,65 @@ import { normalizeSearchText } from "../../lib/searchText";
 import { useAuth } from "../auth/AuthContext";
 import BranchFormModal from "./BranchFormModal";
 import {
+  branchCertificado,
   branchFormValuesFrom,
   regimeTributarioLabel,
+  resumoCertificado,
   type BranchAdmin,
   type BranchFormValues,
 } from "./branches";
+import "./BranchesAdminPage.css";
 import { useBranchesAdmin } from "./useBranchesAdmin";
 
-const COLUNAS: RegistryColumn<BranchAdmin>[] = [
-  { key: "code", label: "Código", width: "90px", align: "center", render: (b) => b.code },
-  { key: "name", label: "Nome", width: "minmax(0, 1fr)", primary: true, render: (b) => b.name },
-  { key: "cnpj", label: "CNPJ", width: "170px", render: (b) => b.cnpj ?? "—" },
-  { key: "uf", label: "UF", width: "60px", align: "center", render: (b) => b.uf ?? "—" },
-  {
-    key: "active",
-    label: "Situação",
-    width: "100px",
-    align: "center",
-    render: (b) => (b.active ? "Ativa" : "Inativa"),
-  },
-];
+/**
+ * As colunas da lista.
+ *
+ * É função, e não constante, por causa de uma só delas: a do certificado
+ * precisa saber se as colunas de A11 existem neste banco. Sem isso ela
+ * afirmaria "Não cadastrado" para toda filial enquanto a migration não for
+ * aplicada — que é o estado de hoje —, e a ficha, a dois centímetros dali,
+ * diria "Indisponível" sobre a mesma filial. Uma tela que se contradiz sobre
+ * o mesmo fato é pior que uma tela que diz menos.
+ */
+function colunasDaLista(certificadoDisponivel: boolean | null): RegistryColumn<BranchAdmin>[] {
+  return [
+    { key: "code", label: "Código", width: "90px", align: "center", render: (b) => b.code },
+    { key: "name", label: "Nome", width: "minmax(0, 1fr)", primary: true, render: (b) => b.name },
+    { key: "cnpj", label: "CNPJ", width: "170px", render: (b) => b.cnpj ?? "—" },
+    { key: "uf", label: "UF", width: "60px", align: "center", render: (b) => b.uf ?? "—" },
+    {
+      key: "active",
+      label: "Situação",
+      width: "100px",
+      align: "center",
+      render: (b) => (b.active ? "Ativa" : "Inativa"),
+    },
+    /*
+     * Certificado na lista, e não só na ficha (A11): o vencimento é a única
+     * coisa desta tela que estraga sozinha, com o tempo, sem ninguém mexer em
+     * nada — e quem administra várias filiais precisa ver qual delas está para
+     * parar de emitir **sem** clicar filial por filial. É por isso que a coluna
+     * paga o espaço que ocupa; nenhum outro campo do cadastro tem essa
+     * propriedade.
+     */
+    {
+      key: "certificado",
+      label: "Certificado",
+      width: "130px",
+      align: "center",
+      render: (b) => {
+        if (certificadoDisponivel === false) return "—";
+        const resumo = resumoCertificado(branchCertificado(b), b.cnpj);
+        const alerta = resumo.status === "vencido" || resumo.status === "vencendo";
+        return (
+          <span className={alerta ? "branch-list__cert-alert" : undefined} title={resumo.detalhe}>
+            {resumo.rotulo}
+          </span>
+        );
+      },
+    },
+  ];
+}
 
 type ModalState = "none" | "new" | "edit";
 
@@ -75,7 +114,7 @@ export default function BranchesAdminPage() {
   const { profile, refreshBranches } = useAuth();
   const canManage = Boolean(profile?.canManageBranches);
 
-  const { branches, loading, error, emailColumnAvailable, create, update } =
+  const { branches, loading, error, emailColumnAvailable, certificadoColumnsAvailable, create, update } =
     useBranchesAdmin(canManage);
 
   const [search, setSearch] = useState("");
@@ -99,6 +138,24 @@ export default function BranchesAdminPage() {
      sumiu do filtro (ou da lista, depois de salvar), cai na primeira. */
   const selected: BranchAdmin | null =
     visibleBranches.find((branch) => branch.id === selectedId) ?? visibleBranches[0] ?? null;
+
+  /*
+   * O certificado da filial selecionada, resolvido **uma vez** e lido pela
+   * faixa do topo e pela ficha — as duas dizem a mesma coisa por construção,
+   * em vez de por coincidência de duas expressões iguais.
+   *
+   * `null` quando não há filial, e também quando as colunas de A11 não existem
+   * neste banco: aí não há dado, e afirmar qualquer coisa seria inventar.
+   */
+  const certificadoSelecionado =
+    selected && certificadoColumnsAvailable !== false
+      ? resumoCertificado(branchCertificado(selected), selected.cnpj)
+      : null;
+
+  const colunas = useMemo(
+    () => colunasDaLista(certificadoColumnsAvailable),
+    [certificadoColumnsAvailable],
+  );
 
   const navItems: HeaderNavItem[] = [
     { id: "inicio", label: "Inicio", icon: HouseIcon, onClick: () => navigate("/inicio") },
@@ -147,6 +204,12 @@ export default function BranchesAdminPage() {
         </p>
       )}
 
+      {certificadoSelecionado?.aviso && (
+        <p className="branch-list__cert-banner" role="alert">
+          <strong>{selected?.name}</strong> — {certificadoSelecionado.aviso}
+        </p>
+      )}
+
       <RegistryLayout>
         <RegistryActions
           title="Cadastrar uma nova filial"
@@ -172,7 +235,7 @@ export default function BranchesAdminPage() {
         />
 
         <RegistryTable
-          columns={COLUNAS}
+          columns={colunas}
           rows={visibleBranches}
           getRowId={(branch) => branch.id}
           selectedId={selected?.id ?? null}
@@ -194,6 +257,17 @@ export default function BranchesAdminPage() {
             {
               label: "Estoque negativo",
               value: selected ? (selected.allowNegativeStock ? "Permitido" : "Bloqueado") : undefined,
+            },
+            {
+              label: "Certificado digital",
+              /* Mesma regra das outras linhas: sem filial selecionada, sem
+                 valor. E, sem as colunas de A11 no banco, a ficha diz que não
+                 sabe em vez de afirmar "não cadastrado" — que seria inventar
+                 um fato sobre a filial. */
+              value: !selected
+                ? undefined
+                : (certificadoSelecionado?.detalhe ??
+                  "Indisponível (migration de A11 não aplicada)"),
             },
             {
               label: "E-mail para cópia da nota",
@@ -225,6 +299,8 @@ export default function BranchesAdminPage() {
           title={modal === "edit" ? `Editar filial — ${selected?.name ?? ""}` : "Nova filial"}
           initialValues={modal === "edit" && selected ? branchFormValuesFrom(selected) : undefined}
           emailColumnAvailable={emailColumnAvailable}
+          certificado={modal === "edit" && selected ? branchCertificado(selected) : null}
+          certificadoColumnsAvailable={certificadoColumnsAvailable}
           saving={saving}
           onSubmit={salvar}
           onCancel={() => setModal("none")}
