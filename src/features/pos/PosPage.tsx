@@ -14,6 +14,7 @@ import {
   CardIcon,
   CartIcon,
   CropIcon,
+  DrawerIcon,
   FrameIcon,
   GridViewIcon,
   ListViewIcon,
@@ -21,10 +22,12 @@ import {
   PencilIcon,
   PixIcon,
   PlayIcon,
+  PrinterIcon,
   SplitIcon,
 } from "./icons";
 import { formatMoney, productPlaceholder } from "./pos";
 import { useOpenCashSession, usePosSale, type PosPaymentMethod } from "./usePosSale";
+import { usePrinter } from "./usePrinter";
 import "./PosPage.css";
 
 const LOW_STOCK_DEFAULT = 15;
@@ -58,7 +61,7 @@ function productBadge(product: Product): { label: string; tone: "low" | "out" } 
 export default function PosPage() {
   const navigate = useNavigate();
   const searchRef = useRef<HTMLInputElement>(null);
-  const { hasPermission, currentBranchId, profile, user } = useAuth();
+  const { hasPermission, currentBranchId, branches, profile, user } = useAuth();
   const sellerId = profile?.id ?? user?.id ?? null;
   const canCreate = hasPermission("ponto-de-venda", "create");
   /* Sem permissao de criar contato o atalho some - oferecer um cadastro que a
@@ -67,7 +70,25 @@ export default function PosPage() {
 
   const { products } = useProductsData(currentBranchId);
   const { session: openSession, loading: sessionLoading, reload: reloadSession } = useOpenCashSession(currentBranchId);
-  const sale = usePosSale(currentBranchId, sellerId);
+  const currentBranch = branches.find((branch) => branch.id === currentBranchId) ?? null;
+  const storeInfo = currentBranch ? { name: currentBranch.name, document: currentBranch.cnpj } : null;
+  const sale = usePosSale(currentBranchId, sellerId, storeInfo);
+  const printer = usePrinter();
+
+  /*
+   * Cupom imprime sozinho ao confirmar a venda — comportamento de PDV de
+   * verdade, decisão documentada em AGENTS.md (a maioria não tem botão de
+   * imprimir). Gaveta abre junto só quando a venda teve pagamento em
+   * dinheiro: pra crédito/débito/PIX puro não há troco pra dar, e abrir a
+   * gaveta sem motivo é o tipo de coisa que rende sangria/suprimento
+   * registrado errado no fim do dia.
+   */
+  useEffect(() => {
+    if (!sale.lastReceipt) return;
+    void printer.printReceipt(sale.lastReceipt.receipt);
+    if (sale.lastReceipt.hasCashPayment) void printer.openDrawer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sale.lastReceipt]);
 
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -351,10 +372,51 @@ export default function PosPage() {
                   </div>
                 )}
               </div>
+              <button
+                type="button"
+                aria-label="Abrir gaveta"
+                title="Abrir gaveta (sangria/suprimento)"
+                onClick={() => void printer.openDrawer()}
+              >
+                <DrawerIcon />
+              </button>
+              <button
+                type="button"
+                aria-label="Reimprimir último cupom"
+                title={sale.lastReceipt ? "Reimprimir último cupom" : "Nenhuma venda para reimprimir"}
+                disabled={!sale.lastReceipt}
+                onClick={() => sale.lastReceipt && void printer.printReceipt(sale.lastReceipt.receipt)}
+              >
+                <PrinterIcon />
+              </button>
               <button type="button" aria-label="Cancelar venda" onClick={sale.reset}>
                 <CancelSaleIcon />
               </button>
             </div>
+          </div>
+
+          <div className={`pos__printer-status pos__printer-status--${printer.status}`}>
+            {printer.status === "unsupported" && (
+              <span>Impressora térmica indisponível — abra o PDV no Chrome ou Edge para imprimir cupom.</span>
+            )}
+            {printer.status === "disconnected" && (
+              <>
+                <span>Impressora não conectada.</span>
+                {printer.canPairUsb && (
+                  <button type="button" onClick={() => void printer.pair("usb")}>
+                    Conectar (USB)
+                  </button>
+                )}
+                {printer.canPairSerial && (
+                  <button type="button" onClick={() => void printer.pair("serial")}>
+                    Conectar (Serial)
+                  </button>
+                )}
+              </>
+            )}
+            {printer.status === "connecting" && <span>Conectando à impressora…</span>}
+            {printer.status === "connected" && <span>Impressora conectada — {printer.label}</span>}
+            {printer.error && <span className="pos__printer-status-error">{printer.error}</span>}
           </div>
 
           <div className="pos__cart-items">

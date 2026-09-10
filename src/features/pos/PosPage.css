@@ -448,6 +448,49 @@
   color: #5B6472;
 }
 
+/* Estado da impressora térmica (E1) — mora logo abaixo do cabeçalho do
+   carrinho, sempre visível: o operador precisa notar antes da primeira
+   venda, não só quando algo já deu errado. */
+.pos__printer-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  font-size: 12px;
+  border-bottom: 1px solid #E7EAEF;
+}
+
+.pos__printer-status button {
+  border: 1px solid #D7DBE2;
+  border-radius: 6px;
+  background: var(--white);
+  color: #1D2433;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.pos__printer-status--unsupported,
+.pos__printer-status--disconnected {
+  color: #8A5A15;
+  background: #FFF9EE;
+}
+
+.pos__printer-status--connected {
+  color: #2E9E52;
+  background: #EEFAF2;
+}
+
+.pos__printer-status--connecting {
+  color: #5B6472;
+}
+
+.pos__printer-status-error {
+  flex-basis: 100%;
+  color: #C0453B;
+}
+
 .pos__cart-items {
   flex: 1;
   min-height: 0;

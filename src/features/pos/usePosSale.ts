@@ -8,6 +8,7 @@ import type { CashSession } from "../cashcontrol/cashControl";
 import { formatMoney } from "./pos";
 import type { Sale, SalePaymentMethod } from "../sales/sales";
 import { emitFiscalDocumentForSale } from "./fiscalDocument";
+import { buildPosReceiptSnapshot, type PosReceiptSnapshot } from "./receipt";
 
 export type PosCartLine = {
   lineId: string;
@@ -132,12 +133,15 @@ export function useOpenCashSession(branchId: string | null) {
   return { session, loading, reload };
 }
 
+/** Nome/CNPJ da filial pra imprimir no cabeçalho do cupom (E1) — `null` quando ainda não carregou. */
+export type PosStoreInfo = { name: string; document: string | null };
+
 /**
  * Estado de uma venda em andamento no PDV: carrinho + cliente (opcional) +
  * pagamento. `sellerId` chega de quem está logado — o PDV não tem seletor de
  * vendedor (ver AGENTS.md).
  */
-export function usePosSale(branchId: string | null, sellerId: string | null) {
+export function usePosSale(branchId: string | null, sellerId: string | null, storeInfo: PosStoreInfo | null) {
   const [cart, setCart] = useState<PosCartLine[]>([]);
   const [contact, setContact] = useState<Contact | null>(null);
   const [discount, setDiscount] = useState("");
@@ -150,6 +154,13 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmedSale, setConfirmedSale] = useState<Sale | null>(null);
+  /**
+   * Snapshot do cupom da última venda confirmada — sobrevive ao `reset()`
+   * de propósito (ver `receipt.ts`), diferente de `confirmedSale` (que some
+   * sozinho em 5s). É o que permite reimprimir depois que o carrinho já foi
+   * limpo pra próxima venda.
+   */
+  const [lastReceipt, setLastReceipt] = useState<PosReceiptSnapshot | null>(null);
   /**
    * Aviso não bloqueante de falha na emissão da NFC-e — separado de
    * `submitError` de propósito: a venda já foi confirmada quando isto pode
@@ -340,6 +351,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     setSubmitError(null);
     setFiscalWarning(null);
     try {
+      const payments = buildPayments();
       const sale = await createPosSale({
         branchId,
         contactId: contact?.id ?? null,
@@ -351,9 +363,26 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
           quantity: line.quantity,
           unitPrice: line.product.salePrice,
         })),
-        payments: buildPayments(),
+        payments,
       });
       setConfirmedSale(sale);
+      // Capturado ANTES do reset() de propósito — ver o comentário de
+      // `lastReceipt` acima e `receipt.ts`. `cart`/`subtotal`/`total` daqui
+      // pra baixo ainda são os da venda que acabou de confirmar.
+      setLastReceipt(
+        buildPosReceiptSnapshot({
+          saleCode: sale.code,
+          issuedAt: new Date(),
+          cart,
+          subtotalAmount: subtotal,
+          discountAmount,
+          totalAmount: total,
+          payments,
+          changeAmount: method === "dinheiro" ? troco : null,
+          storeName: storeInfo?.name ?? "Facilite",
+          storeDocument: storeInfo?.document ?? null,
+        }),
+      );
       reset();
       // A venda já está confirmada aqui — `emitFiscalDocumentForSale` nunca
       // lança (ver fiscalDocument.ts), então uma falha de NFC-e vira aviso
@@ -405,6 +434,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null) {
     submitError,
     confirmedSale,
     fiscalWarning,
+    lastReceipt,
     confirmSale,
     reset,
   };

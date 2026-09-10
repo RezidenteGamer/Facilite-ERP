@@ -129,3 +129,22 @@ export function FrameIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function PrinterIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M6.5 8V4h11v4" />
+      <rect x="4" y="8" width="16" height="8" rx="1.2" />
+      <path d="M6.5 14.5h11V21h-11Z" />
+    </svg>
+  );
+}
+
+export function DrawerIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3.5" y="6" width="17" height="12" rx="1.2" />
+      <line x1="9.5" y1="12" x2="14.5" y2="12" />
+    </svg>
+  );
+}

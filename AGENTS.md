@@ -8964,3 +8964,277 @@ Documentos **já emitidos** continuam com HTML em `pdf_content` e passarão a se
 rotulados `application/pdf` — vão abrir corrompidos. São dados de teste de um
 sistema sem cliente real (ver "Fase do projeto"); a saída, se incomodar, é
 emitir de novo, não migrar.
+
+### E1/E2 — impressão térmica ESC/POS e abertura de gaveta, via WebUSB/WebSerial (10/09/2026)
+
+Primeira tarefa da Etapa 5 ("chão de loja pelo navegador") do plano "Mínimo
+pra vender", e a primeira tarefa do projeto inteiro que fala com hardware do
+navegador. Diferente de D3/D11/D13 (banco, Edge Function, PDF — tudo
+determinístico e verificável sem hardware), aqui só metade dá pra testar
+automatizado; a outra metade é reconhecida como não testável em CI desde o
+enunciado da tarefa, e este documento é honesto sobre qual é qual.
+
+#### O que existe agora
+
+| Arquivo | Camada | O que faz |
+|---|---|---|
+| `src/lib/printer/escposCommands.ts` | núcleo puro | Bytes ESC/POS crus (init, negrito, alinhamento, corte, pulso de gaveta) |
+| `src/lib/printer/receiptFormat.ts` | núcleo puro | Layout de texto: largura de coluna, acento, dinheiro |
+| `src/lib/printer/receiptEscpos.ts` | núcleo puro | Recibo → `Uint8Array` pronto pra escrever na porta |
+| `src/lib/printer/printerApi.d.ts` | tipos | Ambiente `Navigator.usb`/`Navigator.serial` — não existe em `lib.dom.d.ts` |
+| `src/lib/printer/printerPort.ts` | borda de hardware | Detecção de suporte, pareamento, reconexão silenciosa, escrita — a única parte que toca `navigator.usb`/`navigator.serial` de verdade |
+| `src/features/pos/receipt.ts` | ponte PDV↔recibo | Traduz `PosCartLine[]`/pagamentos do PDV pro formato genérico de `ReceiptData` |
+| `src/features/pos/usePrinter.ts` | hook React | Estado de conexão (`unsupported`/`disconnected`/`connecting`/`connected`), pareamento, `printReceipt`/`openDrawer` |
+| `src/features/pos/usePosSale.ts`, `PosPage.tsx`, `PosPage.css` | integração | Captura do snapshot antes do `reset()`, gatilho automático de impressão/gaveta, status da impressora na tela |
+
+`lib/printer/*` não sabe o que é uma "venda" — só entende `ReceiptData`
+(itens/pagamentos/total já resolvidos) e bytes. `receipt.ts` é o único lugar
+que conhece os dois lados. Nenhuma outra tela do sistema importa nada disso:
+hardware de impressão continua não existindo pro resto do app, por desenho.
+
+#### Fonte de cada comando ESC/POS: a referência da própria Epson, não memória
+
+ESC/POS não é um padrão ISO com dono neutro — é o protocolo de fato da Epson,
+replicado por praticamente toda impressora térmica barata do mercado (é o que
+"impressora ESC/POS" significa na prática, mesmo em impressoras de outra
+marca). Cada comando usado aqui foi conferido página por página no "ESC/POS
+Command Reference for TM Printers", `download4.epson.biz/sec_pubs/pos/reference_en/escpos/`
+(10/09/2026), mesma disciplina de "fonte primária, não memória" de D11 (CRC16
+contra o manual do Bacen) e D13 (QR/Code128 contra a norma):
+
+| Comando | Bytes | Página |
+|---|---|---|
+| `ESC @` — Initialize printer | `1B 40` | `esc_atsign.html` |
+| `ESC E n` — Emphasized (negrito) on/off | `1B 45 n` | `esc_ce.html` |
+| `ESC a n` — Select justification | `1B 61 n` (0/1/2 = esq./centro/dir.) | `esc_la.html` |
+| `GS V m` — Select cut mode (Function A) | `1D 56 01` = corte parcial | `gs_cv.html` |
+| `ESC p m t1 t2` — Generate pulse (gaveta) | `1B 70 m t1 t2` | `esc_lp.html` |
+| `ESC t n` — Select character code table | `1B 74 n` (n=3 → PC860 Portuguese) | `esc_lt.html` |
+
+`tests/unit/escposCommands.test.ts` confere cada um contra esses valores.
+
+O sequenciamento QR (`GS ( k`, comandos de modelo/módulo/correção/dados/impressão)
+também foi pesquisado e confirmado contra a referência da Epson (páginas
+`gs_lparen_lk_fn165/167/169/180/181.html`) — mas **não entrou no código**: ver
+a decisão sobre QR/chave de acesso abaixo.
+
+#### Decisão: acentuação sem code page — remover acento é o padrão, e é o único caminho usado
+
+`receiptFormat.ts stripToPrintableAscii` remove todo acento (NFD + descarte de
+diacrítico, mesma técnica de `normalizePixText` de D11, mas sem minusculizar)
+e qualquer byte fora de 0x20–0x7E, antes de qualquer texto virar byte ESC/POS.
+
+`ESC t n` existe e foi pesquisado (page 3 = PC860, "Portuguese" — tabela
+confirmada na fonte acima), mas **não é usado neste código**. Motivo: a mesma
+página da Epson lista mais de 50 code pages possíveis e diz explicitamente que
+elas variam "differently depending on the printers" — não existe garantia de
+que uma impressora térmica barata qualquer tenha PC860 gravada. Sem uma
+impressora real pra testar (ver limitações), mandar byte acima de 0x7E
+apostando numa code page específica arrisca imprimir lixo em qualquer
+impressora que não tenha essa página exata. Remover acento garante legibilidade
+em 100% das impressoras ESC/POS, sempre — e como todo texto que sai daqui já é
+ASCII puro, declarar uma code page não mudaria nada (a faixa 0x20–0x7E é igual
+em todas as páginas, segundo a própria Epson). Mesmo espírito da decisão de
+WinAnsi em D13 e de `normalizePixText` em D11: o caminho seguro por padrão.
+
+#### Decisão: sem QR Code e sem chave de acesso fiscal no cupom
+
+A tarefa deixava em aberto incluir QR Code (`GS ( k`) no cupom, com a condição
+de garantir ao menos a chave de acesso em texto se o QR fosse recusado. As duas
+coisas foram recusadas juntas, e o motivo é arquitetural, não de orçamento:
+
+O cupom imprime **automaticamente no instante em que a venda é confirmada**
+(ver decisão de gatilho automático abaixo) — e a emissão da NFC-e
+(`fiscalDocument.ts`/`emitFiscalDocumentForSale`) é **assíncrona** e roda
+**depois** disso, na mesma função `confirmSale`. A chave de acesso
+simplesmente não existe ainda no instante em que o papel precisa sair, e pode
+nunca existir (emissão pode falhar — vira `fiscalWarning`, não bloqueia a
+venda, ver decisão do PDV mais acima neste arquivo). Duas saídas possíveis e
+as duas ruins: atrasar a impressão até a nota terminar (contradiz o motivo de
+existir de uma impressora térmica — entregar o cupom na hora, com o cliente
+ainda no caixa) ou construir um segundo fluxo de reimpressão que buscasse
+`fiscal_documents` depois do fato (fora do escopo desta tarefa — que é a
+infraestrutura de impressão, não integração fiscal; e essa tarefa pede
+explicitamente para não mexer em Supabase). O cupom impresso aqui é, no mesmo
+espírito do DANFE simulado de D13, "não é o documento fiscal de ninguém" — só
+o comprovante de venda (itens, pagamento, total).
+
+Consequência prática: `ReceiptData` (o formato genérico do recibo) não tem
+campo nenhum pra chave de acesso ou QR — não foi omitido por esquecimento, é
+a decisão registrada aqui.
+
+#### Decisão: largura da bobina assumida — 48 colunas (80mm, fonte A)
+
+48 é o valor que a própria Epson documenta pra fonte A (9×17 pontos) em papel
+de 80mm nas folhas técnicas da família TM-T20/TM-T20II — a impressora térmica
+barata mais comum do mercado (fonte: `files.support.epson.com` técnica da
+TM-T20II, consultada em 10/09/2026). 58mm (tipicamente 32 colunas) não é
+suportado — só uma largura, pra não inflar o escopo, com a suposição
+documentada aqui em vez de perseguida universalmente.
+
+#### Decisão: o bug do `reset()` — snapshot capturado antes, não depois
+
+A pesquisa prévia (repetida no início desta seção pra quem só ler aqui)
+encontrou: `confirmSale` chamava `reset()` logo depois de confirmar a venda, e
+`reset()` zera `cart`/`method`/`splitLines`/`received` **antes** da emissão da
+NFC-e terminar — um botão de imprimir ou impressão automática que lesse esse
+estado depois do `reset()` acharia carrinho vazio.
+
+A correção: `usePosSale.confirmSale` monta o snapshot do recibo
+(`buildPosReceiptSnapshot`, em `receipt.ts`) usando `cart`/`subtotal`/`total`/
+os pagamentos já resolvidos **antes** de chamar `reset()` — não depois — e
+guarda o resultado em `lastReceipt`, um estado novo e separado de
+`confirmedSale` (que ainda some sozinho em 5s; `lastReceipt` não tem esse
+timer, fica disponível pra reimprimir até a próxima venda confirmar).
+`tests/unit/posReceiptSnapshot.test.ts` prova duas coisas: que o snapshot tem
+os itens certos, e que ele sobrevive mesmo a uma mutação hipotética do array
+de carrinho original depois de construído (a garantia de que `.map()` copia
+os dados em vez de guardar referência — a metade da correção que dá pra testar
+sem React; a outra metade, a ordem de chamada dentro de `confirmSale`, foi
+conferida por leitura/revisão porque este projeto não tem harness de teste de
+hook React — ver limitações).
+
+#### Decisão: impressão automática ao confirmar a venda, não um botão
+
+A tarefa apontava o conflito e pedia decisão: o timer de 5s de `confirmedSale`
+entraria em rota de colisão com "dar tempo do operador clicar Imprimir" se a
+impressão dependesse de clique manual. Optou-se pelo comportamento de PDV de
+verdade — a maioria não tem botão de imprimir, só imprime — via o `useEffect`
+em `PosPage.tsx` que observa `sale.lastReceipt` e chama
+`printer.printReceipt(...)` assim que ele muda, sem esperar clique nenhum.
+
+Um botão manual "Reimprimir último cupom" continua existindo nos controles do
+carrinho (usa o mesmo `lastReceipt`, que sobrevive ao `reset()`) — cobre o caso
+real de a impressora estar desligada/sem papel no momento da venda e o
+operador precisar tentar de novo depois de resolver o problema físico.
+
+#### Decisão: gaveta abre sozinha só quando a venda teve pagamento em dinheiro
+
+Mesma lógica do parágrafo acima, mesmo `useEffect`: `hasCashPayment` (calculado
+em `receipt.ts`, `true` quando qualquer pagamento da venda — inclusive dividido
+— tem `method: "dinheiro"`) decide se `printer.openDrawer()` roda junto do
+`printReceipt()`. Cartão/PIX puro não abre a gaveta sozinho: não há troco pra
+dar, e abrir sem motivo é o tipo de coisa que gera sangria/suprimento
+registrado errado no fechamento do caixa. Um botão manual "Abrir gaveta"
+continua sempre disponível nos controles do carrinho, pra sangria/suprimento
+fora de uma venda — é o mínimo que a tarefa pedia, e cobre o caso que o
+gatilho automático não cobre.
+
+#### Decisão: onde mora o pareamento da impressora — dentro do próprio PDV
+
+O controle de "conectar/reconectar impressora" vive em `PosPage.tsx`, não numa
+seção de Configurações. Motivo: o `USBDevice`/`SerialPort` pareado e o
+`localStorage` que guarda a referência dele são **locais a esta máquina e este
+navegador** — cada PC do chão de loja tem sua própria impressora física
+plugada nele, e o que está pareado numa máquina não diz nada sobre as outras
+(a mesma conclusão de pesquisa que já descartou qualquer coluna em
+`cash_registers` pra isso, antes de qualquer código ser escrito). Colocar esse
+controle em Configurações (que é dado de filial, sincronizado pelo Supabase,
+igual em qualquer PC que abrir o sistema) sugeriria — incorretamente — que
+parear numa máquina resolve pras outras. Fica no PDV, que é a única tela que
+usa impressora, e onde o operador já está quando precisa reconectar.
+
+#### WebUSB e WebSerial: as duas, e a fronteira que não tem correção de código
+
+`printerPort.ts` suporta as duas APIs porque impressora térmica barata aparece
+pro navegador de um jeito ou de outro dependendo do chip que usa por dentro —
+um controlador USB genérico expõe WebUSB puro; um adaptador serial-sobre-USB
+(FTDI/CH340/CP210x, comum em impressora chinesa sem marca) só aparece pro
+WebSerial. Confirmado contra a documentação atual do MDN (10/09/2026) e contra
+o caniuse.com/web-serial: as duas só existem em navegador **Chromium** (Chrome,
+Edge, Opera — não Firefox, não Safari, sem previsão de nenhum dos dois
+implementar) e só em **contexto seguro** (HTTPS, ou `http://localhost` em
+desenvolvimento). Isso não é um detalhe de implementação — é um limite
+permanente que nenhuma quantidade de código aqui contorna.
+`printerPort.isPrinterApiSupported()` é o que permite `PosPage.tsx` mostrar
+isso com uma mensagem clara ("Impressora térmica indisponível — abra o PDV no
+Chrome ou Edge") em vez de travar em silêncio — mesmo espírito de A8/A11/D1:
+"construído e desligado com o motivo explicado".
+
+Reconexão silenciosa: `navigator.usb.getDevices()`/`navigator.serial.getPorts()`
+listam o que já foi autorizado antes, sem pedir gesto do usuário de novo —
+`reconnectPrinter()` roda ao abrir o PDV (efeito em `usePrinter.ts`) e só cai
+pra "desconectado" (com botão de parear) se nada bater com o `vendorId`/
+`productId` salvo em `localStorage`. Pareamento novo (`requestDevice`/
+`requestPort`) só funciona dentro de um clique — os dois botões
+"Conectar (USB)"/"Conectar (Serial)" existem separados de propósito: encadear
+os dois pickers a partir de um clique só é frágil (nem toda implementação de
+navegador preserva o gesto do usuário por dois prompts sensíveis seguidos).
+
+Taxa da porta serial assumida em `9600` bps — convenção comum de impressora
+ESC/POS serial, não um valor que o WebSerial descobre sozinho; impressora
+configurada numa taxa diferente (existe chavinha/menu pra isso na maioria dos
+modelos) não funcionaria por este caminho. Documentado no código
+(`printerPort.ts`), não verificável sem hardware real.
+
+**Limite conhecido da reconexão silenciosa por WebSerial**: `SerialPort.getInfo()`
+só devolve `usbVendorId`/`usbProductId` quando a porta é, por baixo, um
+dispositivo USB (a esmagadora maioria dos adaptadores serial-sobre-USB que
+impressora barata usa). Uma porta serial genuína (RS-232 de verdade, ou uma
+porta Bluetooth exposta como serial) não carrega esses dois campos — a
+especificação do Web Serial não expõe nenhum outro identificador estável pra
+esse caso. `pairSerialPrinter()` simplesmente não salva referência nenhuma
+quando isso acontece (`typeof info.usbVendorId === "number"` dá falso), e
+`reconnectPrinter()` nunca vai achar essa porta de novo sozinho — o operador
+precisaria clicar "Conectar (Serial)" de novo a cada vez que abrir o PDV. Não
+é um bug corrigível em código: é o que a própria API expõe. Impressora ligada
+por adaptador USB-serial (o caso comum) não tem esse problema.
+
+#### O que ficou deliberadamente fora
+
+- **`window.print()`/impressão via driver do SO** — contradiz o motivo de
+  existir da tarefa ("sem driver e sem agente"). Não foi cogitado como atalho.
+- **QR Code e chave de acesso fiscal no cupom** — ver decisão acima.
+- **Seleção de code page (`ESC t`)** — pesquisada, decidida contra. Ver acima.
+- **58mm/32 colunas** — só 80mm/48 colunas suportado nesta tarefa.
+- **E4 (modo scanner) e E6 (PDV offline-first)** — tarefas próprias da mesma
+  Etapa 5, nada delas foi tocado aqui.
+- **Qualquer coisa no Supabase** — nenhuma migration, nenhuma Edge Function,
+  nenhum deploy. Confirmado no fim da pesquisa: nem `cash_registers` nem
+  nenhuma outra tabela precisa de coluna de impressora (é estado de máquina,
+  não de filial — ver decisão de pareamento acima).
+- **`@types/w3c-web-usb`/`@types/w3c-web-serial`** — dependência nova evitada;
+  `printerApi.d.ts` declara só a superfície que `printerPort.ts` usa de
+  verdade, mesmo raciocínio de D13 evitar `pdf-lib`.
+
+#### Testes e o que é honestamente não testável
+
+`tests/unit/escposCommands.test.ts` (13), `receiptFormat.test.ts` (15),
+`receiptEscpos.test.ts` (14) e `posReceiptSnapshot.test.ts` (6) são novos — 48
+casos, todos contra o núcleo puro (`lib/printer/*` e `features/pos/receipt.ts`).
+719 testes unitários passando (671 antes + 48 novos). `npm run build`,
+`npm run lint` e `tsc -b` limpos.
+
+**`printerPort.ts` não tem teste automatizado, e isso é esperado, não uma
+falha desta tarefa.** `navigator.usb`/`navigator.serial` só existem dentro de
+um Chromium de verdade, atrás de gesto físico do usuário — não há como simular
+isso em Vitest (ambiente Node) sem um mock que provaria só que o mock
+funciona, nunca que o código fala com hardware de verdade. Um mock também não
+pegaria os erros mais prováveis de acontecer com hardware real: endpoint OUT
+errado numa impressora USB com mais de uma interface, baud rate que não bate,
+`vendorId`/`productId` que mudam entre o SO reconhecer o dispositivo e o
+Chromium expor ele. **Esta sessão não tinha acesso a uma impressora ESC/POS
+física nem a um simulador de porta serial** — nada em `printerPort.ts` foi
+testado contra hardware de verdade. O que foi verificado:
+
+- O núcleo de formatação (`escposCommands.ts`, `receiptFormat.ts`,
+  `receiptEscpos.ts`) contra os valores de bytes documentados pela Epson —
+  isso sim é uma verificação real, só que de especificação, não de hardware.
+- `npm run build` (inclui `tsc -b`, que checa `printerPort.ts` contra os tipos
+  ambiente de `printerApi.d.ts`) e `npm run lint` limpos — prova que o código
+  compila e que a superfície das duas APIs foi usada com a assinatura correta
+  segundo a documentação do MDN, não que o dispositivo real responde assim.
+- A tela do PDV (`PosPage.tsx`) **não foi aberta com login real** — esta
+  sessão não tinha `FACILITE_TEST_EMAIL`/credenciais em `.env.local` (mesma
+  limitação que D13 registrou). O servidor de desenvolvimento foi iniciado e a
+  tela de login carregou sem erro no console, mas nada depois do login (o PDV
+  em si, o status da impressora na tela, os botões de parear/abrir gaveta) foi
+  clicado de verdade.
+
+Se/quando alguém tiver uma impressora térmica ESC/POS física (ou USB/serial)
+disponível, o roteiro de verificação manual é: abrir o PDV em Chrome ou Edge,
+clicar "Conectar (USB)" ou "Conectar (Serial)", confirmar que o pareamento
+aparece no seletor do navegador, fazer uma venda e conferir que o cupom sai
+formatado (sem acento, larguras batendo) e que a gaveta abre em venda com
+dinheiro — e então recarregar a página e confirmar que a impressora reconecta
+sozinha, sem pedir pareamento de novo.
