@@ -1,0 +1,11 @@
+.pix-charge-modal__status {
+  margin: 0;
+  color: var(--white);
+}
+
+.pix-charge-modal__amount {
+  margin: 0 0 4px;
+  color: var(--white);
+  opacity: 0.85;
+  text-align: center;
+}

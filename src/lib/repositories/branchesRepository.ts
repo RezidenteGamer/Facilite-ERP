@@ -6,6 +6,7 @@ import {
   COLUNA_CERT_VALIDO_ATE,
   COLUNA_CERT_VALIDO_DE,
   COLUNA_EMAIL_COPIA_NOTA,
+  COLUNA_PIX_KEY,
   COLUNAS_CERTIFICADO,
   isDuplicateBranchCodeError,
   isMissingColumnError,
@@ -119,6 +120,8 @@ const GRUPOS_OPCIONAIS = {
   email: [COLUNA_EMAIL_COPIA_NOTA] as readonly string[],
   /** `00000000000015_a11_certificado_digital_validade.sql` */
   certificado: COLUNAS_CERTIFICADO as readonly string[],
+  /** `00000000000017_d11_cobranca_pix_estatico.sql` */
+  pix: [COLUNA_PIX_KEY] as readonly string[],
 } as const;
 
 type GrupoOpcional = keyof typeof GRUPOS_OPCIONAIS;
@@ -129,6 +132,7 @@ const GRUPOS = Object.keys(GRUPOS_OPCIONAIS) as GrupoOpcional[];
 const disponibilidade: Record<GrupoOpcional, boolean | null> = {
   email: null,
   certificado: null,
+  pix: null,
 };
 
 /** A coluna de e-mail está disponível? `null` enquanto ninguém listou ainda. */
@@ -142,6 +146,11 @@ export function branchEmailColumnAvailable(): boolean | null {
  */
 export function branchCertificadoColumnsAvailable(): boolean | null {
   return disponibilidade.certificado;
+}
+
+/** A coluna da chave PIX (D11) está disponível? `null` enquanto ninguém listou ainda. */
+export function branchPixKeyColumnAvailable(): boolean | null {
+  return disponibilidade.pix;
 }
 
 /** Os grupos que vale a pena tentar — os que não são sabidamente ausentes. */
@@ -178,6 +187,7 @@ function toBranchAdmin(row: LinhaFilial): BranchAdmin {
     certificadoValidoDe: (row[COLUNA_CERT_VALIDO_DE] as string | null) ?? null,
     certificadoValidoAte: (row[COLUNA_CERT_VALIDO_ATE] as string | null) ?? null,
     certificadoCnpj: (row[COLUNA_CERT_CNPJ] as string | null) ?? null,
+    pixKey: (row[COLUNA_PIX_KEY] as string | null) ?? null,
   };
 }
 
@@ -191,7 +201,10 @@ function toBranchAdmin(row: LinhaFilial): BranchAdmin {
  * digitou num campo que estava habilitado.
  */
 function toColunas(values: BranchFormValues): Record<string, unknown> {
-  return branchColumnsFromForm(values, { includeEmail: disponibilidade.email !== false });
+  return branchColumnsFromForm(values, {
+    includeEmail: disponibilidade.email !== false,
+    includePix: disponibilidade.pix !== false,
+  });
 }
 
 /** Mensagem do banco traduzida quando dá para dizer algo melhor que o texto cru. */
@@ -274,6 +287,65 @@ export async function createBranch(values: BranchFormValues): Promise<BranchAdmi
     .single();
   if (error) throw erroDeEscrita(error);
   return toBranchAdmin(data as unknown as LinhaFilial);
+}
+
+/**
+ * O que Financeiro precisa da filial ativa para montar um BR Code (D11,
+ * 10/09/2026): a chave PIX, e nome/cidade para os campos `59`/`60` do
+ * payload. Não passa pelo caminho de `fetchBranchesForAdmin` (que exige
+ * `can_manage_branches`) porque quem cobra em Financeiro não precisa gerenciar
+ * filiais — só `has_branch_access`, que a policy `read accessible branches`
+ * já garante para qualquer coluna desta tabela.
+ *
+ * Mesma sondagem por coluna ausente que o resto deste arquivo usa: se
+ * `pix_key` ainda não existe neste banco (migration de D11 não aplicada),
+ * `pixKey` volta `null` em vez de a leitura inteira falhar.
+ */
+export async function fetchBranchPixChargeInfo(
+  branchId: string,
+): Promise<{ pixKey: string | null; name: string; municipio: string | null }> {
+  const row = await selectUmaFilialComSondagem("pix", "name, municipio", branchId);
+  return {
+    pixKey: (row[COLUNA_PIX_KEY] as string | null) ?? null,
+    name: row.name as string,
+    municipio: (row.municipio as string | null) ?? null,
+  };
+}
+
+/**
+ * Uma filial só, com as colunas fixas pedidas mais as do grupo opcional
+ * indicado — a mesma sondagem de `fetchBranchesForAdmin` (tenta com o
+ * grupo; se a coluna não existir, marca o grupo indisponível e refaz sem
+ * ela), só que para uma linha em vez da lista inteira. Extraído do que era
+ * um `fetchBranchPixChargeInfo` com dois blocos quase idênticos
+ * (achado do `/code-review alto`) — se um terceiro chamador de leitura de
+ * filial única precisar de outro grupo opcional, é esta função que ele
+ * reaproveita, não uma terceira cópia da sondagem.
+ */
+async function selectUmaFilialComSondagem(
+  grupo: GrupoOpcional,
+  colunasFixas: string,
+  branchId: string,
+): Promise<LinhaFilial> {
+  const client = assertSupabase();
+
+  if (disponibilidade[grupo] !== false) {
+    const { data, error } = await client
+      .from("branches")
+      .select(`${colunasFixas}, ${GRUPOS_OPCIONAIS[grupo].join(", ")}`)
+      .eq("id", branchId)
+      .single();
+    if (!error) {
+      disponibilidade[grupo] = true;
+      return data as unknown as LinhaFilial;
+    }
+    if (!isMissingColumnError(error)) throw error;
+    disponibilidade[grupo] = false;
+  }
+
+  const { data, error } = await client.from("branches").select(colunasFixas).eq("id", branchId).single();
+  if (error) throw error;
+  return data as unknown as LinhaFilial;
 }
 
 /** Edita uma filial. Exige `can_manage_branches` (policy `manage branches update`). */

@@ -5,6 +5,7 @@ import {
   branchFiscalWarnings,
   branchFormValuesFrom,
   COLUNA_EMAIL_COPIA_NOTA,
+  COLUNA_PIX_KEY,
   EMPTY_BRANCH_FORM,
   formatCep,
   formatCnpj,
@@ -261,6 +262,7 @@ describe("branchFormValuesFrom", () => {
     certificadoValidoDe: "2026-09-01",
     certificadoValidoAte: "2027-09-01",
     certificadoCnpj: "00.000.000/0001-91",
+    pixKey: null,
   };
 
   /*
@@ -297,7 +299,7 @@ describe("branchFormValuesFrom", () => {
 
 describe("branchColumnsFromForm", () => {
   it("traduz para snake_case e transforma campo vazio em null, nunca em string vazia", () => {
-    const row = branchColumnsFromForm(form(), { includeEmail: true });
+    const row = branchColumnsFromForm(form(), { includeEmail: true, includePix: true });
     expect(row.code).toBe("002");
     expect(row.name).toBe("Filial Norte");
     expect(row.cnpj).toBeNull();
@@ -310,7 +312,7 @@ describe("branchColumnsFromForm", () => {
   it("uniformiza CNPJ e CEP antes de gravar, e sobe a UF para maiúsculas", () => {
     const row = branchColumnsFromForm(
       form({ cnpj: "00000000000191", cep: "01310100", uf: "sp" }),
-      { includeEmail: true },
+      { includeEmail: true, includePix: true },
     );
     expect(row.cnpj).toBe("00.000.000/0001-91");
     expect(row.cep).toBe("01310-100");
@@ -320,6 +322,7 @@ describe("branchColumnsFromForm", () => {
   it("apara espaços de código e nome — o código é chave única no banco", () => {
     const row = branchColumnsFromForm(form({ code: "  002  ", name: " Filial Norte " }), {
       includeEmail: true,
+      includePix: true,
     });
     expect(row.code).toBe("002");
     expect(row.name).toBe("Filial Norte");
@@ -328,18 +331,39 @@ describe("branchColumnsFromForm", () => {
   it("só inclui a coluna de e-mail quando mandam incluir", () => {
     const values = form({ emailCopiaNotaFiscal: "contador@escritorio.com.br" });
 
-    const com = branchColumnsFromForm(values, { includeEmail: true });
+    const com = branchColumnsFromForm(values, { includeEmail: true, includePix: true });
     expect(com[COLUNA_EMAIL_COPIA_NOTA]).toBe("contador@escritorio.com.br");
 
     // Sem a coluna no banco, a chave não pode nem aparecer: o PostgREST recusa
     // o insert/update inteiro por causa de um campo opcional.
-    const sem = branchColumnsFromForm(values, { includeEmail: false });
+    const sem = branchColumnsFromForm(values, { includeEmail: false, includePix: true });
     expect(Object.keys(sem)).not.toContain(COLUNA_EMAIL_COPIA_NOTA);
   });
 
   it("e-mail vazio vira null quando a coluna existe", () => {
-    const row = branchColumnsFromForm(form({ emailCopiaNotaFiscal: "  " }), { includeEmail: true });
+    const row = branchColumnsFromForm(form({ emailCopiaNotaFiscal: "  " }), {
+      includeEmail: true,
+      includePix: true,
+    });
     expect(row[COLUNA_EMAIL_COPIA_NOTA]).toBeNull();
+  });
+
+  it("só inclui a coluna da chave PIX quando mandam incluir (D11, mesma regra do e-mail)", () => {
+    const values = form({ pixKey: "financeiro@facilite.com.br" });
+
+    const com = branchColumnsFromForm(values, { includeEmail: true, includePix: true });
+    expect(com[COLUNA_PIX_KEY]).toBe("financeiro@facilite.com.br");
+
+    const sem = branchColumnsFromForm(values, { includeEmail: true, includePix: false });
+    expect(Object.keys(sem)).not.toContain(COLUNA_PIX_KEY);
+  });
+
+  it("chave PIX vazia vira null quando a coluna existe", () => {
+    const row = branchColumnsFromForm(form({ pixKey: "  " }), {
+      includeEmail: true,
+      includePix: true,
+    });
+    expect(row[COLUNA_PIX_KEY]).toBeNull();
   });
 });
 

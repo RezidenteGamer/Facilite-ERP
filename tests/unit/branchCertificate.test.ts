@@ -477,7 +477,7 @@ describe("nada de certificado chega ao banco pelo formulário", () => {
     for (const includeEmail of [true, false]) {
       const colunas = branchColumnsFromForm(
         { ...EMPTY_BRANCH_FORM, code: "002", name: "Filial Norte", cnpj: "11.222.333/0001-81" },
-        { includeEmail },
+        { includeEmail, includePix: includeEmail },
       );
       const chaves = Object.keys(colunas);
       for (const coluna of COLUNAS_CERTIFICADO) {

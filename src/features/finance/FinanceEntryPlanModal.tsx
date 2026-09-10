@@ -5,6 +5,7 @@ import SearchCombobox from "../../components/form/SearchCombobox";
 import type { Contact, ContactKind } from "../customers/contacts";
 import QuickContactFormModal from "../customers/QuickContactFormModal";
 import { useAuth } from "../auth/AuthContext";
+import { SALE_PAYMENT_METHOD_LABEL } from "../sales/sales";
 import "../registry-engine/RegistryFormModal.css";
 import "./FinanceEntryPlanModal.css";
 import {
@@ -14,6 +15,19 @@ import {
   type FinanceEntryType,
 } from "./finance";
 import { extractErrorMessage } from "./useFinancialEntriesData";
+
+/**
+ * Mesmo vocabulário de forma de pagamento que Realizar Venda/Pedidos/Compras
+ * já usam (`SALE_PAYMENT_METHOD_LABEL`, em `features/sales/sales.ts`) — não
+ * uma lista nova. O valor gravado é o RÓTULO capitalizado ("PIX", não
+ * "pix"), porque é isso que `financial_entries.payment_method` já guarda
+ * hoje (ver `v_method_label` nas RPCs de venda/compra) e o que o `CHECK`
+ * novo de D11 aceita (D11, 10/09/2026).
+ */
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "", label: "Não informado" },
+  ...Object.values(SALE_PAYMENT_METHOD_LABEL).map((label) => ({ value: label, label })),
+];
 
 type FinanceEntryPlanModalProps = {
   type: FinanceEntryType;
@@ -161,6 +175,8 @@ export default function FinanceEntryPlanModal({
               <FormField
                 id="finance-plan-payment-method"
                 label="Forma de pagamento"
+                type="select"
+                options={PAYMENT_METHOD_OPTIONS}
                 value={paymentMethod}
                 onChange={setPaymentMethod}
               />

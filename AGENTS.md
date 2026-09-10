@@ -8432,3 +8432,259 @@ aplicada, o fallback de `isMissingProductColumnError` em
 `productsRepository.ts` simplesmente para de disparar (nunca mais recebe
 `42703`/`PGRST204` para essas duas colunas) — não precisa ser removido, é
 código morto barato, não lixo.
+
+### D11 — Cobrança por PIX estático: BR Code gerado no cliente, chave PIX na filial (10/09/2026)
+
+Segunda tarefa da Etapa 4. Fecha a lacuna que D3 tinha deixado ao lado:
+"PIX" existia como rótulo em `sale_payment_method` desde a linha de base,
+mas escolher "PIX" numa venda/compra nunca fez mais que gravar a palavra —
+zero infraestrutura de PIX existia (sem chave, sem QR, sem BR Code).
+
+#### Pesquisa da especificação do BR Code
+
+Fonte primária: "Manual de Padrões para Iniciação do Pix" e "BR Code
+Manual" do Banco Central
+(`bcb.gov.br/content/estabilidadefinanceira/pix/Regulamento_Pix/II_ManualdePadroesparaIniciacaodoPix.pdf`
+e `bcb.gov.br/content/config/Documents/BR_Code_MANUAL_Version_2_May_2020.pdf`).
+Os dois PDFs vieram como binário comprimido — `WebFetch` não extrai texto
+deles. A pesquisa então seguiu o mesmo espírito de A9 (dígito verificador de
+CPF/CNPJ): confirmar o layout de campos contra **exemplos reais e
+publicamente verificáveis**, de fontes independentes entre si, em vez de só
+confiar na própria implementação calculando os dois lados.
+
+Dois exemplos completos, de fontes distintas, foram usados:
+
+1. Chave `123e4567-e12b-12d1-a456-426655440000`, "Fulano de Tal" /
+   "BRASILIA", sem valor fixo — CRC publicado `1D3D`.
+2. Chave `bee05743-4291-4f3c-9259-595df1307ba1`, "Alexandre Lima" /
+   "Presidente Prudente", valor R$10,00 — CRC publicado `D475`.
+
+Mais um terceiro conferimento, independente de qualquer exemplo de Pix: o
+valor de checagem catalogado do próprio algoritmo CRC-16/CCITT-FALSE
+(`crc16Ccitt("123456789") === "29B1"`, constante pública do padrão CRC, não
+específica de Pix). Os três batem com a implementação em
+`src/lib/pix/pixPayload.ts` (`crc16Ccitt`: polinômio `0x1021`, inicial
+`0xFFFF`, sem reflexão, sem XOR final) — os três testes estão em
+`tests/unit/pixPayload.test.ts`, reproduzidos byte a byte contra o cálculo
+manual, não só contra a própria função.
+
+**Achado da pesquisa que contrariava a suposição inicial da tarefa:** os
+dois exemplos reais **omitem** o campo `01` (Ponto de Iniciação) e ainda
+assim têm CRC correto — ele é de fato opcional no EMVCo genérico (só existe
+para diferenciar reutilizável `11` de dinâmico-de-PSP `12`). Mesmo assim
+`buildPixBRCode` **inclui** `01=11` explicitamente, porque é o que o Manual
+do Pix do Bacen documenta para o arranjo Pix especificamente, e incluir o
+campo não quebra nenhum leitor (é um TLV a mais que todo app de banco já
+sabe ler). A decisão e os dois exemplos usados estão documentados no
+cabeçalho de `pixPayload.ts`.
+
+Escopo deliberado: só o modo **estático/reutilizável**. O modo `12`
+(dinâmico, com URL de um PSP) não existe — é o que "PIX estático" no plano
+já excluía.
+
+#### `branches.pix_key` — sem validação de formato
+
+Migration `00000000000017_d11_cobranca_pix_estatico.sql` (escrita, **NÃO
+aplicada** — mesma regra de D1/A11/etc., sessão sem autorização para aplicar
+migration). Coluna `text` nullable, mesma categoria de metadado público que
+`email_copia_nota_fiscal`/`certificado_cnpj` — sem mudança de RLS.
+
+**Decisão: sem `CHECK` de formato.** Uma chave PIX é CPF, CNPJ, e-mail,
+telefone (`+55DDDNNNNNNNNN`) ou uma chave aleatória (UUID) — quatro formatos
+bem diferentes. Um regex que tentasse reconhecer qual dos quatro está sendo
+cadastrado teria a mesma armadilha que D1 já tinha decidido evitar para
+e-mail: recusar uma chave válida por um regex errado é pior que aceitar uma
+malformada, que só falha quando alguém tenta escanear o QR — e nesse
+momento o erro é visível na hora para quem cadastrou (o operador testa o
+próprio QR, não o pagador sozinho). Front: `BranchFormModal.tsx` ganhou o
+campo **inline**, na grade de "Cobrança" — e não um arquivo próprio como
+`BranchCertificateSection.tsx` — porque não há nada calculado/derivado para
+mostrar (diferente do certificado, que resume validade e status): é um
+`FormField` só, com hint explicando os quatro formatos aceitos, sem travar
+o salvar.
+
+Threading no mesmo padrão de D1/A11: novo grupo `pix` em
+`GRUPOS_OPCIONAIS`/`disponibilidade` (`branchesRepository.ts`),
+`branchPixKeyColumnAvailable()`, `pixKeyColumnAvailable` passado por
+`useBranchesAdmin` → `BranchesAdminPage` → `BranchFormModal`, e uma linha
+"Chave PIX" na ficha de Filiais ao lado da de e-mail.
+
+#### Onde a cobrança aparece — só Financeiro
+
+Ação nova "Cobrar via PIX" ao lado de "Baixar" (`FinancePage.tsx`),
+habilitada quando `selected.status === 'aberto' && selected.type ===
+'a_receber'`. **Decisão: não trava pelo `payment_method` gravado na
+linha** — uma conta cadastrada como "Boleto" ainda pode ser cobrada via PIX
+na prática, e a etiqueta original não deveria impedir isso.
+
+**Fluxo de venda/PDV (candidato secundário do plano) — declinado.** Mostrar
+o QR também no momento da venda (`FaturamentoStep.tsx`/`PosPage.tsx`) seria
+um momento forte de demo, mas: (1) nesse ponto do fluxo ainda não existe uma
+linha de `financial_entries` para servir de base ao txid/valor — a venda
+ainda não foi confirmada; (2) acoplaria mais duas telas à chave PIX da
+filial e ao componente de QR sem nenhum ganho de reconciliação (a baixa
+continua manual de qualquer jeito, em Financeiro); (3) o plano descreve isso
+como "sua decisão", não obrigatório. Mesma disciplina de D1 recusando áreas
+secundárias sem achado concreto — declinado, com `PixQrCode.tsx` construído
+como componente isolado (QR + copia-e-cola + Copiar, sem saber de onde o
+payload veio) exatamente para que essa tela, se vier a existir, não precise
+reconstruir nada.
+
+#### `financial_entries.payment_method` — `CHECK`, não migração de tipo
+
+A coluna é `text` livre desde a linha de base, escrita hoje por duas vias:
+`v_method_label` (RPCs de venda/compra/devolução, rótulos capitalizados —
+`'Dinheiro'/'Débito'/'Crédito'/'PIX'/'Boleto'/'Outro'`, ou `NULL` na
+devolução com pagamento misto) e o lançamento manual do Financeiro, que até
+aqui aceitava qualquer texto.
+
+**Decisão: `CHECK` na coluna `text`, não migrar para o tipo do enum
+`sale_payment_method`.** Os dados já gravados usam os RÓTULOS
+capitalizados, não os valores crus do enum (`"PIX"`, não `"pix"`) —
+confirmado ao vivo (`select distinct payment_method from
+financial_entries`, 10/09/2026: os 14 lançamentos existentes, incluindo os
+4 manuais, já batem com os 6 rótulos, sem exceção — a migration não precisa
+de passo de limpeza). Migrar o tipo exigiria reconciliar toda gravação
+existente E as três RPCs que já escrevem o rótulo pronto — mudança maior
+para o mesmo ganho prático que o `CHECK` já entrega.
+
+Front: `FinanceEntryPlanModal.tsx` trocou o `FormField` de texto livre por
+um `<select>` com `SALE_PAYMENT_METHOD_LABEL` (já existente em
+`features/sales/sales.ts`, já usado por `FaturamentoStep.tsx`/
+`PurchaseFormPage.tsx`) — vocabulário reaproveitado, não uma lista nova.
+
+#### `/code-review alto` — 9 achados, 8 corrigidos, 1 decidido
+
+Rodado com 8 agentes-buscadores (3 ângulos de correção + reuse +
+simplificação + eficiência + altitude + convenções) e verificação
+individual. Achados reais, na ordem de severidade:
+
+1. **`pixKey` não passava pela normalização ASCII antes de entrar no TLV
+   nem no CRC** (dois ângulos independentes bateram nisso) — diferente de
+   `merchantName`/`merchantCity`, a chave ia crua para `emvField`. Como
+   `branches.pix_key` não valida formato, uma chave com acento (erro de
+   copiar-e-colar) faria `value.length` (unidades UTF-16) divergir do que um
+   leitor EMV espera em bytes, corrompendo o campo `26` e o CRC calculado
+   sobre a mesma string. **Corrigido**: `buildPixBRCode` agora passa
+   `pixKey` por `normalizePixText` como os outros campos.
+2. **Sem limite de tamanho na chave** — `merchantName`/`merchantCity`
+   truncam em 25/15; a chave não truncava em nada, e o prefixo de tamanho do
+   `emvField` é sempre 2 dígitos. Uma chave malformada longa o bastante
+   (>77 caracteres) estouraria o orçamento de 99 caracteres do campo `26` e
+   quebraria o TLV a partir dali. **Corrigido**: `PIX_KEY_MAX_LENGTH_IN_PAYLOAD
+   = 77` (99 do campo 26, menos 18 do subcampo fixo do GUI, menos 4 do
+   cabeçalho do subcampo da chave) — proteção estrutural do formato, não
+   validação de formato de chave (que continua não existindo, de propósito).
+3. **A ficha de "Editar lançamento" (motor genérico, `module_fields`) segue
+   texto livre para `payment_method`**, sem checagem contra o `CHECK` novo —
+   confirmado ao vivo que `module_fields.payment_method.data_type = "text"`
+   e que o vocabulário de `dataType` não tem `"select"`. Sem correção, editar
+   um lançamento com qualquer texto fora do vocabulário passaria a falhar
+   com erro cru do Postgres assim que a migration for aplicada. **Corrigido
+   sem tocar o motor genérico**: `validateFinanceEntryEditValues` em
+   `finance.ts` ganhou a mesma checagem contra `SALE_PAYMENT_METHOD_LABEL`,
+   com mensagem em português antes do `submit` — o campo continua texto
+   livre na tela, só passou a recusar cedo.
+4. **"Cadastrar chave PIX" (estado "sem chave" do modal) navegava sempre
+   para `/configuracoes/filiais`**, que exige `can_manage_branches` — mais
+   restritivo que o `has_branch_access` que o próprio fluxo de Financeiro
+   usa. Um operador só de Financeiro cairia num beco sem saída ("Você não
+   tem permissão para gerenciar filiais"). **Corrigido**: o botão só aparece
+   para quem tem `can_manage_branches`; sem ele, a mensagem já diz "peça a
+   um administrador" em vez de oferecer um link morto.
+5. **`fetchBranchPixChargeInfo` reimplementava, com forma ligeiramente
+   diferente, a mesma sondagem de coluna ausente que `fetchBranchesForAdmin`
+   já generalizava** (achado por três ângulos independentes — reuse,
+   simplificação e altitude). **Corrigido**: extraída
+   `selectUmaFilialComSondagem(grupo, colunasFixas, branchId)`, reaproveitando
+   `GRUPOS_OPCIONAIS`/`disponibilidade`; `fetchBranchPixChargeInfo` ficou em
+   6 linhas.
+6. **`PixQrCode`'s "copiar com retorno de 1,5s" era a terceira cópia** do
+   mesmo bloco (`WorkflowSection.tsx`, `ModuleBuilderPage.tsx`). **Corrigido**:
+   extraído `src/lib/useCopyToClipboard.ts`, usado pelo componente novo — as
+   duas cópias antigas não foram tocadas (fora do escopo de D11).
+7. **O `setTimeout` do "Copiado!" nunca era cancelado** — fechar o modal
+   dentro de 1,5s deixava um timer tentando atualizar um componente
+   desmontado. **Corrigido** dentro do novo hook (`clearTimeout` no
+   desmonte).
+8. **Checagem redundante** `amount !== null && amount !== undefined` antes
+   de `Number.isFinite`, que já cobre os dois. **Corrigido** (uma linha).
+9. **A ação nova "Cobrar via PIX" não tem checagem de permissão**, ao
+   contrário de toda ação irmã no mesmo array (`canCreate`/`canEdit`/
+   `canDelete`). **Decisão, não corrigido**: a ação não escreve nada no
+   banco — é a mesma informação que `canView` (já exigido pela página
+   inteira) mostra, mais a chave PIX da filial, que não é segredo (existe
+   para ser entregue a quem vai pagar). Travar em `canEdit` bloquearia um
+   caso de uso real (recepção só-visualização gerando uma cobrança para o
+   cliente na hora) sem fechar risco de verdade. Mantido como está.
+
+Um décimo candidato (achado C — "`entry.total <= 0` poderia gerar um QR
+'em aberto' silenciosamente") foi **refutado**: `financial_entries.total`
+tem `CHECK (total > 0)` desde a linha de base
+(`financial_entries_total_check`) — a precondição é impossível para
+qualquer linha que chega à tela.
+
+Um achado de reuse foi considerado e **declinado**: `normalizePixText`
+repete o mesmo trecho de remoção de acento (`normalize("NFD").replace(...)`)
+que já existe em `searchText.ts`, `moduleBuilder.ts` e `ReportsPage.tsx`.
+Nenhum desses helpers tem o mesmo contrato (filtro por faixa ASCII +
+truncamento, sem minúsculas) — extrair um `stripAccents` compartilhado
+tocaria quatro arquivos fora do escopo de D11 para um ganho cosmético.
+Deixado como está; candidato a uma tarefa própria se o padrão se repetir
+uma quinta vez.
+
+#### Lib de QR: `qrcode.react`
+
+Escolhida por ser a opção mais estabelecida especificamente para React
+(componente `<QRCodeSVG>`, sem dependência de canvas do DOM), gera SVG puro
+no cliente sem chamada de rede, e tem compatibilidade declarada com React 19
+(`peerDependencies`: `^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0`, conferido
+com `npm view` antes de instalar). `package.json`/`package-lock.json`
+ganharam a entrada; nenhuma outra dependência nova.
+
+#### O que ficou deliberadamente fora
+
+- Confirmação automática de pagamento — PIX estático é auto-contido, sem
+  provedor no meio; "Baixar" continua manual, como antes.
+- Validação de formato da chave PIX no cadastro — ver a seção acima.
+- Fluxo de venda/PDV — ver a seção acima.
+- Migrar `payment_method` para o tipo do enum — ver a seção acima.
+- Qualquer mudança em `supabase/functions/` — confirmado que nenhum payload
+  fiscal (`NfePayload`, `invoiceMapping.ts`) lê
+  `financial_entries.payment_method`; `grep financial_entries` em
+  `supabase/functions/` não bate em nada.
+
+#### Testes e verificação
+
+`tests/unit/pixPayload.test.ts` (17 casos): os dois exemplos reais + o valor
+de checagem do CRC-16/CCITT-FALSE (ver acima), truncamento/normalização de
+acento em nome/cidade/chave, sanitização de txid, presença condicional do
+campo de valor. `tests/unit/finance.test.ts` (novo, 4 casos): a validação
+nova de `payment_method` na edição. `tests/unit/branchForm.test.ts`/
+`branchCertificate.test.ts` ganharam os casos de `pix_key`/`includePix`
+espelhando os já existentes de e-mail/certificado.
+
+`npm run build`/`lint`/`test:unit` limpos (639 testes unitários passando,
+17 novos em `pixPayload.test.ts` + 4 novos em `finance.test.ts` + os casos
+de `pix_key` nos dois arquivos de filial). `npm test` (bateria completa)
+mantém os mesmos 4 arquivos de concorrência/isolamento falhando por falta
+de `FACILITE_TEST_EMAIL`/etc. em `.env.local` — condição de ambiente
+pré-existente, não relacionada a D11. `deno check` não roda porque nada em
+`supabase/functions/` mudou (confirmado acima).
+
+**UI não testada ao vivo no navegador**: esta sessão não tinha credenciais
+de login em `.env.local` (só `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`) —
+sem conta de teste, não deu para abrir o app e conferir visualmente o
+formulário de Filiais nem o modal de cobrança. A verificação ficou por
+`tsc -b`, `npm run build`, lint e os 639 testes unitários.
+
+#### Fronteira com quem aplicar a migration
+
+A sessão de coordenação precisa aplicar
+`00000000000017_d11_cobranca_pix_estatico.sql`. Sem Edge Function tocada,
+sem segredo novo, sem deploy pendente. Depois de aplicada: o `CHECK` de
+`payment_method` começa a valer para toda escrita nova (a validação de
+`finance.ts` já cobre a tela de edição; as RPCs de venda/compra/devolução
+já escrevem só os 6 rótulos, então nada muda para elas), e as filiais
+passam a poder cadastrar `pix_key` — sem ela, "Cobrar via PIX" mostra a
+mensagem de chave ausente em vez de dar erro.

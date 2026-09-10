@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   branchCertificadoColumnsAvailable,
   branchEmailColumnAvailable,
+  branchPixKeyColumnAvailable,
   createBranch,
   fetchBranchesForAdmin,
   updateBranch,
@@ -28,6 +29,8 @@ export function useBranchesAdmin(enabled: boolean) {
   const [certificadoColumnsAvailable, setCertificadoColumnsAvailable] = useState<boolean | null>(
     null,
   );
+  /** Idem, para a coluna da chave PIX (D11). */
+  const [pixKeyColumnAvailable, setPixKeyColumnAvailable] = useState<boolean | null>(null);
 
   /**
    * Número da leitura mais recente. Duas leituras podem estar no ar ao mesmo
@@ -59,6 +62,7 @@ export function useBranchesAdmin(enabled: boolean) {
       setBranches(rows);
       setEmailColumnAvailable(branchEmailColumnAvailable());
       setCertificadoColumnsAvailable(branchCertificadoColumnsAvailable());
+      setPixKeyColumnAvailable(branchPixKeyColumnAvailable());
     } catch (err) {
       if (!aindaVale()) return;
       setError(extractErrorMessage(err, "Erro ao carregar as filiais."));
@@ -93,6 +97,7 @@ export function useBranchesAdmin(enabled: boolean) {
     error,
     emailColumnAvailable,
     certificadoColumnsAvailable,
+    pixKeyColumnAvailable,
     reload,
     create,
     update,

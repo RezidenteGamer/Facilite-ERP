@@ -55,6 +55,15 @@ export type BranchAdmin = {
   certificadoValidoDe: string | null;
   certificadoValidoAte: string | null;
   certificadoCnpj: string | null;
+  /**
+   * Chave PIX da filial (D11, 10/09/2026) — CPF, CNPJ, e-mail, telefone ou
+   * chave aleatória, sem validação de formato (ver a decisão na migration de
+   * D11). Usada para montar o BR Code em Financeiro > "Cobrar via PIX".
+   *
+   * `null` também significa "a coluna ainda não existe neste banco" — mesma
+   * convenção de `emailCopiaNotaFiscal`/`certificadoValidoDe`.
+   */
+  pixKey: string | null;
 };
 
 export type BranchFormValues = {
@@ -72,6 +81,7 @@ export type BranchFormValues = {
   uf: string;
   cep: string;
   emailCopiaNotaFiscal: string;
+  pixKey: string;
   active: boolean;
   allowNegativeStock: boolean;
 };
@@ -125,6 +135,7 @@ export const EMPTY_BRANCH_FORM: BranchFormValues = {
   uf: "",
   cep: "",
   emailCopiaNotaFiscal: "",
+  pixKey: "",
   active: true,
   allowNegativeStock: false,
 };
@@ -146,6 +157,7 @@ export function branchFormValuesFrom(branch: BranchAdmin): BranchFormValues {
     uf: branch.uf ?? "",
     cep: branch.cep ?? "",
     emailCopiaNotaFiscal: branch.emailCopiaNotaFiscal ?? "",
+    pixKey: branch.pixKey ?? "",
     active: branch.active,
     allowNegativeStock: branch.allowNegativeStock,
   };
@@ -275,6 +287,9 @@ function ouNulo(value: string): string | null {
 /** Nome da coluna de e-mail; ver `BranchAdmin.emailCopiaNotaFiscal`. */
 export const COLUNA_EMAIL_COPIA_NOTA = "email_copia_nota_fiscal";
 
+/** Nome da coluna da chave PIX (D11); ver `BranchAdmin.pixKey`. */
+export const COLUNA_PIX_KEY = "pix_key";
+
 /**
  * Valores do formulário → colunas físicas de `branches`.
  *
@@ -297,7 +312,7 @@ export const COLUNA_EMAIL_COPIA_NOTA = "email_copia_nota_fiscal";
  */
 export function branchColumnsFromForm(
   values: BranchFormValues,
-  options: { includeEmail: boolean },
+  options: { includeEmail: boolean; includePix: boolean },
 ): Record<string, unknown> {
   const row: Record<string, unknown> = {
     code: values.code.trim(),
@@ -318,6 +333,9 @@ export function branchColumnsFromForm(
   };
   if (options.includeEmail) {
     row[COLUNA_EMAIL_COPIA_NOTA] = ouNulo(values.emailCopiaNotaFiscal);
+  }
+  if (options.includePix) {
+    row[COLUNA_PIX_KEY] = ouNulo(values.pixKey);
   }
   return row;
 }

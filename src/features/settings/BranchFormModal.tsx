@@ -28,6 +28,12 @@ type BranchFormModalProps = {
    */
   emailColumnAvailable: boolean | null;
   /**
+   * A coluna `pix_key` existe neste banco? Mesma convenção de
+   * `emailColumnAvailable` (D11): quando não existe, o campo aparece
+   * desabilitado com a explicação em vez de sumir.
+   */
+  pixKeyColumnAvailable: boolean | null;
+  /**
    * O certificado digital **gravado** desta filial (A11). `null` em "Nova
    * filial": não há nada gravado ainda. Só leitura — nada neste formulário
    * escreve certificado, e nem existe campo para isso em `BranchFormValues`.
@@ -69,6 +75,7 @@ export default function BranchFormModal({
   title,
   initialValues,
   emailColumnAvailable,
+  pixKeyColumnAvailable,
   certificado,
   certificadoColumnsAvailable,
   saving,
@@ -238,6 +245,24 @@ export default function BranchFormModal({
               ver a decisão de D1 no AGENTS.md. A <strong>alíquota de crédito do Simples</strong>{" "}
               (<code>pCredSN</code>) continua em Configurações, escopada pela filial ativa.
             </p>
+
+            <p className="branch-form__section">Cobrança</p>
+            <div className="branch-form__grid">
+              <Wide>
+                <FormField
+                  id="branch-form-pix-key"
+                  label="Chave PIX"
+                  value={values.pixKey}
+                  disabled={pixKeyColumnAvailable === false}
+                  onChange={(value) => set("pixKey", value)}
+                  hint={
+                    pixKeyColumnAvailable === false
+                      ? "Indisponível: a coluna deste campo faz parte da migration de D11, que ainda não foi aplicada neste banco."
+                      : "CPF, CNPJ, e-mail, telefone ou chave aleatória — sem validação de formato aqui. É a chave usada para gerar o QR Code de cobrança em Financeiro."
+                  }
+                />
+              </Wide>
+            </div>
 
             <BranchCertificateSection
               certificado={certificado}

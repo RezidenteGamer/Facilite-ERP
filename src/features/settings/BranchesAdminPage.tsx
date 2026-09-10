@@ -114,8 +114,16 @@ export default function BranchesAdminPage() {
   const { profile, refreshBranches } = useAuth();
   const canManage = Boolean(profile?.canManageBranches);
 
-  const { branches, loading, error, emailColumnAvailable, certificadoColumnsAvailable, create, update } =
-    useBranchesAdmin(canManage);
+  const {
+    branches,
+    loading,
+    error,
+    emailColumnAvailable,
+    certificadoColumnsAvailable,
+    pixKeyColumnAvailable,
+    create,
+    update,
+  } = useBranchesAdmin(canManage);
 
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -280,6 +288,15 @@ export default function BranchesAdminPage() {
                   ? "Indisponível (migration de D1 não aplicada)"
                   : (selected.emailCopiaNotaFiscal ?? "Não informado"),
             },
+            {
+              label: "Chave PIX",
+              /* Mesma regra das outras linhas opcionais (D11). */
+              value: !selected
+                ? undefined
+                : pixKeyColumnAvailable === false
+                  ? "Indisponível (migration de D11 não aplicada)"
+                  : (selected.pixKey ?? "Não cadastrada"),
+            },
           ]}
         />
       </RegistryLayout>
@@ -299,6 +316,7 @@ export default function BranchesAdminPage() {
           title={modal === "edit" ? `Editar filial — ${selected?.name ?? ""}` : "Nova filial"}
           initialValues={modal === "edit" && selected ? branchFormValuesFrom(selected) : undefined}
           emailColumnAvailable={emailColumnAvailable}
+          pixKeyColumnAvailable={pixKeyColumnAvailable}
           certificado={modal === "edit" && selected ? branchCertificado(selected) : null}
           certificadoColumnsAvailable={certificadoColumnsAvailable}
           saving={saving}

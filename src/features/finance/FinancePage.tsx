@@ -18,6 +18,7 @@ import RegistryFormModal from "../registry-engine/RegistryFormModal";
 import { useModuleDefinition } from "../registry-engine/useModuleDefinition";
 import { FinanceIcon } from "../home/icons";
 import FinanceEntryPlanModal from "./FinanceEntryPlanModal";
+import PixChargeModal from "./PixChargeModal";
 import {
   buildFinanceEntryEditInput,
   computeCashFlowTotals,
@@ -64,6 +65,7 @@ export default function FinancePage() {
   const [formContact, setFormContact] = useState<Contact | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pixChargeEntry, setPixChargeEntry] = useState<FinanceEntry | null>(null);
 
   const {
     entries,
@@ -303,6 +305,20 @@ export default function FinancePage() {
                     onClick: () => selected && run(() => settleEntry(selected.id)),
                   },
                   {
+                    id: "cobrar-pix",
+                    label: "Cobrar via PIX",
+                    /*
+                     * Só para "a receber" em aberto — cobrar quem vai PAGAR a
+                     * filial, não quem a filial paga. Não trava pelo
+                     * `paymentMethod` gravado na linha: uma conta cadastrada
+                     * como "Boleto" ainda pode ser cobrada via PIX na
+                     * prática, e a etiqueta original não devia impedir isso
+                     * (D11).
+                     */
+                    disabled: !selected || selected.status !== "aberto" || selected.type !== "a_receber",
+                    onClick: () => selected && setPixChargeEntry(selected),
+                  },
+                  {
                     id: "editar",
                     label: "Editar",
                     disabled: !selected || !canEdit || selected.status !== "aberto",
@@ -381,6 +397,14 @@ export default function FinancePage() {
           validate={validateFinanceEntryEditValues}
           onSubmit={handleEditSubmit}
           onCancel={() => setEditModalOpen(false)}
+        />
+      )}
+
+      {pixChargeEntry && currentBranchId && (
+        <PixChargeModal
+          entry={pixChargeEntry}
+          branchId={currentBranchId}
+          onCancel={() => setPixChargeEntry(null)}
         />
       )}
 

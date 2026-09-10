@@ -1,4 +1,5 @@
 import { parseAmount, validateAmount } from "../../lib/amount";
+import { SALE_PAYMENT_METHOD_LABEL } from "../sales/sales";
 
 /** Tipo do lançamento — permanente: nasce a pagar ou a receber e não muda. */
 export type FinanceEntryType = "a_pagar" | "a_receber";
@@ -155,11 +156,41 @@ export function todayIso(): string {
  */
 export { parseAmount, validateAmount };
 
-/** `validate` do `RegistryFormModal` para o formulário de edição de um lançamento. */
+/**
+ * `financial_entries.payment_method` (D11, 10/09/2026) tem um `CHECK` no
+ * banco restrito a estes 6 rótulos (ou `NULL`) — os mesmos que
+ * `v_method_label` já grava nas RPCs de venda/compra/devolução, e o mesmo
+ * vocabulário que `FinanceEntryPlanModal.tsx` já oferece como `<select>` na
+ * criação. Reaproveitado aqui, e não uma lista nova.
+ */
+const PAYMENT_METHOD_LABELS = new Set(Object.values(SALE_PAYMENT_METHOD_LABEL));
+
+/**
+ * `validate` do `RegistryFormModal` para o formulário de edição de um
+ * lançamento (achado do `/code-review alto`, corrigido aqui).
+ *
+ * O campo "Forma de pagamento" da edição continua vindo de `module_fields`
+ * como texto livre — o motor genérico só tem `dataType`
+ * `text`/`date`/`boolean`/`phone`/`email`, sem `select`, então virar um
+ * `<select>` aqui exigiria mexer no motor genérico, fora do escopo de D11
+ * (que só pediu o select na criação, em `FinanceEntryPlanModal.tsx`). Mas
+ * deixar o texto livre sem checagem nenhuma, depois que a migration de D11
+ * criar o `CHECK`, faria um valor fora do vocabulário (`"pix"` minúsculo,
+ * texto inventado) passar pelo formulário e só falhar no banco com um erro
+ * cru do Postgres. Esta validação intercepta isso antes do `submit`, com a
+ * mesma vitrine de erro que `total` já usa.
+ */
 export function validateFinanceEntryEditValues(values: Record<string, string>): string[] {
   const errors: string[] = [];
   const totalError = validateAmount(values.total, "Valor total");
   if (totalError) errors.push(totalError);
+
+  const paymentMethod = values.paymentMethod?.trim();
+  if (paymentMethod && !PAYMENT_METHOD_LABELS.has(paymentMethod)) {
+    errors.push(
+      `Forma de pagamento inválida. Use um destes valores: ${[...PAYMENT_METHOD_LABELS].join(", ")}.`,
+    );
+  }
   return errors;
 }
 
