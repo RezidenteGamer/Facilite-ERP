@@ -10159,3 +10159,75 @@ projeto sem nenhuma extensão proprietária de verdade. Se o escopo do
 backup um dia crescer para além de `public` (ver a lacuna documentada
 acima), essa conta muda e Branching volta a valer a pena revisitar — com
 o usuário, não dentro de um diff.
+
+### MT1 — começa a migração multi-tenant: tabela `organizations` e `branches.organization_id` (11/09/2026)
+
+**Esta entrada pertence a um plano diferente de todas as anteriores.**
+Tudo até C7 acima é do "Mínimo pra vender"
+(`preciso-que-voc-veja-nested-fox.md`); MT1 é a primeira tarefa de
+`facilite-multi-tenant-saas.md`, um plano separado, nascido de uma
+conversa sobre preço: o piso de "um projeto Supabase por cliente" (~R$150-
+200/mês fixos) não compete com o preço de entrada do mercado. O plano
+propõe organização como camada acima de filial, sem substituir
+`has_branch_access`/`has_permission` — as duas funções que já sustentam
+quase todo o controle de acesso do sistema.
+
+MT1 é só a fundação de dado, de propósito pequena: migration escrita e
+**não aplicada** (mesma regra de D1, A11, D3, E4 — esta sessão de
+coordenação não tinha autorização para aplicar nada), em
+`00000000000019_mt1_organizations.sql`. Cria `organizations` (`id`,
+`name`, `document` nullable — CNPJ da matriz, `active` default `true`,
+`created_at`) e `branches.organization_id uuid not null references
+organizations(id)`, com índice. Nenhuma RLS **existente** muda, nenhuma
+tela muda — confirmado que `organization_id`/`organizationId` não
+aparece em lugar nenhum de `src/` hoje. `organizations` em si liga RLS
+própria sem policy nenhuma (`revoke all ... from anon, authenticated` de
+defesa em profundidade, mesmo padrão de `fiscal_numbering` em A10): é a
+mesma regra que toda tabela nova deste projeto já segue desde que ganhou
+migration versionada (`mva_rules`, `fiscal_numbering`, `fiscal_queue`) —
+"toda tabela nasce trancada", não uma decisão de isolamento por
+organização, que continua sendo MT3.
+
+#### O nome da organização de backfill
+
+Pesquisado antes de inventar qualquer coisa: este banco não tem cadastro
+de "razão social" separado de filial em lugar nenhum — sem coluna em
+`profiles`, sem tabela de configuração, e
+`fiscal_documents.emitente_nome`/`emitente_nome_fantasia` nulos (nenhuma
+nota emitida ainda preencheu esse snapshot). O único nome de empresa que
+já existia no sistema é `branches.name` da única filial em produção —
+`Supermercado No Ponto Centro`. A organização de backfill nasce com esse
+nome, não um genérico. `document` fica nulo no backfill: o CNPJ da
+organização não foi assumido como igual ao `branches.cnpj` da matriz —
+essa equivalência é decisão de MT9 (provisionamento), não desta tarefa.
+
+#### Por que `active` entrou já, e a diferença do caso que D1 recusou
+
+`organizations.active boolean not null default true` entrou nesta
+migration, não foi adiado. Comparado ao mesmo tipo de decisão que D1
+tomou ao **recusar** uma coluna de série fiscal (evitar repositório e
+produção dizendo coisas diferentes sobre um campo que o código ainda não
+respeitava): aqui o risco não se aplica da mesma forma — `active` parado
+em `true`, sem nenhuma RLS ou tela lendo a coluna, não finge suspensão
+nenhuma; é cadastro puro, como `email_copia_nota_fiscal` de D1, e o mesmo
+padrão que `branches.active` já usa nesta base. MT13 (Etapa 6 do plano —
+suspender licença) é quem vai ligar comportamento a ela.
+
+#### O achado que muda a ordem de MT3, registrado no plano, não corrigido aqui
+
+A pesquisa desta tarefa confirmou algo que `facilite-multi-tenant-saas.md`
+já registrava como suspeita: `can_manage_branches()` é um flag de papel
+puro (`roles.can_manage_branches`), sem checar filial nem organização —
+sustenta as policies `manage branches insert/update/delete` e metade de
+`read accessible branches`. A mesma forma vale, quase certo, para
+`can_manage_users()`/`can_manage_permissions()`/`can_manage_modules()`
+(a confirmar uma a uma em MT3, não presumido aqui). Assim que existir uma
+segunda organização de verdade, um admin da Organização A consegue mexer
+em filial da Organização B por essas policies — até MT3 corrigir essa
+família de funções. Por isso nenhuma tela nova de gestão de filial
+multi-organização pode abrir para uso antes de MT3 fechar: a coluna
+sozinha, de propósito, não fecha isolamento nenhum.
+
+`profiles.organization_id` (MT2) e as quatro tabelas globais por engano —
+`roles`, `contacts`, `tax_groups`/`tax_rules`, `modules` (Etapa 2) —
+continuam de fora, sem tocar.
