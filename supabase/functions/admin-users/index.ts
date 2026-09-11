@@ -68,6 +68,8 @@ Deno.serve(async (req: Request) => {
   // qualquer outra ação (ex.: reset de senha) sempre exige can_manage_users.
   const isBootstrap = (profileCount ?? 0) === 0 && payload.action === "create";
 
+  let callerId: string | null = null;
+
   if (!isBootstrap) {
     // Fora do bootstrap, exige um usuário autenticado com can_manage_users.
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -83,9 +85,10 @@ Deno.serve(async (req: Request) => {
     if (userError || !userData.user) {
       return jsonResponse({ error: "Não autenticado." }, 401);
     }
+    callerId = userData.user.id;
 
     const { data: canManage, error: canManageError } = await admin.rpc("can_manage_users_for", {
-      p_user_id: userData.user.id,
+      p_user_id: callerId,
     });
     if (canManageError) {
       return jsonResponse({ error: `Erro ao checar permissão: ${canManageError.message}` }, 500);
@@ -99,6 +102,53 @@ Deno.serve(async (req: Request) => {
     const { email, password, name, document, operatorCode } = payload;
     if (!email || !password || !name) {
       return jsonResponse({ error: "Email, senha e nome são obrigatórios." }, 400);
+    }
+
+    // Resolve organization_id ANTES de criar o usuário no Supabase Auth —
+    // se a resolução falhar, a função retorna sem deixar usuário órfão em
+    // auth.users (MT2, ver facilite-multi-tenant-saas.md).
+    let organizationId: string;
+    if (isBootstrap) {
+      // MT2 (Etapa 1) — ponte temporária, não a solução de MT9.
+      //
+      // O bootstrap desta função só serve para o primeiríssimo usuário da
+      // primeiríssima organização: a checagem "profiles está vazia" só
+      // faz sentido enquanto existir uma organização só no sistema
+      // inteiro, porque não há nenhum caminho (ainda) para uma segunda
+      // organização cadastrar o próprio primeiro usuário — isso é
+      // ovo-e-galinha (can_manage_users_for exige já ser usuário de uma
+      // organização) e é exatamente o motivo de existir MT9 (Etapa 4,
+      // "uma organização nasce sozinha"). Até MT9 substituir este
+      // mecanismo por um provisionamento real, o bootstrap exige que
+      // `organizations` tenha exatamente uma linha e usa o id dela — se
+      // não tiver, falha de forma explícita em vez de adivinhar qual
+      // organização usar ou criar uma organização nova aqui.
+      const { data: orgs, error: orgsError } = await admin
+        .from("organizations")
+        .select("id");
+      if (orgsError) {
+        return jsonResponse({ error: `Erro ao verificar organizações existentes: ${orgsError.message}` }, 500);
+      }
+      if (!orgs || orgs.length !== 1) {
+        return jsonResponse({
+          error:
+            `Bootstrap indisponível: esperava exatamente 1 organização para criar o primeiro usuário sem ambiguidade, encontrou ${orgs?.length ?? 0}. Isto exige MT9 (provisionamento de organização nova) para ser resolvido.`,
+        }, 500);
+      }
+      organizationId = orgs[0].id;
+    } else {
+      // Caminho normal: todo usuário criado nasce na mesma organização de
+      // quem o criou — resolvida a partir do perfil do chamador, nunca de
+      // um campo vindo do front-end.
+      const { data: callerProfile, error: callerProfileError } = await admin
+        .from("profiles")
+        .select("organization_id")
+        .eq("id", callerId)
+        .single();
+      if (callerProfileError || !callerProfile) {
+        return jsonResponse({ error: `Erro ao resolver organização do usuário autenticado: ${callerProfileError?.message ?? "perfil não encontrado"}` }, 500);
+      }
+      organizationId = callerProfile.organization_id;
     }
 
     const { data: created, error: createError } = await admin.auth.admin.createUser({
@@ -129,6 +179,7 @@ Deno.serve(async (req: Request) => {
       document: document ?? "",
       operator_code: operatorCode ?? "",
       role_id: roleId,
+      organization_id: organizationId,
     });
     if (profileError) {
       // Reverte a criação do usuário de auth para não deixar órfão.

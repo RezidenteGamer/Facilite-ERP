@@ -10231,3 +10231,72 @@ sozinha, de propósito, não fecha isolamento nenhum.
 `profiles.organization_id` (MT2) e as quatro tabelas globais por engano —
 `roles`, `contacts`, `tax_groups`/`tax_rules`, `modules` (Etapa 2) —
 continuam de fora, sem tocar.
+
+### MT2 — `profiles.organization_id`, e `admin-users` aprende a preenchê-lo (11/09/2026)
+
+Segunda tarefa da Etapa 1 de `facilite-multi-tenant-saas.md`. MT1 criou
+`organizations` e `branches.organization_id`; esta tarefa faz o mesmo tipo
+de coluna em `profiles` — mas, diferente de MT1, também toca código de
+aplicação, porque `profiles` só ganha linha nova num lugar do sistema
+inteiro: a Edge Function `admin-users`, ação `"create"` (confirmado — sem
+trigger em `auth.users`, sem outro caminho).
+
+Migration escrita e **não aplicada**, mesma regra de D1/A11/D3/E4/MT1, em
+`00000000000020_mt2_profiles_organization_id.sql`. Mesma forma de MT1:
+coluna nasce nullable, backfill roda, só depois `set not null`, índice
+(`profiles_organization_id_idx`), tudo na mesma transação. A diferença de
+decisão em relação a MT1: como esta migration roda **depois** que
+`organizations` já existe como tabela de verdade (não a cria na mesma
+transação), ela abre com um `do $$ ... $$` que conta linhas de
+`organizations` e levanta exceção se não for exatamente 1, em vez de
+adivinhar — `profiles` não guarda `branch_id` (é `user_branches`, N:N), então
+com mais de uma organização não haveria uma resposta única sobre "qual
+organização" para cada usuário.
+
+#### A mudança em `supabase/functions/admin-users/index.ts`
+
+O caminho normal (não-bootstrap) resolve `organization_id` a partir do
+perfil de quem está chamando (`callerId`, já usado para o RPC de
+permissão) — todo usuário criado nasce na mesma organização de quem o
+criou, sem nenhum campo novo vindo do front-end. Confirmado antes de
+escrever: `src/lib/repositories/adminUsersApi.ts` (única chamadora de
+`admin-users` em `src/`) não manda `organization_id` hoje e continua sem
+mandar — a resolução é inteira do servidor.
+
+O caminho de bootstrap (dispara só quando `profiles` está globalmente
+vazia — gatilho não mudou) ganhou a mesma guarda da migration: exige que
+`organizations` tenha exatamente 1 linha e usa o id dela; se não tiver,
+retorna erro 500 explícito em vez de adivinhar ou criar uma organização
+ali na hora. O código tem um comentário extenso (mesmo padrão de
+`organizations.active` em MT1) registrando que isto é uma ponte estreita e
+temporária — só funciona porque hoje existe uma organização só — e que é
+MT9 (Etapa 4, "uma organização nasce sozinha") quem precisa substituir
+este mecanismo antes de uma segunda organização conseguir cadastrar o
+próprio primeiro usuário. Esta tarefa não resolve esse problema, só evita
+que ele falhe em silêncio.
+
+Em ambos os caminhos, `organization_id` é resolvido **antes** de chamar
+`auth.admin.createUser` — se a resolução falhar, a função retorna sem
+criar usuário nenhum no Supabase Auth, sem depender do rollback de
+`deleteUser` (que continua existindo, para outros motivos de falha).
+
+`action: "reset-password"` não cria perfil — confirmado que não precisava
+de nenhuma mudança, e não mudou.
+
+#### Testes
+
+Procurado antes de presumir: não existe hoje nenhum teste sobre
+`admin-users` em `tests/` (nem unitário, nem de integração) — as baterias
+de integração existentes (`tests/isolation/`) cobrem RLS entre filiais,
+não esta Edge Function. Esta tarefa não criou teste novo: o pedido era
+estender um teste existente se houvesse um, e não havia. `deno check` foi
+rodado sobre o arquivo editado e passou sem erro de tipo.
+
+#### O que fica de fora, de propósito
+
+Mesma lista de MT1, ampliada: RLS de qualquer tipo e toda função de
+autorização (`has_branch_access`, `has_permission`, `can_manage_*`,
+incluindo `can_manage_users_for` — continua sem checar organização, é
+MT3); MT9 em si (esta tarefa só contém o problema do bootstrap, não o
+resolve); qualquer tela nova; mover um usuário existente de uma
+organização para outra (não existe esse conceito hoje).
