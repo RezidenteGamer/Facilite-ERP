@@ -9924,3 +9924,226 @@ derrubando a rede no nível do `fetch` (o mesmo `TypeError` que o Chrome lança)
 Um achado de UX veio daí e foi corrigido: o resultado da sincronização sumia da
 tela no mesmo instante em que a fila esvaziava, e o operador nunca ficava
 sabendo que o dinheiro tinha entrado.
+
+### C7 — backup lógico agendado e teste de restauração: dump diário, restore mensal num Postgres efêmero, e por que o repositório ser público mudou o desenho (11/09/2026)
+
+Fecha a Etapa 6 do plano "Mínimo pra vender" — tarefa única. Diferente de
+D3 a E6, C7 não mexe em nenhuma tela nem em nenhuma RPC: é a primeira
+tarefa puramente de infraestrutura operacional do projeto — dois workflows
+do GitHub Actions (`.github/workflows/backup-diario.yml` e
+`.github/workflows/restore-mensal.yml`) mais três scripts e dois SQLs de
+apoio em `scripts/backup/`. "Backup que nunca foi restaurado não é
+backup": o segundo workflow existe para provar, todo mês, que o primeiro
+produz algo que volta.
+
+#### O achado que mudou o desenho inteiro: o repositório é público
+
+A pesquisa prévia (ver o prompt da tarefa) já sabia que o projeto está no
+plano `free` da Supabase (sem backup automático, PITR pago a partir do
+Pro) e que branching tem custo recorrente confirmado
+(US$ 0,01344/hora). O que faltava — e que esta sessão conferiu direto no
+GitHub, sem precisar de nenhuma credencial — é que
+`RezidenteGamer/Facilite-ERP` é **público**, não privado.
+
+Isso descarta de cara a opção mais óbvia para "onde o dump fica guardado":
+um artefato do GitHub Actions (ou uma branch órfã do próprio repositório)
+em texto claro. Em repositório público, artefatos de workflow são
+baixáveis por qualquer pessoa que veja o run — guardar ali um dump com
+schema e dados de clientes/produtos/vendas seria publicar essa informação,
+não fazer backup dela. A saída não é trocar de destino (introduzir um
+serviço de armazenamento novo, que o projeto evita sem necessidade real —
+ver D13 recusando `pdf-lib`, E1 evitando `@types/*`) e sim **criptografar
+antes de guardar em qualquer lugar**. `gpg` já vem instalado nos runners do
+GitHub Actions (testado localmente, ver abaixo) — nenhuma dependência nova.
+
+Com isso resolvido, o destino escolhido é o artefato do próprio workflow
+(`actions/upload-artifact`, `retention-days: 90`, o máximo do plano
+gratuito) — não uma branch órfã do Git. Motivo: o Git guarda para sempre
+por padrão (um blob binário novo todo dia, sem poda, é crescimento do
+repositório sem limite), enquanto o artefato expira sozinho. Para este
+projeto, ainda sem cliente real, uma janela de 90 dias é aceitável — fica
+documentado como limitação a revisitar antes do primeiro cliente pagante:
+se algum dia for preciso restaurar de mais de 90 dias atrás, o backup já
+não vai mais estar lá.
+
+#### Por que o dump usa o Session Pooler, não a conexão direta
+
+A documentação da própria Supabase recomenda a conexão direta
+(`db.<ref>.supabase.co:5432`) para `pg_dump`/`supabase db dump` — mas a
+mesma documentação lista **GitHub Actions, nomeado explicitamente**, como
+um dos ambientes que só enxergam IPv4, e a conexão direta do plano free só
+existe em IPv6 (o add-on de IPv4 é pago, a partir do Pro). Sem isso, o
+workflow falharia com "connection refused" todo dia, num jeito que só
+apareceria na primeira execução real. `SUPABASE_DB_URL` deve ser a string
+do **Session Pooler** (`postgres://postgres.<ref>:[SENHA]@aws-<região>.pooler.supabase.com:5432/postgres`
+— modo *session*, porta 5432, não *transaction*/6543), que é IPv4 em todo
+plano e é o modo que a própria Supabase recomenda como alternativa à
+conexão direta para clientes persistentes em rede IPv4-only.
+
+#### Por que o dump é só o schema `public`
+
+`supabase db dump` (mesmo com `--schema public`) já resolve o CLI a rodar
+`pg_dump` **dentro de um container Docker com a imagem Postgres da própria
+Supabase** (confirmado na documentação e observado ao rodar o CLI
+localmente) — então ele nunca precisa dessas extensões instaladas na
+máquina que dispara o dump. O problema é o **restore**: a extensão pede um
+Postgres genérico (`postgres:17` puro, sem a imagem da Supabase), e ali
+`pg_cron`, `pg_net` e `supabase_vault` simplesmente não existem, e as
+funções `auth.uid()`/`auth.role()` (usadas nas RLS deste projeto) também
+não.
+
+Testado direto (dois containers Docker locais, um schema de exemplo com
+tabela + RLS com `auth.uid()`/`auth.role()` + gatilho chamando
+`net.http_post`, nunca o projeto real):
+
+* `pg_cron` e `pg_net` **não estão disponíveis** na imagem `postgres:17`
+  genérica ("Could not open extension control file"). Confirmado tentando
+  instalar — falha.
+* Um `CREATE FUNCTION` cujo corpo chama `net.http_post(...)` **é aceito
+  mesmo sem o schema `net` existir** — PL/pgSQL não valida chamada a
+  função externa na criação, só na execução. Então isso não impede o
+  schema de subir.
+* Rodar a carga de `data.sql` com `SET session_replication_role =
+  replica` antes (a própria receita oficial da Supabase para restore em
+  self-hosted, e o `supabase db dump --data-only` **já inclui essa linha
+  sozinho** no início do arquivo — confirmado direto no dump real)
+  desliga os gatilhos normais durante a carga, então o gatilho que chama
+  `net.http_post` nunca dispara de verdade durante o restore de teste —
+  o que também é desejável por si: um restore de teste automatizado
+  **não deveria** disparar webhooks reais contra a fila fiscal.
+* `extensions.unaccent(...)` é usada (só dentro de corpos de função de
+  busca, não em `default`/índice — conferido com grep nas migrations) e,
+  pela mesma razão de PL/pgSQL não validar chamada externa na criação,
+  também não impede o schema de subir.
+
+A decisão: o dump diário usa `--schema public` nas três chamadas de
+`supabase db dump` (roles/schema/dados). Isso **exclui** `auth`,
+`storage`, `extensions`, `realtime`, `vault` — a infraestrutura que a
+própria Supabase gerencia — do backup. Três razões, não só uma:
+
+1. É o que este time realmente é dono e responsável por não perder:
+   contatos, produtos, vendas, financeiro, tributação, etc. — tudo que foi
+   construído aqui.
+2. Torna o restore de teste mensal **determinístico e verificável** contra
+   um `postgres:17` genérico (`services: postgres` do próprio Actions),
+   sem precisar reimplementar uma fatia da imagem Postgres proprietária da
+   Supabase só para o teste passar.
+3. Defesa em profundidade: mesmo criptografado, um pacote menor que nunca
+   contém `auth.users` (hashes de senha, e-mails de login) é preferível.
+
+**Lacuna documentada, não resolvida**: este backup não cobre usuários do
+Supabase Auth, Storage nem configuração do Realtime. Hoje isso é aceitável
+— o projeto ainda não tem cliente real, e a própria conta de testes está
+documentada à mão neste arquivo. Antes do primeiro cliente pagante, revisar
+se `auth.users` precisa entrar num backup separado (ou se o backup deixa de
+ser `--schema public` e passa a cobrir a instância inteira, aceitando a
+complexidade de restore que isso traz).
+
+#### O que o restore de teste realmente confere, e por que roles/schema toleram erro
+
+`scripts/backup/restore-and-verify.sh` roda em quatro passos, dentro do
+Postgres efêmero do próprio job (nasce e morre ali, nunca fica de pé
+cobrando nada — ver o raciocínio sobre Supabase Branching abaixo):
+
+1. **Prelude** (`scripts/backup/prelude.sql`, estrito — falha o job se der
+   erro): cria o schema `extensions` + a extensão `unaccent`, e stuba
+   `auth.uid()`/`auth.role()` devolvendo `NULL` — exatamente e só o que o
+   grep nas migrations mostrou ser necessário, nada especulativo.
+2. **Roles** (`roles.sql`, **tolerante** a erro): testado com um dump
+   improvisado (`pg_dumpall`, não o CLI real) contra o role `postgres`
+   pré-existente do Postgres efêmero, e deu conflito de "já existe".
+   Refeito com o `supabase db dump --role-only` de verdade contra uma
+   fonte de teste: o CLI real **já descarta roles reservados** — o
+   `roles.sql` gerado veio praticamente vazio, sem esse conflito. Mesmo
+   assim, a tolerância a erro ficou como salvaguarda: um projeto real pode
+   ter roles customizados que colidam por outro motivo, e isso não deveria
+   derrubar o restore inteiro sozinho.
+3. **Schema** (`schema.sql`): testado com o CLI real e subiu **sem nenhum
+   erro** (`CREATE SCHEMA IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS` —
+   o CLI já gera DDL idempotente, confirmando a nota da documentação da
+   Supabase sobre isso). Mesmo assim o passo não usa
+   `--single-transaction`/`ON_ERROR_STOP` global — proposital: se algum
+   objeto pré-existente no Postgres efêmero colidir, essa linha falha e o
+   restante do arquivo continua, e quem decide se o restore passou de
+   verdade é só o próximo passo.
+4. **Dados** (`data.sql`, com `session_replication_role = replica`) e
+   **conferência do manifesto**: `scripts/backup/manifest.sql` conta as
+   linhas de cada tabela do schema `public` (via `query_to_xml`, sem
+   precisar de um bloco PL/pgSQL) — uma vez no dump (contagem de origem,
+   guardada dentro do próprio pacote) e de novo depois do restore. As duas
+   saídas são comparadas com `jq -S` (ordem de chave não importa) — se não
+   baterem, ou se o schema/dados não subiram de verdade, a comparação
+   falha e **isso** é o que derruba o job. Essa é a garantia real de "o
+   backup restaura íntegro" — não o passo 3 rodar sem imprimir erro.
+
+Falha do job = e-mail automático do GitHub Actions para quem observa o
+workflow (mecanismo padrão do próprio Actions, nada construído à parte).
+
+#### O que foi testado de verdade, e como, sem tocar o projeto real
+
+Toda a cadeia — dump com o `supabase db dump` real, dois containers
+Postgres 17 (Docker local), pacote `.tar.gz` criptografado com `gpg`
+simétrico (round-trip decifrar/verificar testado), prelude, restore
+tolerante, `session_replication_role=replica`, e a comparação do
+manifesto batendo (`{"contacts":3,"fiscal_queue":2}` nos dois lados) —
+rodou de ponta a ponta contra um schema de exemplo fake, nunca contra
+`ifmdedruuetbbqjbnrkd`. O `--network-id` do `supabase db dump` permitiu
+apontar o CLI real para o container de teste (`--db-url
+postgresql://postgres:postgres@<container>:5432/postgres`) sem precisar
+de nenhuma credencial real. Os dois containers e a rede Docker usados no
+teste foram removidos ao final da sessão.
+
+Os workflows em si (o YAML) **não foram disparados** — nem manualmente,
+nem esperando o cron — porque isso exigiria os dois secrets já
+cadastrados, o que é passo fora deste diff. Sintaxe validada com um
+parser YAML de verdade (`js-yaml`), os três scripts com `bash -n`.
+
+O que ainda falta para isto rodar de verdade pela primeira vez:
+
+1. **Cadastrar os dois secrets** no GitHub (Settings → Secrets and
+   variables → Actions), nenhum dos dois gerado ou visto por esta sessão:
+   * `SUPABASE_DB_URL` — a connection string do **Session Pooler** (não a
+     direta — ver acima), copiada do painel da Supabase
+     (`Connect → Session pooler`), com a senha do banco.
+   * `BACKUP_ENCRYPTION_PASSPHRASE` — uma senha forte gerada à parte (ex.:
+     `openssl rand -base64 32`), só para isto — perdê-la significa que os
+     backups criptografados já guardados ficam irrecuperáveis.
+2. Depois de cadastrados, disparar `backup-diario.yml` manualmente
+   (`workflow_dispatch`) uma vez para conferir contra o banco real, e só
+   então confiar no agendamento (diário 06:00 UTC / mensal dia 1º 07:00
+   UTC — fora do horário comercial brasileiro nos dois casos).
+3. `restore-mensal.yml` só encontra um artefato depois que o primeiro
+   `backup-diario.yml` tiver rodado com sucesso pelo menos uma vez.
+
+#### Privilégio da credencial: por que não um role só de `SELECT`
+
+Pesquisado antes de escrever qualquer coisa, sem criar role nenhum no
+projeto real. A documentação de roles da Supabase é direta: `postgres` "é
+o role padrão... tem privilégios de admin", e credenciais podem ganhar
+`bypassrls` explicitamente para tarefas de sistema — o próprio
+mecanismo que faz um dump completo ser possível. Um role customizado só
+com `SELECT` nas tabelas de `public`, sem `bypassrls` e sem ser dono das
+tabelas, ficaria sujeito às policies de RLS deste projeto (que são
+pervasivas — `has_permission`, `auth.uid()` em quase todo lugar) durante
+o próprio `pg_dump`: sem uma sessão autenticada por trás, a maioria das
+policies devolveria zero linhas, e o dump sairia **silenciosamente
+incompleto** — o pior tipo de falha de backup, porque nada avisa. Por
+isso `SUPABASE_DB_URL` usa o role `postgres` (via Session Pooler, não a
+credencial mais ampla "por comodidade" — é a única que garante o dump
+completo com este desenho de RLS).
+
+#### Por que não Supabase Branching
+
+Confirmado disponível nesta organização (`get_cost({type: "branch"})` →
+US$ 0,01344/hora) e seria, em tese, mais fiel ao ambiente real da Supabase
+para o restore de teste (extensões proprietárias inclusas de fábrica). Não
+usado, por dois motivos que já eram claros na pesquisa prévia e a
+implementação confirmou: (1) um branch persiste e cobra por hora enquanto
+existir — criar e derrubar um todo mês é uma decisão de custo recorrente,
+por menor que seja, que esta sessão não toma sozinha; (2) não era
+necessário — o container `services: postgres` genérico, com o prelude de
+três linhas acima, provou restaurar e conferir o schema `public` deste
+projeto sem nenhuma extensão proprietária de verdade. Se o escopo do
+backup um dia crescer para além de `public` (ver a lacuna documentada
+acima), essa conta muda e Branching volta a valer a pena revisitar — com
+o usuário, não dentro de um diff.

@@ -1,0 +1,49 @@
+name: C7 — backup diário do banco
+
+# Dump lógico diário do schema public (roles + schema + dados), criptografado
+# e publicado como artefato do próprio workflow. Ver AGENTS.md, seção C7,
+# para o desenho completo (por que Session Pooler e não conexão direta, por
+# que só o schema public, por que criptografar, onde o dump fica guardado).
+#
+# workflow_dispatch existe para permitir rodar manualmente depois que o
+# secret SUPABASE_DB_URL estiver cadastrado — não foi disparado nenhuma vez
+# durante o desenvolvimento deste workflow.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC = 03:00 America/Sao_Paulo, fora do horário comercial
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar cliente Postgres (psql, para o manifesto)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Gerar dump lógico + manifesto de contagem de linhas
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: bash scripts/backup/dump-and-package.sh
+
+      - name: Criptografar o pacote (repositório é público)
+        env:
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+        run: bash scripts/backup/encrypt-package.sh
+
+      - name: Publicar como artefato do workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup
+          path: backup-output/db-backup-*.tar.gz.gpg
+          retention-days: 90
+          if-no-files-found: error
