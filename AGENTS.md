@@ -9559,3 +9559,368 @@ saber que o caminho já foi percorrido:
 
 4. **`posRootRef` morto** — sobra de uma versão em que o ouvinte de clique era
    registrado no nó em vez de via `onClick`. Removido.
+
+### E6 — PDV offline-first: a fila de vendas, o que o PDV passa a supor e o que ele deixa de fingir (10/09/2026)
+
+Fecha a Etapa 5. Com E1/E2 (impressora) e E4 (leitor) o balcão já funcionava
+sem rede do meio para fora — a impressora é USB, o leitor é teclado. O que
+faltava era o meio: **sem rede o PDV não vendia**, nem com a loja aberta e o
+caixa aberto.
+
+Esta foi a tarefa de maior risco arquitetural do plano até aqui, e não por
+causa de IndexedDB. É que ela mexe com dinheiro em trânsito: entre o clique em
+"Confirmar" e a gravação de verdade no banco passa a existir um intervalo em
+que o dinheiro já entrou na gaveta, a mercadoria já saiu da loja e o sistema
+**ainda não sabe de nada disso**. Quase tudo abaixo é sobre esse intervalo.
+
+#### O que estava quebrado, literalmente
+
+`useOpenCashSession` fazia isto:
+
+```ts
+try { setSession(await getOpenCashSession(branchId)); }
+catch { setSession(null); }
+```
+
+`session = null` é **exatamente** o estado "não há caixa aberto", que bloqueia
+"Confirmar Venda". Ou seja: cair a internet produzia a mesma resposta que
+fechar o caixa. O PDV parava de vender numa loja onde o caixa estava aberto o
+dia inteiro, e a tela dizia ao operador para abrir uma sessão que já estava
+aberta.
+
+E `useProductsData` não tem cache nenhum: sem rede, `products` fica `[]` e não
+há o que vender nem que a sessão estivesse resolvida.
+
+#### A pergunta que decide tudo: foi a rede ou foi o banco?
+
+É a fronteira central de E6. Uma venda recusada por **negócio** (estoque
+acabou, sessão fechada, sem permissão, desconto acima do teto) precisa de erro
+na cara do operador **agora** — enfileirar daria a mesma recusa depois, só que
+com o cliente já na rua. Uma venda que falhou por **rede** precisa ser
+guardada.
+
+Pesquisa feita no código do `@supabase/postgrest-js` 2.112.2 que está em
+`node_modules`, e confirmada rodando uma chamada de verdade contra um host que
+não resolve:
+
+```
+status: 0 ""
+error keys: [ 'message', 'details', 'hint', 'code' ]
+error.message: "TypeError: fetch failed"
+error.code: ""
+instanceof Error: false      // é objeto simples, não Error
+```
+
+Duas armadilhas, as duas evitadas de propósito em `postgrestFailure.ts`:
+
+* **A mensagem é do ambiente, não da biblioteca.** `"fetch failed"` em Node,
+  `"Failed to fetch"` no Chrome, `"NetworkError when attempting to fetch
+  resource."` no Firefox, `"Load failed"` no Safari. Casar isso por expressão
+  regular é escrever um teste que passa na máquina de quem escreveu e falha no
+  balcão do cliente — e errar aqui custa dinheiro nos dois sentidos.
+* **O erro não é `Error`.** `err instanceof Error` é `false`; o reflexo de
+  checar `TypeError` também não funciona.
+
+O que a biblioteca garante, e é nisso que a classificação se apoia:
+`PostgrestBuilder.then()` só produz `status: 0` num lugar — o `catch` em volta
+do `fetch`, quando a requisição nem virou resposta HTTP. Toda resposta que o
+PostgREST devolveu, inclusive recusa, sai com o status HTTP de verdade (400
+com SQLSTATE `P0001` para o `RAISE EXCEPTION` de `create_pos_sale`). Então:
+
+* `status === 0` → **rede**;
+* 408/425/429/5xx/52x → **rede** (infraestrutura passageira entre o PDV e o
+  Postgres: gateway, proxy, limite de taxa. Um 502 no horário de pico não pode
+  fazer a venda sumir);
+* 401/403 → **negócio**, de propósito: sessão expirada e falta de permissão são
+  recusas que o operador precisa ver agora, e enfileirar não conserta nenhuma
+  das duas;
+* o resto → **negócio**.
+
+Como `if (error) throw error` jogava o `status` fora, `createPosSale` e
+`getOpenCashSession` passaram a lançar `SupabaseRequestError`, que carrega
+`kind`. A `message` continua sendo palavra por palavra a do banco — todo
+tratamento que já existia (que casa a mensagem em português contra uma lista)
+segue funcionando sem saber que essa classe existe.
+
+Também vale registrar: `RETRYABLE_METHODS` do postgrest-js é `["GET", "HEAD",
+"OPTIONS"]`. **POST não é repetido pela biblioteca**; quem decide tentar de
+novo é a fila do PDV.
+
+#### As decisões de produto, com o raciocínio
+
+**1. O que "offline" cobre.** A tela do PDV **já carregada** continua
+funcional quando a rede cai durante o uso: buscar produto, montar carrinho,
+confirmar venda, imprimir. Não cobre abrir `/ponto-de-venda` do zero sem rede
+nenhuma — ver a recusa do service worker abaixo. Não cobre abrir/fechar sessão
+de caixa sem rede: continua exigindo conexão, e E6 assume que a sessão foi
+aberta com rede antes do problema começar.
+
+**2. Catálogo local (`usePosCatalog`).** Toda carga bem-sucedida é gravada no
+IndexedDB; sem rede, a lista vem de lá, com aviso na tela dizendo de que hora
+ela é. O cache mora **do lado do PDV**, envelopando `useProductsData` em vez de
+mudá-lo, porque a regra é oposta nas duas telas: em Produtos, editar a partir
+de um cache de ontem é gravar por cima da mudança de outra pessoa; no PDV,
+vender com preço de uma hora atrás é muito melhor do que não vender.
+
+O que envelhece pior é o **estoque**, e é por isso que o aviso existe. O número
+no cartão é o de quando a rede ainda existia. Quem decide de verdade é o
+`select ... for update` de `create_sale`, na hora de sincronizar.
+
+**3. Sessão de caixa: vender em cima do último estado conhecido.** Sem rede não
+dá para confirmar que a sessão continua aberta — só dá para lembrar qual era o
+último estado que o servidor confirmou. O PDV **deixa vender** com base nele,
+com aviso visível: *"Sem conexão: o caixa 0012 estava aberto às 22:23. Se ele
+tiver sido fechado depois disso, as vendas feitas agora vão ser recusadas ao
+sincronizar."* — "estava aberto", não "está aberto", porque é isso que se sabe.
+
+Bloquear por precaução foi descartado: bloquear sem rede é o comportamento de
+hoje, é o problema que E6 existe para resolver, e deixaria a tarefa inteira sem
+efeito prático. O preço é a recusa tardia — e ela **não some em silêncio**, vira
+venda `falhou` na fila. Risco aceito, detalhado adiante.
+
+**4. A fila (`offlineQueue.ts`, puro + `offlineStore.ts`, borda).** Mesma
+divisão de E1 e E4: o que decide o destino do dinheiro é testável; o que fala
+com o navegador não decide nada. A fila guarda o **payload idêntico** ao que
+`createPosSale` receberia — nada é recalculado na hora de sincronizar.
+
+Três estados: `pendente` (esperando rede), `sincronizando` (RPC disparada),
+`falhou` (precisa de gente — **nunca sai daí sozinho**). Não existe descarte
+automático em lugar nenhum: uma venda paga que não fica gravada é dinheiro que
+desaparece da contabilidade.
+
+**5. A ordem de tentar é a ordem em que o cliente pagou.** Duas vendas offline
+do mesmo produto com uma unidade em estoque: só uma passa, e a que passa tem que
+ser a primeira que foi paga. A numeração de `sales.code`, sequencial por filial,
+também nasce na ordem de gravação. O laço **para na primeira falha de rede** —
+insistir na terceira depois de a segunda falhar inverteria a ordem se por acaso
+passasse. Recusa de negócio não diz nada sobre a rede, então o laço segue.
+
+**6. Automático no evento `online` + botão manual, e nada de varredura
+periódica.** `navigator.onLine`/`online` responde "estou ligado a uma rede", não
+"a internet funciona" — roteador sem link, portal cativo, DNS caído: nos três o
+navegador se diz online. Por isso ele nunca decide nada aqui: só **mexe no
+indicador e dispara uma tentativa**. Quem classifica é sempre o erro da
+chamada. O botão "Sincronizar agora" é a porta que sempre funciona.
+
+Sem backoff exponencial, ao contrário da fila do lado do servidor (A7). A
+diferença é quem está olhando: A7 roda de madrugada sem ninguém na frente da
+tela; aqui há um operador no caixa o tempo todo, com o número de pendentes em
+cima do carrinho e um botão do lado.
+
+**7. Sem rede E sem onde guardar, o PDV diz "não deu".** É o único caminho em
+que a venda offline falha de verdade. `writePendingSale` só devolve `true`
+quando a transação do IndexedDB **commitou** — prometer que guardou uma venda
+que vive só na memória da aba seria perder dinheiro no primeiro F5. A tela
+avisa: "Anote a venda no papel e lance depois."
+
+**8. O cupom sai, com o número da fila.** A impressora é USB (E1) e não depende
+de rede. O código impresso é `PEND-XXXXXXXX`, derivado do id da fila e igual ao
+que a tela mostra na lista de pendentes — não um `sales.code` inventado, que
+seria imprimir um número que não vai existir no sistema. `ReceiptData` ganhou um
+`notice` opcional, e a venda offline usa: **"VENDA PENDENTE DE
+SINCRONIZACAO"**, centralizado e em negrito abaixo do número. Ausente/nulo, o
+cupom sai byte a byte igual ao de antes de E6.
+
+**9. "Guardada" não é nem "confirmada" nem "erro".** `queuedSale` é estado
+próprio, cor âmbar, nem o verde de `confirmedSale` (a venda não está no
+sistema; dizer "confirmada" seria mentira) nem o vermelho de `submitError` (que
+mandaria o operador refazer uma venda que já está guardada — e aí sim haveria
+venda duplicada). Mesma lógica do `fiscalWarning` de A1.
+
+**10. A NFC-e só depois de sincronizar.** Antes da venda existir no banco não há
+o que a Edge Function `fiscal-emit` leia. Mesma regra assíncrona de sempre:
+nota que não sai não desfaz venda.
+
+**11. Uma sincronização interrompida no meio vira `falhou`, não `pendente`.**
+`sincronizando` é gravado no IndexedDB **antes** da chamada, e não só mantido em
+memória. Se a aba morrer no meio (queda de energia no caixa é o caso realista),
+na volta encontra-se a venda parada nesse estado — e essa é a única pista de que
+a requisição chegou a sair daqui. Reenviar arriscaria gravar a venda duas vezes.
+Então ela é parada e mostrada: *"A sincronização foi interrompida no meio. Esta
+venda pode ter sido gravada — confira em Vendas antes de refazer."*
+
+Isso é deliberadamente mais conservador do que o tratamento de uma falha de
+rede comum, e a razão é a diferença de informação: numa falha de rede comum o
+caso dominante é a requisição nem ter saído da máquina (não há conectividade
+nenhuma), então retentar é certo; numa interrupção no meio da sincronização a
+máquina estava online o bastante para tentar, e a chance de o servidor ter
+gravado é muito maior.
+
+#### Duas correções fora do PDV que a tarefa não previa, e sem as quais ela não valeria nada
+
+Encontradas **testando no navegador**, não lendo código. Com a rede caída,
+bastava a aba perder e recuperar o foco para o PDV inteiro — carrinho montado,
+venda em andamento — desaparecer. O supabase-js reemite a sessão quando a aba
+volta a ficar visível; isso troca o objeto `session`, e dois efeitos penduram
+nele leituras que, ao falhar, **apagavam estado bom**:
+
+* `ModuleCatalogContext`: o `catch` fazia `setModules([])` + `status: "error"`
+  sem olhar se já havia catálogo, e `App.tsx` troca a aplicação inteira pela
+  tela "Não foi possível carregar o catálogo de módulos" nesse estado.
+* `AuthContext.loadProfile`: um `profiles` que falha fazia `setProfile(null)` +
+  `setPermissions({})`; e mesmo com o perfil OK, `branchLinks ?? []` e
+  `rolePerms ?? []` transformavam erro de leitura em "este usuário não tem
+  filial nenhuma" e "este papel não pode nada". Resultado na tela: *"Você não
+  tem permissão para acessar este módulo"*, no meio de uma venda.
+
+Os dois receberam a mesma regra, que é a mesma do catálogo de produtos desta
+tarefa: **uma releitura que falha não apaga o que já estava valendo**. Só a
+primeira carga tem direito de ir para o estado de erro. O preço é que uma recusa
+de verdade (perfil desativado, módulo excluído) só aparece na próxima leitura
+que der certo — muito menor que o de derrubar o caixa.
+
+#### O que ficou deliberadamente de fora
+
+* **App shell offline (service worker).** Abrir `/ponto-de-venda` do zero sem
+  rede exigiria um service worker cacheando o bundle. Sem `vite-plugin-pwa`
+  (dependência nova), seria um SW escrito à mão com cache em tempo de execução —
+  e ele traz uma classe inteira de problemas cara num sistema financeiro: bundle
+  velho servido a um IndexedDB novo, ciclo de atualização, usuário preso numa
+  versão antiga do código que fala com a fila. E nada disso é testável em CI.
+  Recusado com razão; o plano já previa essa saída.
+* **Contingência fiscal de verdade** (`tpEmis` de contingência, prazo de
+  transmissão SEFAZ). `tpEmis` continua sempre `1` — decisão de A1, não
+  revisitada. E6 é o **pré-requisito** dela (a venda passa a sobreviver sem
+  rede), não ela.
+* **Abrir/fechar sessão de caixa offline.**
+* **Qualquer coisa no Supabase.** Sem migration, sem Edge Function. A RPC
+  `create_pos_sale` não mudou uma linha: nenhuma venda deste sistema é gravada
+  sem passar por ela.
+
+#### Riscos aceitos, explícitos e não resolvidos
+
+**1. Dois terminais vendendo a mesma última unidade.** Dois PDVs offline (ou um
+offline e uma venda online) podem os dois "vender" a última unidade sem que
+nenhum saiba do outro até sincronizar. Só um consegue gravar — o `for update` do
+servidor decide — e o outro vira `falhou` na fila, com a mercadoria já entregue.
+Resolver de verdade exigiria reserva distribuída, que é infraestrutura de outra
+ordem de grandeza. Aceito.
+
+**2. A sessão de caixa fechada durante o offline.** Ver a decisão 3. Se alguém
+fechar o caixa por outro caminho enquanto este PDV está sem rede, toda venda
+feita depois disso é recusada ao sincronizar, com a mensagem "Abra uma sessão de
+caixa antes de vender." — para vendas já pagas. **Cenário verificado no
+navegador de ponta a ponta**, e o resultado é o desenhado: a venda fica `falhou`,
+vermelha, com o motivo e um botão de dispensar depois de resolvida na mão.
+
+**3. Venda duplicada quando a resposta se perde no caminho.** É o risco mais
+incômodo, porque é invisível. Se a rede morrer **depois** de o servidor gravar a
+venda e **antes** de a resposta chegar, o PDV vê `Failed to fetch`, enfileira, e
+ao sincronizar grava a venda **de novo** — estoque baixado duas vezes, dinheiro
+lançado que não entrou.
+
+As saídas foram pesquisadas e nenhuma cabe aqui:
+
+* **Chave de idempotência** na RPC resolveria de verdade — e exige migration,
+  que está fora de escopo por regra da tarefa.
+* **Procurar a venda no servidor antes de reenviar** (mesma filial, mesmo total,
+  mesma janela de tempo) parece barato e é **pior que nada**: a policy `read
+  sales` exige `realizar-venda:view`, que um operador só de PDV não tem. Para
+  ele a busca voltaria vazia sempre e a conclusão seria "não gravou" — um guarda
+  que não guarda, criando confiança falsa exatamente em quem mais depende dele.
+  Além disso, duas vendas de balcão genuinamente idênticas no mesmo minuto são
+  comuns, e não há como distingui-las.
+
+O que foi feito em vez disso: a **interrupção no meio da sincronização** — o
+caso em que a requisição comprovadamente saiu da máquina — é parada para
+conferência manual em vez de reenviada (decisão 11). O caso da resposta perdida
+numa falha de rede comum continua sendo reenviado, e **pode duplicar**. Aceito,
+consciente, e é a primeira coisa que uma chave de idempotência no
+`create_pos_sale` resolveria.
+
+**4. `navigator.onLine` mente.** Tratado: ele nunca decide, só sugere quando
+tentar. Ver decisão 6.
+
+#### A corrida de leituras sobrepostas da sessão de caixa (achado da revisão)
+
+`useOpenCashSession.reload` é `async`, atravessa dois `await` e nunca teve
+cancelamento — nem antes de E6. Duas leituras podiam estar em voo ao mesmo
+tempo (trocar de filial; ou confirmar uma venda, que dispara `reloadSession`,
+enquanto outra leitura ainda não voltou), e **quem escrevia o estado da tela
+era quem respondesse por último, não quem tivesse sido pedido por último**. O
+PDV podia acabar mostrando a sessão da filial anterior com `branchId` já sendo
+a nova — e `canConfirm` liberando venda em cima disso.
+
+Era pré-existente em forma, mas E6 elevou o preço: o mesmo valor agora
+alimenta o aviso de sessão suposta, a decisão de vender offline e o snapshot
+gravado no IndexedDB.
+
+A correção é uma "senha da vez": um contador em `useRef`, e só a leitura mais
+recente escreve. Vale para os três lados — o estado da sessão, o `loading` (uma
+leitura atrasada não pode apagar o "carregando" de outra mais nova ainda em
+voo) e o snapshot.
+
+O snapshot ficar de fora quando a leitura foi superada é deliberado. Numa troca
+de filial, o que se perde é só não refrescar o snapshot da filial abandonada —
+ele volta na próxima vez que ela for aberta. Gravar assim mesmo teria um caso
+ruim de verdade: duas leituras da **mesma** filial em voo, com a mais velha
+chegando por último e gravando "caixa aberto" por cima do "caixa fechado" que a
+mais nova já tinha visto. O PDV passaria a vender offline contra uma sessão que
+ele sabia estar fechada.
+
+A regra saiu de dentro do hook e virou `lib/latestTurn.ts` (`claimTurn`) por um
+motivo prático: dentro de um hook ela não tem como ser testada — os testes
+deste projeto rodam em `node`, sem DOM, e não há biblioteca de teste de
+componente aqui. Fora dele, `tests/unit/latestTurn.test.ts` cobre a regra,
+inclusive o caso que dá nome a ela (a resposta atrasada **não** recupera o
+direito de escrever só porque virou a única ainda rodando).
+
+**O que não foi possível provar no navegador, e por quê**: a corrida em si.
+`sessionLoading` desabilita "Confirmar Venda" enquanto uma leitura está em voo,
+então não dá para disparar a segunda leitura por uma segunda venda; e a base de
+teste tem uma filial só, então não há troca de filial para fazer. O que foi
+verificado no navegador é a ausência de regressão — o PDV carrega, vende e
+grava o snapshot normalmente com a senha da vez no caminho.
+
+#### Duas corridas de carregamento fechadas na segunda revisão
+
+As duas nascem da mesma forma — leitura assíncrona do IndexedDB correndo com
+outra coisa — e as duas terminavam com dado bom sendo substituído por dado
+velho:
+
+* **A fila era substituída, não mesclada.** O efeito de abertura fazia
+  `apply(recuperada)` com o que leu do disco. Uma venda offline confirmada
+  **enquanto** essa leitura ainda estava em voo já tinha entrado em
+  `queueRef` — e era descartada por essa substituição. A venda continuava
+  gravada (voltaria na abertura seguinte), mas nesta sessão sumia da tela e
+  não era sincronizada: o operador ouviu "venda guardada" e não via pendência
+  nenhuma. Agora o que veio do disco é mesclado por id com o que já está na
+  memória, e a memória prevalece. A propriedade de que isso depende está
+  travada em `tests/unit/posOfflineQueue.test.ts`.
+* **O cache do catálogo podia regredir.** A leitura do cache corre com a busca
+  de rede. Se a rede respondesse primeiro (regravando o cache) e a leitura do
+  disco chegasse depois, ela sobrescrevia o catálogo fresco pela versão
+  anterior — e a próxima queda de rede serviria um catálogo mais velho, com
+  hora mais velha, do que o que já tinha sido carregado com sucesso na mesma
+  sessão. Agora fica o mais novo, comparando `savedAt` **dentro da mesma
+  filial** (entre filiais diferentes, quem chegou por último é quem vale).
+
+#### O que os testes provam, e o que não têm como provar
+
+`tests/unit/posOfflineQueue.test.ts` (38 casos) cobre as transições da fila
+(quem entra, quem sai, em que ordem se tenta, o que nunca sai sozinho) e a
+classificação rede × negócio, com os vetores **observados** — não supostos — de
+uma chamada real que falhou por rede.
+
+Não prova, e não há como: **IndexedDB de verdade** (o ambiente de teste é
+`node`, onde ele não existe — daí o núcleo puro e a borda que não decide nada) e
+**rede caindo de verdade**, que nenhum mock reproduz.
+
+Por isso a verificação no navegador, com o servidor de dev e a conta de testes,
+derrubando a rede no nível do `fetch` (o mesmo `TypeError` que o Chrome lança):
+
+* catálogo de 49 produtos servido do IndexedDB, com o aviso da hora;
+* aviso do caixa 0012 "estava aberto às 22:23";
+* venda offline guardada (`PEND-B9E84674`), cupom com o mesmo número, carrinho
+  limpo para a próxima;
+* rede de volta → sincronizou sozinha e virou a **venda 0039 de verdade**, com
+  `cash_session_id` preenchido, mais o aviso de NFC-e não emitida (falha de
+  cadastro pré-existente de IBS/CBS nesta filial de teste, não de E6);
+* caixa fechado por fora enquanto o PDV estava offline → ao sincronizar, recusa
+  real do banco, venda parada em `falhou`, vermelha, com o motivo na tela;
+* aba perdendo e recuperando o foco offline três vezes seguidas → o PDV
+  sobrevive (antes das duas correções acima, morria na primeira).
+
+Um achado de UX veio daí e foi corrigido: o resultado da sincronização sumia da
+tela no mesmo instante em que a fila esvaziava, e o operador nunca ficava
+sabendo que o dinheiro tinha entrado.

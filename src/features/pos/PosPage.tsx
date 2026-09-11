@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { SearchIcon } from "../../components/icons";
 import SearchCombobox from "../../components/form/SearchCombobox";
 import { useAuth } from "../auth/AuthContext";
-import { useProductsData } from "../products/useProductsData";
+import { usePosCatalog } from "./usePosCatalog";
 import { productMatchesSearch, type Product } from "../products/products";
 import type { Contact } from "../customers/contacts";
 import QuickContactFormModal from "../customers/QuickContactFormModal";
@@ -36,6 +36,8 @@ import {
   type ScanProgress,
 } from "./scanDetection";
 import { useOpenCashSession, usePosSale, type PosPaymentMethod } from "./usePosSale";
+import { useOfflineSales } from "./useOfflineSales";
+import { shortPendingCode, type PendingSale } from "./offlineQueue";
 import { usePrinter } from "./usePrinter";
 import "./PosPage.css";
 
@@ -55,6 +57,14 @@ const SPLIT_METHOD_LABEL: Record<PosPaymentMethod, string> = {
   credito: "Crédito",
   pix: "PIX",
 };
+
+/** "às 14:32" de um carimbo da fila offline — data completa quando não é de hoje. */
+function formatQueuedAt(ms: number): string {
+  const quando = new Date(ms);
+  const hora = quando.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const ehHoje = quando.toDateString() === new Date().toDateString();
+  return ehHoje ? hora : `${quando.toLocaleDateString("pt-BR")} ${hora}`;
+}
 
 function formatPausedTime(ms: number): string {
   return new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -95,12 +105,21 @@ export default function PosPage() {
      RLS vai recusar so produz erro. */
   const canCreateContact = hasPermission("clientes-fornecedores", "create");
 
-  const { products } = useProductsData(currentBranchId);
-  const { session: openSession, loading: sessionLoading, reload: reloadSession } = useOpenCashSession(currentBranchId);
+  const catalog = usePosCatalog(currentBranchId);
+  const products = catalog.products;
+  const {
+    session: openSession,
+    loading: sessionLoading,
+    assumed: sessionAssumed,
+    assumedAt: sessionAssumedAt,
+    reload: reloadSession,
+  } = useOpenCashSession(currentBranchId);
   const currentBranch = branches.find((branch) => branch.id === currentBranchId) ?? null;
   const storeInfo = currentBranch ? { name: currentBranch.name, document: currentBranch.cnpj } : null;
-  const sale = usePosSale(currentBranchId, sellerId, storeInfo);
+  const offline = useOfflineSales(products);
+  const sale = usePosSale(currentBranchId, sellerId, storeInfo, offline);
   const printer = usePrinter();
+  const [showQueueList, setShowQueueList] = useState(false);
 
   /*
    * Cupom imprime sozinho ao confirmar a venda — comportamento de PDV de
@@ -515,6 +534,19 @@ export default function PosPage() {
             </p>
           )}
 
+          {/* Catálogo servido do IndexedDB (E6). O aviso não é decoração: o
+              estoque mostrado nos cartões é o de quando a rede ainda existia,
+              e é com ele que o operador vai decidir se tem produto. */}
+          {catalog.servedFromCache && catalog.cachedAt !== null && (
+            <p className="pos__offline-notice" role="status">
+              Sem conexão — catálogo e estoque são os de {formatQueuedAt(catalog.cachedAt)} e podem estar
+              desatualizados.{" "}
+              <button type="button" className="pos__link-button" onClick={catalog.reload}>
+                Tentar atualizar
+              </button>
+            </p>
+          )}
+
           <div className="pos__filters">
             <select
               className="pos__sort-select"
@@ -708,6 +740,106 @@ export default function PosPage() {
             {printer.error && <span className="pos__printer-status-error">{printer.error}</span>}
           </div>
 
+          {/* ------------------------------------------------------------------
+              Fila offline (E6). Fica em cima do carrinho, e não escondida num
+              menu, de propósito: cada linha aqui é uma venda já paga que o
+              sistema ainda não tem. Esconder isso atrás de um clique é o
+              caminho mais curto para o dinheiro sumir da contabilidade.
+              ------------------------------------------------------------------ */}
+          {!offline.storageAvailable && (
+            <div className="pos__offline-bar pos__offline-bar--danger" role="alert">
+              <span>
+                Este navegador está bloqueando o armazenamento local — sem rede, as vendas <strong>não</strong> podem
+                ser guardadas. Saia da janela anônima ou libere os dados do site.
+              </span>
+            </div>
+          )}
+
+          {/* `syncNotice` entra na condição de propósito: sem ele, o resultado
+              da sincronização ("2 vendas sincronizadas.") sumia da tela no
+              mesmo instante em que a fila esvaziava, e o operador nunca ficava
+              sabendo que o dinheiro tinha entrado. Conferido no navegador. */}
+          {(offline.pending > 0 || offline.failed > 0 || !offline.online || offline.syncNotice !== null) && (
+            <div
+              className={`pos__offline-bar${offline.failed > 0 ? " pos__offline-bar--danger" : ""}`}
+              role={offline.failed > 0 ? "alert" : "status"}
+            >
+              <div className="pos__offline-bar-line">
+                <span>
+                  {!offline.online && <strong>Sem conexão. </strong>}
+                  {offline.pending > 0 && (
+                    <>
+                      {offline.pending === 1 ? "1 venda aguardando" : `${offline.pending} vendas aguardando`}{" "}
+                      sincronização.{" "}
+                    </>
+                  )}
+                  {offline.failed > 0 && (
+                    <strong>
+                      {offline.failed === 1
+                        ? "1 venda foi recusada e precisa de você."
+                        : `${offline.failed} vendas foram recusadas e precisam de você.`}
+                    </strong>
+                  )}
+                </span>
+                {offline.queue.length > 0 && (
+                  <span className="pos__offline-bar-actions">
+                    <button
+                      type="button"
+                      className="pos__link-button"
+                      onClick={() => setShowQueueList((current) => !current)}
+                    >
+                      {showQueueList ? "Ocultar" : "Ver vendas"}
+                    </button>
+                    <button
+                      type="button"
+                      className="pos__link-button"
+                      disabled={offline.syncing || offline.pending === 0}
+                      onClick={() => void offline.sync()}
+                    >
+                      {offline.syncing ? "Sincronizando…" : "Sincronizar agora"}
+                    </button>
+                  </span>
+                )}
+              </div>
+
+              {showQueueList && offline.queue.length > 0 && (
+                <ul className="pos__offline-list">
+                  {offline.queue.map((item: PendingSale) => (
+                    <li key={item.id} className={`pos__offline-item pos__offline-item--${item.status}`}>
+                      <div className="pos__offline-item-head">
+                        <span>{shortPendingCode(item.id)}</span>
+                        <span>{formatMoney(item.totalAmount)}</span>
+                        <span>{formatQueuedAt(item.queuedAt)}</span>
+                      </div>
+                      {item.status === "falhou" ? (
+                        <>
+                          <p className="pos__offline-item-reason">{item.failureReason}</p>
+                          <button type="button" className="pos__link-button" onClick={() => void offline.discard(item.id)}>
+                            Já resolvi esta venda — tirar da lista
+                          </button>
+                        </>
+                      ) : (
+                        <p className="pos__offline-item-reason">
+                          {item.status === "sincronizando" ? "Enviando…" : "Na fila"}
+                          {item.attempts > 0 && ` · ${item.attempts} tentativa(s)`}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {offline.syncNotice && (
+                <p className="pos__offline-bar-notice">
+                  {offline.syncNotice}{" "}
+                  <button type="button" className="pos__link-button" onClick={offline.clearSyncNotice}>
+                    ok
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="pos__cart-items">
             {sale.cart.length === 0 ? (
               <p className="pos__cart-empty">Adicione produtos à venda</p>
@@ -755,6 +887,19 @@ export default function PosPage() {
               <div className="pos__session-warning" role="alert">
                 <span>Abra uma sessão de caixa antes de vender.</span>
                 <Link to="/controle-caixa">Abrir no Controle de caixa →</Link>
+              </div>
+            )}
+
+            {/* Vendendo em cima do último estado conhecido da sessão (E6). A
+                frase diz "estava aberta", não "está aberta", porque é isso que
+                se sabe — ver `useOpenCashSession`. */}
+            {sessionAssumed && openSession && (
+              <div className="pos__session-warning pos__session-warning--assumed" role="status">
+                <span>
+                  Sem conexão: o caixa <strong>{openSession.code}</strong> estava aberto às{" "}
+                  {sessionAssumedAt !== null ? formatQueuedAt(sessionAssumedAt) : "—"}. Se ele tiver sido fechado
+                  depois disso, as vendas feitas agora vão ser recusadas ao sincronizar.
+                </span>
               </div>
             )}
 
@@ -948,6 +1093,12 @@ export default function PosPage() {
             {sale.submitError && <p className="pos__error">{sale.submitError}</p>}
             {sale.confirmedSale && (
               <p className="pos__success">Venda {sale.confirmedSale.code} confirmada.</p>
+            )}
+            {sale.queuedSale && (
+              <p className="pos__queued" role="status">
+                Sem conexão: venda {shortPendingCode(sale.queuedSale.id)} guardada neste computador e será enviada
+                quando a rede voltar. O cupom saiu com esse número.
+              </p>
             )}
             {sale.fiscalWarning && <p className="pos__fiscal-warning">{sale.fiscalWarning}</p>}
             {!canCreate && <p className="pos__error">Sem permissão para vender no ponto de venda.</p>}

@@ -79,6 +79,30 @@ describe("buildReceiptLines", () => {
   });
 });
 
+/**
+ * O recado da venda offline (E6, 10/09/2026): um cupom que sai de uma venda
+ * que ainda não está gravada no sistema precisa dizer isso no papel.
+ */
+describe("buildReceiptLines com `notice`", () => {
+  it("imprime o recado logo depois da linha da venda, antes dos itens", () => {
+    const lines = buildReceiptLines({
+      ...SAMPLE,
+      saleCode: "PEND-0F8A1B2C",
+      notice: "VENDA PENDENTE DE SINCRONIZACAO",
+    });
+    const saleIndex = lines.findIndex((line) => line.includes("Venda #PEND-0F8A1B2C"));
+    const noticeIndex = lines.findIndex((line) => line.includes("VENDA PENDENTE DE SINCRONIZACAO"));
+    const firstItemIndex = lines.findIndex((line) => line.includes("2x Pao de Queijo"));
+    expect(saleIndex).toBeGreaterThanOrEqual(0);
+    expect(noticeIndex).toBe(saleIndex + 1);
+    expect(firstItemIndex).toBeGreaterThan(noticeIndex);
+  });
+
+  it("ausente ou nulo, o cupom sai idêntico ao de antes de E6 — venda comum não muda uma linha", () => {
+    expect(buildReceiptLines({ ...SAMPLE, notice: null })).toEqual(buildReceiptLines(SAMPLE));
+  });
+});
+
 describe("buildReceiptBytes", () => {
   const bytes = buildReceiptBytes(SAMPLE);
 

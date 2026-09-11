@@ -1,5 +1,5 @@
 import type { Session, User } from "@supabase/supabase-js";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabaseClient";
 
 export type PermissionAction = "view" | "create" | "edit" | "delete";
@@ -100,6 +100,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
+  /**
+   * Id do usuário cujo perfil, filiais e permissões já foram carregados por
+   * inteiro nesta aba — `null` enquanto nada carregou.
+   *
+   * Existe por causa de um modo de falha encontrado testando o PDV offline
+   * (E6, 10/09/2026). `loadProfile` roda de novo a cada `onAuthStateChange`,
+   * e o supabase-js emite esse evento sozinho quando a aba volta a ficar
+   * visível. Com a rede caída, as três leituras aqui dentro falham — e o
+   * código apagava perfil, filiais e permissões, deixando o operador olhando
+   * "Você não tem permissão para acessar este módulo" no meio de uma venda,
+   * só por ter dado Alt+Tab. Ver a mesma correção em `ModuleCatalogContext`.
+   *
+   * É `ref` e não estado porque quem pergunta são os trechos depois de
+   * `await`, que precisam da resposta de agora.
+   */
+  const perfilCarregado = useRef<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -112,6 +128,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function loadProfile(userId: string) {
       if (!supabase) return;
 
+      /*
+       * Releitura de um perfil que já está valendo. Se qualquer das leituras
+       * abaixo falhar (rede caída é o caso), o certo é **manter o que já
+       * está na tela** em vez de trocá-lo por um estado vazio que nega acesso
+       * a tudo. Uma recusa de verdade do banco (perfil desativado, papel
+       * removido) só aparece na próxima leitura que der certo — é o preço, e
+       * é muito menor que o de derrubar o caixa.
+       */
+      const jaCarregado = perfilCarregado.current === userId;
+
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
         .select(
@@ -123,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
 
       if (profileError || !profileRow) {
+        if (jaCarregado) return;
         setError(profileError?.message ?? "Perfil não encontrado.");
         setProfile(null);
         setPermissions({});
@@ -152,12 +179,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isFaciliteDeveloper: profileRow.is_facilite_developer ?? false,
       });
 
-      const { data: branchLinks } = await supabase
+      const { data: branchLinks, error: branchesError } = await supabase
         .from("user_branches")
         .select("branches(id, code, name, cnpj)")
         .eq("user_id", userId);
 
       if (cancelled) return;
+      // `branchLinks ?? []` trataria erro de leitura como "este usuário não
+      // tem filial nenhuma" — e sem filial o PDV não vende.
+      if (branchesError && jaCarregado) return;
 
       const accessibleBranches: Branch[] = (branchLinks ?? [])
         .map((link) => link.branches as unknown as Branch | null)
@@ -170,16 +200,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentBranchId(validStoredBranch?.id ?? accessibleBranches[0]?.id ?? null);
 
       if (!profileRow.role_id) {
+        // Usuário sem papel: nada mais a ler, e o carregamento está completo
+        // — marcar aqui também é o que dá a ele a mesma proteção contra
+        // releitura falhada que todos os outros têm.
         setPermissions({});
+        perfilCarregado.current = userId;
         return;
       }
 
-      const { data: rolePerms } = await supabase
+      const { data: rolePerms, error: permsError } = await supabase
         .from("role_permissions")
         .select("module_id, can_view, can_create, can_edit, can_delete")
         .eq("role_id", profileRow.role_id);
 
       if (cancelled) return;
+      // Mesma armadilha do bloco de filiais: leitura que falhou não é "este
+      // papel não pode nada".
+      if (permsError && jaCarregado) return;
 
       const map: Record<string, ModulePermission> = {};
       for (const perm of rolePerms ?? []) {
@@ -191,6 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
       setPermissions(map);
+      perfilCarregado.current = userId;
     }
 
     supabase.auth.getSession().then(async ({ data }) => {

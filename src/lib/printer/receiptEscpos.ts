@@ -45,6 +45,12 @@ export type ReceiptData = {
   payments: ReceiptPayment[];
   /** Troco — só existe em venda em dinheiro; omitido quando `null`. */
   changeAmount: number | null;
+  /**
+   * Recado centralizado e em negrito abaixo do número da venda. `null`/ausente
+   * não imprime linha nenhuma — o cupom de uma venda comum é byte a byte o
+   * mesmo de antes de E6. Ver `shortPendingCode` em `offlineQueue.ts`.
+   */
+  notice?: string | null;
 };
 
 /**
@@ -75,8 +81,14 @@ function buildReceiptBlocks(data: ReceiptData, width: number): ReceiptBlock[] {
   blocks.push({
     justify: "left",
     bold: false,
-    lines: [padColumns(`Venda #${data.saleCode}`, formatIssuedAt(data.issuedAt), width), ruleLine("-", width)],
+    lines: [padColumns(`Venda #${data.saleCode}`, formatIssuedAt(data.issuedAt), width)],
   });
+
+  if (data.notice) {
+    blocks.push({ justify: "center", bold: true, lines: wrapText(data.notice, width).map((line) => centerText(line, width)) });
+  }
+
+  blocks.push({ justify: "left", bold: false, lines: [ruleLine("-", width)] });
 
   const itemLines: string[] = [];
   for (const item of data.items) {

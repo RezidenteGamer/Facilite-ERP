@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseAmount } from "../../lib/amount";
+import { claimTurn } from "../../lib/latestTurn";
 import type { Contact } from "../customers/contacts";
 import type { Product } from "../products/products";
 import { createPosSale } from "../../lib/repositories/posRepository";
+import { isNetworkFailure } from "../../lib/repositories/postgrestFailure";
+import type { CreateSaleInput } from "../../lib/repositories/salesRepository";
 import { getOpenCashSession } from "../../lib/repositories/cashControlRepository";
+import { readKnownCashSession, saveKnownCashSession } from "./offlineStore";
+import { shortPendingCode, type PendingSale } from "./offlineQueue";
+import { NO_OPEN_SESSION_ERROR, posSaleErrorMessage } from "./saleErrors";
 import type { CashSession } from "../cashcontrol/cashControl";
-import { formatMoney } from "./pos";
 import type { Sale, SalePaymentMethod } from "../sales/sales";
 import { emitFiscalDocumentForSale } from "./fiscalDocument";
 import { buildPosReceiptSnapshot, type PosReceiptSnapshot } from "./receipt";
@@ -47,82 +52,115 @@ export type PosPausedSale = {
   total: number;
 };
 
-const STOCK_ERROR = /^Estoque insuficiente para o produto ([0-9a-f-]{36})\.$/i;
-const PAYMENTS_MISMATCH_ERROR =
-  /^A soma dos pagamentos \(([\d.,-]+)\) não bate com o total da venda \(([\d.,-]+)\)\.$/;
-/** `assert_discount_within_cap` (tarefa C3, 29/08/2026) — teto de `roles.max_discount_percent`. */
-const DISCOUNT_CAP_ERROR = /^Desconto de [\d.,]+% acima do limite do seu perfil \([\d.,]+%\)\.$/;
-export const NO_OPEN_SESSION_ERROR = "Abra uma sessão de caixa antes de vender.";
-
 /**
- * `create_pos_sale`/`create_sale` já levantam mensagens em português prontas
- * — mesmo tratamento de `useSaleDraft.ts` (Realizar Venda): só traduzimos o
- * erro de estoque (a RPC só tem o id do produto) e blindamos contra erro cru
- * não previsto.
+ * Sessão de caixa aberta da filial — o PDV bloqueia "Confirmar Venda" sem ela
+ * (ver AGENTS.md).
+ *
+ * ## O que mudou em E6, e por quê
+ *
+ * Até 10/09/2026 este hook tinha um `catch { setSession(null) }`. Parece
+ * inofensivo e não é: `session = null` é **exatamente** o estado "não há
+ * sessão de caixa aberta", que bloqueia a venda. Ou seja, cair a rede
+ * produzia a mesma resposta que fechar o caixa — e o PDV parava de vender
+ * numa loja onde o caixa estava aberto o tempo todo. É a reclamação literal
+ * do plano desta tarefa.
+ *
+ * Agora a falha de rede é separada da recusa do banco
+ * (`postgrestFailure.ts`), e sem rede o PDV cai no **último estado que o
+ * servidor confirmou**, guardado no IndexedDB. `assumed: true` acompanha esse
+ * estado até a próxima confirmação de verdade.
+ *
+ * ## A aposta que `assumed` representa, dita em voz alta
+ *
+ * Último estado conhecido **não é** estado atual. Entre a última confirmação
+ * e agora, alguém pode ter fechado a sessão pelo Controle de Caixa em outra
+ * máquina. Vender em cima dessa suposição significa que, na hora de
+ * sincronizar, `create_pos_sale` pode responder "Abra uma sessão de caixa
+ * antes de vender." para uma venda que já foi paga e já saiu da loja.
+ *
+ * A alternativa — bloquear por precaução — foi descartada de propósito:
+ * bloquear sem rede é o comportamento de hoje, é o problema que E6 existe
+ * para resolver, e deixaria a tarefa inteira sem efeito prático. O preço da
+ * escolha é aquela recusa tardia, que **não some em silêncio**: vira uma
+ * venda `falhou` na fila, visível na tela até alguém resolver. Decisão e
+ * risco registrados em AGENTS.md.
  */
-function extractErrorMessage(err: unknown, cart: PosCartLine[]): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : err && typeof err === "object" && "message" in err && typeof err.message === "string"
-        ? err.message
-        : null;
-
-  if (!raw) return "Não foi possível confirmar a venda. Tente novamente — se o problema continuar, acione o suporte.";
-
-  if (raw === NO_OPEN_SESSION_ERROR) return raw;
-
-  const stockMatch = raw.match(STOCK_ERROR);
-  if (stockMatch) {
-    const product = cart.find((line) => line.product.id === stockMatch[1])?.product;
-    return product
-      ? `Estoque insuficiente para "${product.description}" — reduza a quantidade ou remova o item.`
-      : "Estoque insuficiente para um dos produtos da venda.";
-  }
-
-  const mismatchMatch = raw.match(PAYMENTS_MISMATCH_ERROR);
-  if (mismatchMatch) {
-    const paid = Number(mismatchMatch[1].replace(",", "."));
-    const total = Number(mismatchMatch[2].replace(",", "."));
-    return `A soma dos pagamentos (${formatMoney(paid)}) não bate com o total da venda (${formatMoney(total)}).`;
-  }
-
-  if (DISCOUNT_CAP_ERROR.test(raw)) return raw;
-
-  const KNOWN_MESSAGES = [
-    "Sem permissão para vender no ponto de venda.",
-    "Sem permissão para criar vendas.",
-    "Sem acesso a esta filial.",
-    "A venda precisa de ao menos um item.",
-    "A venda precisa de ao menos uma forma de pagamento.",
-    "Produto não encontrado.",
-    "Produto não pertence à filial da venda.",
-    "Quantidade inválida em um dos itens.",
-    "Desconto do item maior que o valor do item.",
-  ];
-  if (KNOWN_MESSAGES.includes(raw)) return raw;
-
-  return "Não foi possível confirmar a venda. Tente novamente — se o problema continuar, acione o suporte.";
-}
-
-/** Sessão de caixa aberta da filial — o PDV bloqueia "Confirmar Venda" sem ela (ver AGENTS.md). */
 export function useOpenCashSession(branchId: string | null) {
   const [session, setSession] = useState<CashSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [assumed, setAssumed] = useState(false);
+  /** Quando o estado suposto foi confirmado pela última vez — a tela mostra a hora. */
+  const [assumedAt, setAssumedAt] = useState<number | null>(null);
+
+  /**
+   * Senha da vez da leitura em curso. Só a mais recente tem direito de
+   * escrever o que descobriu.
+   *
+   * O `reload` abaixo é `async` e atravessa dois `await`, e nada cancelava
+   * uma leitura já disparada: trocar de filial (ou confirmar uma venda, que
+   * também chama `reload`) deixava **duas** em voo, e quem escrevia por
+   * último era quem respondesse por último — não quem tivesse sido pedido por
+   * último. O resultado possível era o PDV mostrando a sessão da filial
+   * anterior enquanto `branchId` já era a nova, e `canConfirm` liberando uma
+   * venda na filial B com base no caixa da filial A.
+   *
+   * O contador também resolve o outro lado: uma leitura atrasada não pode
+   * apagar o `loading` de uma leitura mais nova que ainda está em voo.
+   *
+   * A regra em si mora em `lib/latestTurn.ts`, onde dá para testá-la — aqui
+   * dentro de um hook, não daria (os testes deste projeto rodam em `node`,
+   * sem DOM).
+   */
+  const turno = useRef(0);
 
   const reload = useCallback(async () => {
+    /** Esta leitura ainda é a mais recente? Se não, tudo o que ela descobriu é passado. */
+    const aindaValho = claimTurn(turno);
+
     if (!branchId) {
       setSession(null);
+      setAssumed(false);
+      setAssumedAt(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      setSession(await getOpenCashSession(branchId));
-    } catch {
-      setSession(null);
+      const atual = await getOpenCashSession(branchId);
+      if (!aindaValho()) return;
+      setSession(atual);
+      setAssumed(false);
+      setAssumedAt(null);
+      /*
+       * O snapshot também fica de fora quando esta leitura foi superada, e é
+       * de propósito. Numa troca de filial o que se perde é só não refrescar
+       * o snapshot da filial abandonada — ele volta a ser gravado na próxima
+       * vez que ela for aberta. Já gravar assim mesmo teria um caso ruim de
+       * verdade: duas leituras da MESMA filial em voo (trocar de filial e
+       * voltar, ou confirmar uma venda no meio), com a mais velha chegando
+       * por último e gravando "caixa aberto" por cima do "caixa fechado" que
+       * a mais nova já tinha visto. O PDV passaria a vender offline contra
+       * uma sessão que ele sabia estar fechada.
+       */
+      await saveKnownCashSession(branchId, atual);
+    } catch (err) {
+      if (!aindaValho()) return;
+      if (!isNetworkFailure(err)) {
+        // Recusa de verdade (sem permissão, sem acesso à filial): tratar como
+        // "não há sessão" continua certo — não é falta de informação, é uma
+        // resposta.
+        setSession(null);
+        setAssumed(false);
+        setAssumedAt(null);
+        return;
+      }
+      const conhecida = await readKnownCashSession(branchId);
+      if (!aindaValho()) return;
+      setSession(conhecida?.session ?? null);
+      setAssumed(conhecida?.session != null);
+      setAssumedAt(conhecida?.session != null ? conhecida.savedAt : null);
     } finally {
-      setLoading(false);
+      if (aindaValho()) setLoading(false);
     }
   }, [branchId]);
 
@@ -130,7 +168,7 @@ export function useOpenCashSession(branchId: string | null) {
     reload();
   }, [reload]);
 
-  return { session, loading, reload };
+  return { session, loading, assumed, assumedAt, reload };
 }
 
 /** Nome/CNPJ da filial pra imprimir no cabeçalho do cupom (E1) — `null` quando ainda não carregou. */
@@ -141,7 +179,22 @@ export type PosStoreInfo = { name: string; document: string | null };
  * pagamento. `sellerId` chega de quem está logado — o PDV não tem seletor de
  * vendedor (ver AGENTS.md).
  */
-export function usePosSale(branchId: string | null, sellerId: string | null, storeInfo: PosStoreInfo | null) {
+/**
+ * A porta da fila offline, vista de dentro de `usePosSale`. Quem implementa é
+ * `useOfflineSales.ts`; aqui só interessa "consegue guardar esta venda?".
+ * Passar como argumento, e não importar o hook direto, mantém `usePosSale`
+ * testável e deixa um só lugar dono da fila na tela (`PosPage`).
+ */
+export type PosOfflineQueue = {
+  enqueueSale: (payload: CreateSaleInput, totalAmount: number) => Promise<PendingSale | null>;
+};
+
+export function usePosSale(
+  branchId: string | null,
+  sellerId: string | null,
+  storeInfo: PosStoreInfo | null,
+  offline: PosOfflineQueue,
+) {
   const [cart, setCart] = useState<PosCartLine[]>([]);
   const [contact, setContact] = useState<Contact | null>(null);
   const [discount, setDiscount] = useState("");
@@ -168,6 +221,14 @@ export function usePosSale(branchId: string | null, sellerId: string | null, sto
    * (ver `fiscalDocument.ts`).
    */
   const [fiscalWarning, setFiscalWarning] = useState<string | null>(null);
+  /**
+   * "Esta venda ficou na fila" — estado próprio, nem `confirmedSale` nem
+   * `submitError`, porque não é nenhum dos dois. A venda não está gravada no
+   * sistema (então dizer "confirmada" seria mentira), e nada deu errado do
+   * ponto de vista do operador (então um erro vermelho mandaria ele refazer
+   * uma venda que já está guardada — e aí sim haveria venda duplicada).
+   */
+  const [queuedSale, setQueuedSale] = useState<PendingSale | null>(null);
 
   // A confirmação vira um aviso passageiro, não uma tela nova — o operador
   // já está de olho no carrinho vazio pronto pra próxima venda.
@@ -176,6 +237,12 @@ export function usePosSale(branchId: string | null, sellerId: string | null, sto
     const timer = window.setTimeout(() => setConfirmedSale(null), 5000);
     return () => window.clearTimeout(timer);
   }, [confirmedSale]);
+
+  useEffect(() => {
+    if (!queuedSale) return;
+    const timer = window.setTimeout(() => setQueuedSale(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [queuedSale]);
 
   function addProduct(product: Product) {
     setCart((current) => {
@@ -336,6 +403,31 @@ export function usePosSale(branchId: string | null, sellerId: string | null, sto
     setSplitLines(target.splitLines);
   }
 
+  /**
+   * Monta o cupom da venda que acabou de sair. Precisa ser chamada **antes**
+   * de `reset()` — `cart`/`total`/`troco` ainda são os da venda. Ver
+   * `receipt.ts`.
+   */
+  function snapshotDoCupom(
+    saleCode: string,
+    payments: { method: SalePaymentMethod; amount: number; installments: number }[],
+    notice: string | null,
+  ) {
+    return buildPosReceiptSnapshot({
+      saleCode,
+      issuedAt: new Date(),
+      cart,
+      subtotalAmount: subtotal,
+      discountAmount,
+      totalAmount: total,
+      payments,
+      changeAmount: method === "dinheiro" ? troco : null,
+      storeName: storeInfo?.name ?? "Facilite",
+      storeDocument: storeInfo?.document ?? null,
+      notice,
+    });
+  }
+
   async function confirmSale(hasOpenSession: boolean) {
     if (!branchId || !sellerId) {
       setSubmitError("Nenhuma filial ou operador identificado.");
@@ -350,39 +442,28 @@ export function usePosSale(branchId: string | null, sellerId: string | null, sto
     setSubmitting(true);
     setSubmitError(null);
     setFiscalWarning(null);
+    setQueuedSale(null);
+    const payments = buildPayments();
+    const payload: CreateSaleInput = {
+      branchId,
+      contactId: contact?.id ?? null,
+      sellerId,
+      issueDate: new Date().toISOString().slice(0, 10),
+      discountAmount,
+      items: cart.map((line) => ({
+        productId: line.product.id,
+        quantity: line.quantity,
+        unitPrice: line.product.salePrice,
+      })),
+      payments,
+    };
     try {
-      const payments = buildPayments();
-      const sale = await createPosSale({
-        branchId,
-        contactId: contact?.id ?? null,
-        sellerId,
-        issueDate: new Date().toISOString().slice(0, 10),
-        discountAmount,
-        items: cart.map((line) => ({
-          productId: line.product.id,
-          quantity: line.quantity,
-          unitPrice: line.product.salePrice,
-        })),
-        payments,
-      });
+      const sale = await createPosSale(payload);
       setConfirmedSale(sale);
       // Capturado ANTES do reset() de propósito — ver o comentário de
       // `lastReceipt` acima e `receipt.ts`. `cart`/`subtotal`/`total` daqui
       // pra baixo ainda são os da venda que acabou de confirmar.
-      setLastReceipt(
-        buildPosReceiptSnapshot({
-          saleCode: sale.code,
-          issuedAt: new Date(),
-          cart,
-          subtotalAmount: subtotal,
-          discountAmount,
-          totalAmount: total,
-          payments,
-          changeAmount: method === "dinheiro" ? troco : null,
-          storeName: storeInfo?.name ?? "Facilite",
-          storeDocument: storeInfo?.document ?? null,
-        }),
-      );
+      setLastReceipt(snapshotDoCupom(sale.code, payments, null));
       reset();
       // A venda já está confirmada aqui — `emitFiscalDocumentForSale` nunca
       // lança (ver fiscalDocument.ts), então uma falha de NFC-e vira aviso
@@ -392,7 +473,49 @@ export function usePosSale(branchId: string | null, sellerId: string | null, sto
         setFiscalWarning(`Venda confirmada, mas a NFC-e não saiu: ${fiscalOutcome.errors.join(" ")}`);
       }
     } catch (err) {
-      setSubmitError(extractErrorMessage(err, cart));
+      /*
+       * A bifurcação de E6, e a única linha desta tela onde a diferença entre
+       * "a rede caiu" e "o banco recusou" vale dinheiro.
+       *
+       * Rede: a venda vai para a fila e o caixa segue trabalhando. Recusa de
+       * negócio (estoque acabou, sessão fechada, sem permissão, desconto
+       * acima do teto): erro na cara do operador, agora, porque enfileirar
+       * daria exatamente a mesma recusa depois — só que tarde demais, com o
+       * cliente já na rua. A classificação vem do `status` da resposta, não
+       * da mensagem do navegador; ver `postgrestFailure.ts`.
+       */
+      if (!isNetworkFailure(err)) {
+        setSubmitError(
+          posSaleErrorMessage(err, (productId) => cart.find((line) => line.product.id === productId)?.product.description ?? null),
+        );
+        return;
+      }
+
+      const pendente = await offline.enqueueSale(payload, total);
+      if (!pendente) {
+        /*
+         * Sem rede E sem onde guardar. É o único caminho em que o PDV precisa
+         * dizer "não deu" mesmo estando offline: prometer que guardou uma
+         * venda que vive só na memória desta aba seria perder dinheiro no
+         * primeiro F5. Ver `offlineStore.ts`.
+         */
+        setSubmitError(
+          "Sem conexão e sem como guardar a venda neste computador — o navegador está bloqueando o armazenamento local. Anote a venda no papel e lance depois.",
+        );
+        return;
+      }
+
+      setQueuedSale(pendente);
+      // Cupom sai igual: a impressora é USB (E1) e não depende de rede
+      // nenhuma. O código impresso é o da fila, não um `sales.code` inventado
+      // — ver `shortPendingCode`.
+      setLastReceipt(
+        snapshotDoCupom(shortPendingCode(pendente.id), payments, "VENDA PENDENTE DE SINCRONIZACAO"),
+      );
+      reset();
+      // Nenhuma NFC-e aqui de propósito: não existe venda no banco para a
+      // Edge Function `fiscal-emit` ler. A emissão acontece depois que a
+      // venda sincronizar de verdade (`useOfflineSales.ts`).
     } finally {
       setSubmitting(false);
     }
@@ -433,6 +556,7 @@ export function usePosSale(branchId: string | null, sellerId: string | null, sto
     submitting,
     submitError,
     confirmedSale,
+    queuedSale,
     fiscalWarning,
     lastReceipt,
     confirmSale,

@@ -46,6 +46,12 @@ type BuildReceiptSnapshotInput = {
   changeAmount: number | null;
   storeName: string;
   storeDocument: string | null;
+  /**
+   * Recado em destaque logo abaixo do número da venda — hoje só a venda
+   * offline usa ("VENDA PENDENTE DE SINCRONIZACAO", E6). Omitido/nulo
+   * imprime o cupom exatamente como antes.
+   */
+  notice?: string | null;
 };
 
 function paymentLabel(payment: PosReceiptPayment): string {
@@ -72,6 +78,7 @@ export function buildPosReceiptSnapshot(input: BuildReceiptSnapshotInput): PosRe
       storeName: input.storeName,
       storeDocument: input.storeDocument,
       saleCode: input.saleCode,
+      notice: input.notice ?? null,
       issuedAt: input.issuedAt,
       items,
       subtotalAmount: input.subtotalAmount,

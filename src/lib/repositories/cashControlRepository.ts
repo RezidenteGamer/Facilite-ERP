@@ -8,6 +8,7 @@ import {
   type CashSession,
 } from "../../features/cashcontrol/cashControl";
 import { supabase } from "../supabaseClient";
+import { throwSupabaseError } from "./postgrestFailure";
 import type { Tables } from "../../types/supabase";
 
 type CashSessionRow = Tables<"cash_sessions"> & {
@@ -93,13 +94,16 @@ export async function listCashSessions(branchId: string): Promise<CashSession[]>
  */
 export async function getOpenCashSession(branchId: string): Promise<CashSession | null> {
   const client = assertSupabase();
-  const { data, error } = await client
+  const { data, error, status } = await client
     .from("cash_sessions")
     .select(SESSION_SELECT_WITH_JOINS)
     .eq("branch_id", branchId)
     .eq("status", "aberto")
     .maybeSingle();
-  if (error) throw error;
+  // Desde E6 o erro sai classificado (rede x recusa): sem rede, o PDV cai no
+  // último estado conhecido em vez de tratar a falha como "não há sessão
+  // aberta" — que era o que acontecia e bloqueava a venda. Ver AGENTS.md.
+  if (error) throwSupabaseError(error, status);
   return data ? toCashSession(data as CashSessionRow) : null;
 }
 
