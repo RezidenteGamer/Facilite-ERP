@@ -10093,27 +10093,39 @@ postgresql://postgres:postgres@<container>:5432/postgres`) sem precisar
 de nenhuma credencial real. Os dois containers e a rede Docker usados no
 teste foram removidos ao final da sessão.
 
-Os workflows em si (o YAML) **não foram disparados** — nem manualmente,
-nem esperando o cron — porque isso exigiria os dois secrets já
-cadastrados, o que é passo fora deste diff. Sintaxe validada com um
-parser YAML de verdade (`js-yaml`), os três scripts com `bash -n`.
+Os workflows em si (o YAML) **não foram disparados por esta sessão** — nem
+manualmente, nem esperando o cron — porque cadastrar os secrets é
+exatamente a ação que a tarefa reservou para o usuário (entrar com
+senha/credencial em qualquer formulário é proibido para o agente,
+sem exceção). Sintaxe validada com um parser YAML de verdade (`js-yaml`),
+os três scripts com `bash -n`.
 
-O que ainda falta para isto rodar de verdade pela primeira vez:
+#### Confirmado depois, contra o banco de verdade (11/09/2026)
 
-1. **Cadastrar os dois secrets** no GitHub (Settings → Secrets and
-   variables → Actions), nenhum dos dois gerado ou visto por esta sessão:
-   * `SUPABASE_DB_URL` — a connection string do **Session Pooler** (não a
-     direta — ver acima), copiada do painel da Supabase
-     (`Connect → Session pooler`), com a senha do banco.
-   * `BACKUP_ENCRYPTION_PASSPHRASE` — uma senha forte gerada à parte (ex.:
-     `openssl rand -base64 32`), só para isto — perdê-la significa que os
-     backups criptografados já guardados ficam irrecuperáveis.
-2. Depois de cadastrados, disparar `backup-diario.yml` manualmente
-   (`workflow_dispatch`) uma vez para conferir contra o banco real, e só
-   então confiar no agendamento (diário 06:00 UTC / mensal dia 1º 07:00
-   UTC — fora do horário comercial brasileiro nos dois casos).
-3. `restore-mensal.yml` só encontra um artefato depois que o primeiro
-   `backup-diario.yml` tiver rodado com sucesso pelo menos uma vez.
+O usuário cadastrou os dois secrets e dois disparos manuais fecharam o
+que faltava:
+
+* **`backup-diario.yml` run #1: falhou.** `SUPABASE_DB_URL` tinha sido
+  cadastrada com a **conexão direta** (`db.ifmdedruuetbbqjbnrkd.supabase.co`,
+  IPv6), não o Session Pooler — exatamente o problema descrito acima, só
+  que na prática: `pg_dumpall: ... Network is unreachable`, e a própria
+  mensagem de erro do CLI confirmou o diagnóstico ("Your network does not
+  support IPv6"). Corrigido trocando o secret pela string do Session
+  Pooler de verdade.
+* **`backup-diario.yml` run #2: sucesso**, 1m54s, artefato `db-backup` de
+  503 KB publicado.
+* **`restore-mensal.yml` run #1: sucesso**, 47s, as 7 etapas verdes —
+  inclusive "Restaurar no Postgres efêmero e conferir contra o
+  manifesto", que é a que derruba o job se a contagem de linhas não
+  bater.
+
+Ou seja: o desenho não só rodou limpo num schema de exemplo local, como
+sobreviveu ao primeiro contato real com o banco de produção — inclusive
+capturando um erro de configuração (secret com a string errada) exatamente
+do jeito que deveria: o job falhou alto e claro, com uma mensagem que
+apontava a causa, em vez de silenciosamente fazer a coisa errada.
+`backup-diario.yml` e `restore-mensal.yml` seguem agora só no agendamento
+(diário 06:00 UTC / mensal dia 1º 07:00 UTC).
 
 #### Privilégio da credencial: por que não um role só de `SELECT`
 
