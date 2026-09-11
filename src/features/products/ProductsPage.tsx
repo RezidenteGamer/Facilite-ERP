@@ -10,6 +10,7 @@ import { fetchNcmCodes, type NcmCode } from "../../lib/repositories/ncmLookups";
 import { fetchTaxGroups } from "../../lib/repositories/taxGroupLookups";
 import { fetchUnitsOfMeasure, type UnitOfMeasure } from "../../lib/repositories/unitsOfMeasureLookups";
 import { normalizeSearchText } from "../../lib/searchText";
+import { extractErrorMessage } from "../../lib/errorMessage";
 import { fetchBranchAllowsNegativeStock } from "../../lib/repositories/branchesRepository";
 import type { TaxGroup } from "../../lib/fiscal/taxGroups";
 import { useAuth } from "../auth/AuthContext";
@@ -91,6 +92,8 @@ export default function ProductsPage() {
   const [pendingPhotoPreview, setPendingPhotoPreview] = useState<string | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  /** Falha de gravação vinda do banco — mostrada dentro do próprio modal. */
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
     products,
@@ -255,20 +258,52 @@ export default function ProductsPage() {
     setFormUnidadeComercial(source?.unidadeComercial ?? "");
     setFormUnidadeTributavel(source?.unidadeTributavel ?? "");
     clearPendingPhoto();
+    // Erro da tentativa anterior não pode reaparecer num modal recém-aberto.
+    setSubmitError(null);
     setModal(next);
   }
 
+  /**
+   * Mensagem legível para uma falha de gravação de produto.
+   *
+   * O caso que obrigou isto a existir é de E4: `products_branch_id_gtin_key`
+   * tornou alcançável um erro que antes não existia — cadastrar o mesmo
+   * código de barras em dois produtos da mesma filial, que é engano
+   * corriqueiro (o mesmo item cadastrado duas vezes). Sem tradução, o
+   * operador receberia o texto cru do Postgres, com nome de constraint e
+   * tudo; sem captura nenhuma, que era o estado anterior, ele não receberia
+   * **nada** e ficaria clicando "Salvar" sem entender por que o modal não
+   * fecha.
+   */
+  function mensagemDeFalhaAoSalvar(err: unknown): string {
+    const bruta = extractErrorMessage(err, "Não foi possível salvar o produto.");
+    const codigo = (err as { code?: string } | null)?.code;
+    if (codigo === "23505" && bruta.includes("products_branch_id_gtin_key")) {
+      return "Este código de barras (GTIN) já está cadastrado em outro produto desta filial.";
+    }
+    return bruta;
+  }
+
   async function handleCreateSubmit(values: Record<string, string>) {
-    const created = await createProduct(
-      buildProductInput(
-        values,
-        formTaxGroup?.id ?? null,
-        formAllowNegativeStock,
-        formUnidadeComercial,
-        formUnidadeTributavel,
-        formNcm?.codigo ?? "",
-      ),
-    );
+    setSubmitError(null);
+    let created;
+    try {
+      created = await createProduct(
+        buildProductInput(
+          values,
+          formTaxGroup?.id ?? null,
+          formAllowNegativeStock,
+          formUnidadeComercial,
+          formUnidadeTributavel,
+          formNcm?.codigo ?? "",
+        ),
+      );
+    } catch (err) {
+      // Mantém o modal aberto com o que o operador digitou — ele precisa
+      // corrigir o campo, não redigitar o cadastro inteiro.
+      setSubmitError(mensagemDeFalhaAoSalvar(err));
+      return;
+    }
 
     if (pendingPhotoFile) {
       try {
@@ -285,17 +320,23 @@ export default function ProductsPage() {
 
   async function handleEditSubmit(values: Record<string, string>) {
     if (!selected) return;
-    await updateProduct(
-      selected.id,
-      buildProductInput(
-        values,
-        formTaxGroup?.id ?? null,
-        formAllowNegativeStock,
-        formUnidadeComercial,
-        formUnidadeTributavel,
-        formNcm?.codigo ?? "",
-      ),
-    );
+    setSubmitError(null);
+    try {
+      await updateProduct(
+        selected.id,
+        buildProductInput(
+          values,
+          formTaxGroup?.id ?? null,
+          formAllowNegativeStock,
+          formUnidadeComercial,
+          formUnidadeTributavel,
+          formNcm?.codigo ?? "",
+        ),
+      );
+    } catch (err) {
+      setSubmitError(mensagemDeFalhaAoSalvar(err));
+      return;
+    }
     setModal("none");
   }
 
@@ -517,6 +558,7 @@ export default function ProductsPage() {
           selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
           fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
+          submitError={submitError}
           onSubmit={handleCreateSubmit}
           onCancel={() => {
             clearPendingPhoto();
@@ -539,6 +581,7 @@ export default function ProductsPage() {
           selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
           fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
+          submitError={submitError}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -547,6 +590,7 @@ export default function ProductsPage() {
             costPrice: selected.costPrice !== undefined ? String(selected.costPrice) : "",
             wholesalePrice: selected.wholesalePrice !== undefined ? String(selected.wholesalePrice) : "",
             replacementCost: selected.replacementCost !== undefined ? String(selected.replacementCost) : "",
+            gtin: selected.gtin ?? "",
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",
@@ -572,6 +616,7 @@ export default function ProductsPage() {
           selectFields={[allowNegativeStockSelect, unidadeComercialSelect, unidadeTributavelSelect]}
           fieldExtras={productFieldExtras}
           validate={validateProductFormValues}
+          submitError={submitError}
           initialValues={{
             description: selected.description,
             stock: String(selected.stock),
@@ -580,6 +625,14 @@ export default function ProductsPage() {
             costPrice: selected.costPrice !== undefined ? String(selected.costPrice) : "",
             wholesalePrice: selected.wholesalePrice !== undefined ? String(selected.wholesalePrice) : "",
             replacementCost: selected.replacementCost !== undefined ? String(selected.replacementCost) : "",
+            /* `gtin` fica de fora de propósito, e é o único campo que a clonagem
+               não copia: GTIN identifica um item de comércio específico e é
+               único por filial (`products_branch_id_gtin_key`). Copiá-lo faria
+               o clone nascer com o código do original e o salvamento morrer na
+               constraint — ou, pior, se a migration de E4 ainda não estiver
+               aplicada, nascer duplicado em silêncio. Clonar é atalho para
+               "produto parecido", e produto parecido tem outro código de
+               barras. */
             location: selected.location ?? "",
             subLocation: selected.subLocation ?? "",
             cest: selected.cest ?? "",

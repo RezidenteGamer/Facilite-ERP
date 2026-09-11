@@ -120,6 +120,19 @@
   color: var(--ink);
 }
 
+/* Recado do modo scanner (E4): código não cadastrado, produto sem estoque, ou
+   a instrução do botão "Digitar código". Ocupa a largura do campo de busca,
+   logo abaixo dele, e some sozinho na tecla seguinte. */
+.pos__scan-notice {
+  flex-shrink: 0;
+  margin: -8px 0 12px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: #8A5A15;
+  background: #FFF9EE;
+}
+
 /* ---------- Filtros ---------- */
 /* Sem abas de categoria: products.type não tem taxonomia estruturada ainda
    (ver AGENTS.md) — só a ordenação e o alternador de visualização. */
@@ -322,6 +335,13 @@
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* O botão do scanner por câmera fica desabilitado de verdade (ver PosPage.tsx
+   para o porquê), e precisa parecer desabilitado. */
+.pos__toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .pos__toolbar svg {

@@ -1,7 +1,13 @@
 import { parseAmount } from "../../lib/amount";
+import { isValidGtin } from "../../lib/gtin";
+import { normalizeSearchText } from "../../lib/searchText";
 
 export type Product = {
   id: string;
+  /**
+   * Sequencial interno de três dígitos por filial ("001", "002"...), gerado
+   * por `nextProductCode`. **Não** é o código de barras — esse é `gtin`.
+   */
   code: string;
   description: string;
   stock: number;
@@ -24,6 +30,13 @@ export type Product = {
    * quando o fornecedor já avisou reajuste mas a compra ainda não aconteceu.
    */
   replacementCost?: number;
+  /**
+   * GTIN — o número do código de barras da embalagem (E4). Oito, doze, treze
+   * ou catorze dígitos; ver `src/lib/gtin.ts` para o dígito verificador e a
+   * fonte GS1. Único por filial (`products_branch_id_gtin_key`), e nulo é o
+   * estado normal: granel, serviço e fabricação própria não têm GTIN.
+   */
+  gtin?: string;
   ncm?: string;
   location?: string;
   subLocation?: string;
@@ -60,6 +73,29 @@ export type Product = {
 };
 
 /**
+ * O produto casa o termo de busca? Confere descrição, código interno e código
+ * de barras — os três que as telas de busca prometem ao operador.
+ *
+ * `normalizedTerm` já vem passado por `normalizeSearchText` e aparado por quem
+ * chama: normalizar uma vez por busca, e não uma vez por produto, é o que
+ * mantém a lista barata numa filial com muitos itens.
+ *
+ * Existe como função em vez de uma linha repetida porque é exatamente isso que
+ * ela era até E4: a mesma condição copiada no PDV e no `ProductPickerPanel`,
+ * as duas prometendo código de barras no placeholder e nenhuma cumprindo.
+ * Com uma função só, a próxima coisa que entrar na busca entra nos dois
+ * lugares de uma vez — e dá para testar sem montar tela nenhuma.
+ */
+export function productMatchesSearch(product: Product, normalizedTerm: string): boolean {
+  if (!normalizedTerm) return true;
+  return (
+    normalizeSearchText(product.description).includes(normalizedTerm) ||
+    normalizeSearchText(product.code).includes(normalizedTerm) ||
+    normalizeSearchText(product.gtin ?? "").includes(normalizedTerm)
+  );
+}
+
+/**
  * Preço de Produto (pt-BR, com "R$ ") — diferente de `formatEntryTotal` do
  * Financeiro/PDV/Controle de Caixa, que é sem símbolo de propósito (rótulos
  * como "Valor"/"Total" já dizem o que é); aqui a coluna se chama "Preço", e
@@ -93,6 +129,30 @@ function priceFieldError(value: string | undefined, label: string): string | nul
   return parseAmount(value) === null ? `${label} precisa ser um número válido.` : null;
 }
 
+/**
+ * Mensagem de erro do campo GTIN, ou `null` se ele está vazio (é opcional) ou
+ * é um GTIN válido.
+ *
+ * **Recusa salvar, não só avisa** — e isso é uma divergência consciente das
+ * outras decisões de validação deste projeto. A chave PIX de D11 e o e-mail de
+ * D1 ficaram sem validação estrita porque em ambos os casos "o que é válido"
+ * é ambíguo: chave PIX tem quatro formatos, e regex de e-mail recusa endereço
+ * legítimo. GTIN não tem essa ambiguidade — o dígito verificador é uma conta
+ * que fecha ou não fecha, publicada pela GS1, sem zona cinzenta.
+ *
+ * E o custo de deixar passar é alto de um jeito específico: um GTIN com um
+ * dígito trocado não dá erro nenhum no cadastro, fica lá parecendo certo, e
+ * só aparece meses depois no balcão — o operador passa o leitor, nada
+ * acontece, e ninguém liga uma coisa à outra. É exatamente o tipo de erro que
+ * o dígito verificador foi inventado para pegar na entrada. Deixá-lo passar
+ * seria ter feito a conta e jogado a resposta fora.
+ */
+function gtinFieldError(value: string | undefined): string | null {
+  if (!value || !value.trim()) return null;
+  if (isValidGtin(value)) return null;
+  return "Código de barras (GTIN) inválido — confira os dígitos. Deve ter 8, 12, 13 ou 14 dígitos e o verificador precisa fechar.";
+}
+
 /** `validate` do `RegistryFormModal` para os formulários de Produto (novo/editar/clonar). */
 export function validateProductFormValues(values: Record<string, string>): string[] {
   const errors: string[] = [];
@@ -104,6 +164,8 @@ export function validateProductFormValues(values: Record<string, string>): strin
   if (wholesalePriceError) errors.push(wholesalePriceError);
   const replacementCostError = priceFieldError(values.replacementCost, "Custo de reposição");
   if (replacementCostError) errors.push(replacementCostError);
+  const gtinError = gtinFieldError(values.gtin);
+  if (gtinError) errors.push(gtinError);
   return errors;
 }
 
@@ -150,6 +212,12 @@ export function buildProductInput(
     type: values.type || undefined,
     costPrice: parseAmount(values.costPrice) ?? undefined,
     wholesalePrice: parseAmount(values.wholesalePrice) ?? undefined,
+    // `trim` aqui, e não só na validação: o GTIN é chave de comparação (a
+    // constraint de unicidade no banco e o casamento exato do scanner no PDV),
+    // e " 789..." com espaço na frente seria um código diferente dos dois
+    // pontos de vista. Um leitor mal configurado que mande espaço antes do CR
+    // não pode criar um cadastro que o próprio leitor depois não acha.
+    gtin: values.gtin?.trim() || undefined,
     replacementCost: parseAmount(values.replacementCost) ?? undefined,
     ncm: ncm || undefined,
     location: values.location || undefined,

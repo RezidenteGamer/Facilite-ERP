@@ -9,6 +9,7 @@ import { useModuleDefinition } from "../../features/registry-engine/useModuleDef
 import {
   allowNegativeStockToOption,
   buildProductInput,
+  productMatchesSearch,
   validateProductFormValues,
   type Product,
 } from "../../features/products/products";
@@ -101,10 +102,13 @@ export default function ProductPickerPanel({
     const term = normalizeSearchText(search.trim());
     const active = products.filter((product) => product.active);
     if (!term) return active;
-    return active.filter(
-      (product) =>
-        normalizeSearchText(product.description).includes(term) || normalizeSearchText(product.code).includes(term),
-    );
+    /* O `gtin` fecha a promessa que o placeholder deste campo já fazia
+       ("Nome, código ou código de barras") desde antes de existir coluna de
+       código de barras — ver E4. Aqui é só busca por texto: o modo scanner
+       (rajada, foco travado, adicionar sozinho) é exclusivo do PDV, conforme
+       o plano. Com o cursor neste campo, passar o leitor filtra a lista e o
+       operador clica — que é o gesto que esta tela já tinha. */
+    return active.filter((product) => productMatchesSearch(product, term));
   }, [products, search]);
 
   const formFields = useMemo(() => (definition ? buildFormFields(definition.fields) : []), [definition]);
@@ -175,6 +179,7 @@ export default function ProductPickerPanel({
             salePrice: String(editingProduct.salePrice),
             type: editingProduct.type ?? "",
             costPrice: editingProduct.costPrice !== undefined ? String(editingProduct.costPrice) : "",
+            gtin: editingProduct.gtin ?? "",
             wholesalePrice:
               editingProduct.wholesalePrice !== undefined ? String(editingProduct.wholesalePrice) : "",
             ncm: editingProduct.ncm ?? "",

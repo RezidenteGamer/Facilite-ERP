@@ -26,12 +26,17 @@ function assertSupabase() {
 /**
  * `42703`/`PGRST204` — a coluna não existe neste banco. Mesmo critério de
  * `isMissingColumnError` em `branches.ts` (D1/A11): serve para `create`/
- * `update` degradarem sem os dois campos de D3 (`average_cost`,
- * `replacement_cost`) enquanto a migration `00000000000016` não foi
- * aplicada — sem isto, criar OU editar qualquer produto falharia por
+ * `update` degradarem sem os campos das migrations ainda não aplicadas —
+ * `average_cost`/`replacement_cost` de D3 (`00000000000016`) e `gtin` de E4
+ * (`00000000000018`). Sem isto, criar OU editar qualquer produto falharia por
  * inteiro (não só os campos novos) até a migration ser aplicada, porque
  * `insert`/`update` do PostgREST recusa o payload inteiro quando ele cita
  * uma coluna que o cache de schema não conhece.
+ *
+ * Consequência aceita, a mesma de D3: com a migration de E4 pendente, salvar
+ * um produto **descarta o GTIN em silêncio** em vez de falhar. É o mal menor
+ * — o outro caminho é o cadastro inteiro parar de funcionar — e some assim
+ * que a migration for aplicada.
  */
 function isMissingProductColumnError(error: { code?: string } | null | undefined): boolean {
   return error?.code === "42703" || error?.code === "PGRST204";
@@ -50,6 +55,7 @@ function toProduct(row: ProductRow): Product {
     wholesalePrice: row.wholesale_price ?? undefined,
     averageCost: row.average_cost ?? undefined,
     replacementCost: row.replacement_cost ?? undefined,
+    gtin: row.gtin ?? undefined,
     ncm: row.ncm ?? undefined,
     location: row.location ?? undefined,
     subLocation: row.sub_location ?? undefined,
@@ -80,6 +86,17 @@ function toUpdateRow(patch: Partial<Product>): TablesUpdate<"products"> {
     // `average_cost` não entra aqui de propósito: é calculado por
     // `create_purchase`, nunca gravado pelo cliente via update — ver D3.
     ...(patch.replacementCost !== undefined && { replacement_cost: patch.replacementCost ?? null }),
+    // `"gtin" in patch`, e não `patch.gtin !== undefined` como os campos
+    // vizinhos: `buildProductInput` devolve `undefined` para campo vazio, e o
+    // teste por `undefined` faria a chave sumir do update — apagar o código
+    // de barras no formulário não apagaria nada no banco.
+    //
+    // Isso importa mais aqui do que nos vizinhos por causa da unicidade: um
+    // GTIN digitado no produto errado ficaria preso nele para sempre, e, por
+    // ser único na filial, impediria cadastrá-lo no produto certo. Sem saída
+    // pela interface. Um patch que não fala de GTIN (ex.: `{ photoUrl }`)
+    // não tem a chave e continua passando batido, como deve.
+    ...("gtin" in patch && { gtin: patch.gtin || null }),
     ...(patch.ncm !== undefined && { ncm: patch.ncm || null }),
     ...(patch.location !== undefined && { location: patch.location || null }),
     ...(patch.subLocation !== undefined && { sub_location: patch.subLocation || null }),
@@ -163,6 +180,7 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
         ...baseRow,
         average_cost: input.costPrice ?? null,
         replacement_cost: input.replacementCost ?? null,
+        gtin: input.gtin || null,
       };
       const { data, error } = await client.from("products").insert(row).select(PRODUCT_SELECT).single();
       if (error && isMissingProductColumnError(error)) {
@@ -190,10 +208,14 @@ export function createProductsRepository(branchId: string): ModuleDataRepository
         .eq("id", id)
         .select(PRODUCT_SELECT)
         .single();
-      if (error && isMissingProductColumnError(error) && "replacement_cost" in updateRow) {
-        // Mesmo fallback de create(): só entra aqui quando o patch tocava
-        // replacement_cost e a migration de D3 ainda não foi aplicada.
-        const { replacement_cost: _replacementCost, ...fallbackRow } = updateRow;
+      const tocaColunaNova = "replacement_cost" in updateRow || "gtin" in updateRow;
+      if (error && isMissingProductColumnError(error) && tocaColunaNova) {
+        // Mesmo fallback de create(): só entra aqui quando o patch tocava uma
+        // coluna de migration pendente (replacement_cost de D3, gtin de E4).
+        // Os dois saem juntos porque o erro do PostgREST não diz qual das duas
+        // faltou, e tentar uma de cada vez custaria mais uma ida ao servidor
+        // para adivinhar algo que não muda o resultado.
+        const { replacement_cost: _replacementCost, gtin: _gtin, ...fallbackRow } = updateRow;
         const { data: fallbackData, error: fallbackError } = await client
           .from("products")
           .update(fallbackRow)

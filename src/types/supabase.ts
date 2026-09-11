@@ -1583,6 +1583,7 @@ export type Database = {
           created_at: string
           cst_ipi: string | null
           description: string
+          gtin: string | null
           id: string
           location: string | null
           minimum_stock: number | null
@@ -1611,6 +1612,7 @@ export type Database = {
           created_at?: string
           cst_ipi?: string | null
           description: string
+          gtin?: string | null
           id?: string
           location?: string | null
           minimum_stock?: number | null
@@ -1639,6 +1641,7 @@ export type Database = {
           created_at?: string
           cst_ipi?: string | null
           description?: string
+          gtin?: string | null
           id?: string
           location?: string | null
           minimum_stock?: number | null

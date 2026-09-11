@@ -9238,3 +9238,324 @@ aparece no seletor do navegador, fazer uma venda e conferir que o cupom sai
 formatado (sem acento, larguras batendo) e que a gaveta abre em venda com
 dinheiro — e então recarregar a página e confirmar que a impressora reconecta
 sozinha, sem pedir pareamento de novo.
+
+### E4 — modo scanner no PDV: o GTIN nasce, e o leitor de balcão vira só um teclado rápido (10/09/2026)
+
+**Esta tarefa escreveu a migration `00000000000018_e4_gtin_do_produto.sql` e NÃO
+a aplicou**, pela mesma regra de D1, A11 e D3. Nenhum `git commit`, nenhum
+`git push`, nenhum deploy.
+
+#### O problema: duas telas prometiam código de barras, e a coluna não existia
+
+`products` não tinha, e nunca teve, coluna de código de barras. O que existe é
+`products.code` — o sequencial de três dígitos por filial ("001", "002"),
+gerado por `nextProductCode`, sem relação nenhuma com o número impresso pelo
+fabricante na embalagem. Mesmo assim, dois campos de busca já prometiam o
+contrário ao operador: o do PDV (`"Buscar produto por nome ou código
+(scanner)..."`) e o do `ProductPickerPanel` (`"Nome, código ou código de
+barras"`), usado em Realizar Venda e Ajuste de Estoque. Os dois filtravam só
+`description` e `code`. E os dois botões de scanner do PDV diziam
+`(não implementado)` no `title`.
+
+#### A fonte do dígito verificador do GTIN
+
+**GS1 General Specifications, Release 17.0.1 (Ratified, Jan 2017), seção 7.9.1
+— "Standard check digit calculations for GS1 data structures", Figura
+7.9.1-1**, obtida em `https://ref.gs1.org/standards/genspecs/17.0.1/`.
+Diferente do ESC/POS de E1 (padrão de fato da Epson, sem dono neutro), aqui há
+dono formal e especificação publicada, então valeu a mesma disciplina de A9
+(Receita) e D11 (Bacen): fonte primária, não memória e não biblioteca de
+terceiros. Nota prática para quem for repetir: `gs1.org/services/*` responde
+403 a fetch automatizado; `ref.gs1.org` serve o PDF.
+
+A regra, palavra por palavra do documento: pesos alternando `x3`/`x1` **da
+direita para a esquerda**, com `x3` no dígito imediatamente à esquerda do
+verificador; *"Subtract sum from nearest equal or higher multiple of ten =
+check digit"*. E o alcance, também dele: *"This algorithm is identical for all
+fixed length numeric GS1 data structures"* — a mesma figura alinha GTIN-8,
+GTIN-12, GTIN-13, GTIN-14, 17 e 18 dígitos na mesma tabela.
+
+Por isso `gs1CheckDigit` (em `src/lib/gtin.ts`) não sabe o comprimento do que
+recebe: ancorar os pesos no verificador, e não na esquerda, elimina o caso
+especial de comprimento par vs. ímpar. Quem decide quais comprimentos o
+cadastro aceita é `isValidGtin`, e ele aceita **os quatro** (8/12/13/14), não
+só o EAN-13 do varejo brasileiro: a caixa que chega do distribuidor traz
+GTIN-14, o produto importado dos EUA traz GTIN-12, e item pequeno traz GTIN-8.
+Restringir a 13 recusaria código legítimo que o operador tem na mão, sem ganhar
+nada — o cálculo é literalmente o mesmo para os quatro.
+
+Deliberadamente **não** compartilha código com `digitoModulo11` de
+`cpfCnpj.ts`: lá é módulo 11 com tabela de pesos da Receita, aqui é módulo 10
+com dois pesos alternados da GS1. Mesma leitura que A9 já tinha feito ao não
+reaproveitar `accessKeyCheckDigit`. Outra divergência explícita: GTIN **não**
+tem a regra de "sequência repetida é inválida por definição" que CPF/CNPJ têm
+— `00000000` é um GTIN-8 aritmeticamente válido, e recusá-lo seria inventar
+regra que o padrão não tem.
+
+#### Decisão: GTIN inválido **recusa salvar**, não só avisa
+
+Divergência consciente da chave PIX (D11) e do e-mail (D1), que ficaram sem
+validação estrita. Nos dois casos "o que é válido" era ambíguo — chave PIX tem
+quatro formatos, regex de e-mail recusa endereço legítimo. GTIN não tem essa
+ambiguidade: o dígito verificador é uma conta publicada que fecha ou não fecha.
+
+E o custo de deixar passar é alto de um jeito específico: um GTIN com um dígito
+trocado não dá erro nenhum no cadastro, fica lá parecendo certo, e só aparece
+meses depois no balcão — o operador passa o leitor, nada acontece, e ninguém
+liga uma coisa à outra. É exatamente o erro que o dígito verificador foi
+inventado para pegar na entrada; validar e jogar a resposta fora não faria
+sentido. Fica em `gtinFieldError`, dentro de `validateProductFormValues`.
+
+O **banco não valida nada** disso — sem `CHECK` de comprimento, de "só
+dígitos", nem de verificador. Mesma decisão que D11 tomou para a chave PIX: um
+`CHECK` errado recusa dado legítimo, e o banco é o pior lugar para descobrir
+isso. O risco aqui tem nome — um `check (length(gtin) = 13)` escrito por quem
+só conhece o EAN-13 recusaria o GTIN-14 da caixa do distribuidor. O que o banco
+garante é o que só ele pode garantir: `unique (branch_id, gtin)`, mesma forma
+de `products_branch_id_code_key`. Conferido na documentação do PostgreSQL antes
+de escolher a forma: `UNIQUE` comum é `NULLS DISTINCT` por padrão (*"two null
+values are not considered equal"*), então não é preciso índice parcial para
+deixar a filial ter quantos produtos sem GTIN quiser — que é o caso da quase
+totalidade do cadastro atual.
+
+#### Decisão: prefixo/sufixo configurável por hardware ficou **fora**
+
+Muitos leitores aceitam prefixo/sufixo arbitrário, mas isso **não vem de
+fábrica**: exige programar o leitor passando-o por códigos de barras de
+configuração do manual daquele fabricante. Expor a opção significaria pedir ao
+lojista que reprogramasse o leitor para casar com uma configuração digitada
+aqui também — duas coisas para desalinhar, para resolver um problema que
+ninguém tem, e impossível de testar sem hardware.
+
+O que a pesquisa confirmou que o leitor barato faz de fábrica é suficiente: ele
+age como **teclado USB (HID)**, despeja o código numa rajada que tipicamente
+termina em menos de um segundo, e manda um **sufixo terminador — o mais comum
+sendo Enter (CR, `0x0D`)**. O par "rajada rápida + Enter" cobre o leitor saído
+da caixa, que é o caso real da loja.
+
+#### Decisão: scanner por câmera **declinado**, com motivo
+
+O texto do plano para E4 ("foco travado, leitura por prefixo/sufixo, nenhuma
+tecla perdida") é inteiramente sobre o leitor físico via teclado — câmera não
+aparece em nenhuma linha. A única rota sem dependência nova seria o
+`BarcodeDetector` nativo, e a pesquisa fechou contra: ele é **"partial
+support" no Chrome de mesa justamente porque depende de suporte do sistema
+operacional** — existe em macOS, ChromeOS e Android, e **não no Windows**, que
+é onde este PDV roda. É uma fronteira mais estreita que a de E1
+(WebUSB/WebSerial ao menos funciona em Chromium no Windows): aqui seria
+Chromium no sistema errado. A alternativa seria uma biblioteca de decodificação
+— dependência nova, que todas as tarefas deste plano evitaram.
+
+O botão continua desabilitado, como já estava, e não ficou pior: ganhou
+`disabled` de verdade (antes era só inerte, sem estilo de desabilitado) e um
+`title` que diz o motivo em vez de `(não implementado)`.
+
+#### O modo scanner, e o bug que o teste pegou antes da tela
+
+A decisão "isto foi um scan?" mora em `src/features/pos/scanDetection.ts`,
+fora do DOM e do React, e é testada isoladamente.
+
+**"Nenhuma tecla perdida" é exigência de implementação, não de protocolo.** O
+jeito de perder tecla numa rajada é remontar o texto a partir dos eventos de
+tecla: qualquer `keydown` que escape sai do texto reconstruído e o código chega
+truncado — num PDV isso é produto errado no carrinho, não erro visível. Por
+isso o módulo **não reconstrói texto**: recebe o `value` que o campo já tem a
+cada `onChange`, e usa o relógio só para medir a velocidade. Conferido também
+que **não existe nenhum `debounce`/`throttle`** no campo de busca do PDV.
+
+`SCAN_MAX_KEY_INTERVAL_MS = 100`. Leitor HID de fábrica não acrescenta atraso
+entre caracteres e o piso prático é o polling USB (~10–20 ms/caractere);
+digitação humana a 100 PPM é ~120 ms/caractere. A literatura de HMI sugere 150
+ms, mais folgado — e que se sobrepõe de fato à digitação rápida (80–250
+ms/caractere). Ficou mais apertado de propósito, porque a folga não compra
+nada: o caminho principal é o Enter, e a rajada é plano B para leitor sem
+sufixo. Limitação aceita: leitor **Bluetooth** pode ter jitter acima disso; sem
+sufixo configurado ele não dispara pela rajada, mas com sufixo (o padrão)
+funciona igual, porque o Enter não olha o relógio.
+
+**O achado que mudou o desenho.** A primeira versão usava "o dígito verificador
+fechou" como sinal de fim de leitura. Elegante e errado: **um GTIN pode ser
+prefixo válido de outro**. `9780132350884` sem o último dígito é
+`978013235088`, um GTIN-12 que fecha a conta por coincidência — e a chance
+disso é de **1 em 10 para qualquer código**, porque o verificador tem dez
+valores. Ou seja: um em cada dez códigos de barras da loja dispararia no 12º
+dígito, o PDV limparia o campo, e o 13º cairia sozinho num campo vazio. Bug
+visível no balcão, em 10% das leituras. Quem pegou isso foi a bateria de
+`tests/unit/gtin.test.ts`, antes de o código chegar à tela. A saída é
+`SCAN_BURST_IDLE_MS = 150`: a rajada acabou quando **parou de chegar
+caractere**, não quando a conta fechou.
+
+O que torna tudo isso seguro, no fim, é outra coisa: o PDV só adiciona sozinho
+quando o código casa **exatamente um produto cadastrado e ativo**. Zero ou mais
+de um mantêm o comportamento de busca normal. Produto sem estoque é recusado
+com aviso, pela mesma regra que já deixa o cartão do produto `disabled`.
+
+#### "Foco travado", e os dois atalhos que precisaram mudar junto
+
+O campo de busca recupera o foco sozinho sempre que ninguém com direito a ele o
+estiver usando — por clique (`handlePosClick`, na raiz do PDV) e por
+`focusout` (quando um elemento focado é desabilitado ou some e joga o foco no
+`body`; o caso concreto é "Retomar venda" ficando `disabled` no instante em que
+a última venda pausada é retomada, com o próprio botão ainda focado). Sem isso,
+basta clicar num cartão de produto para o foco ficar no botão e a rajada
+seguinte se perder — ou, pior, o Enter final do leitor "clicar" o botão focado
+e repetir o item.
+
+Quando ele **não** rouba o foco, de propósito: com o modal de cadastro rápido
+de cliente aberto por cima (as teclas são dele); quando o foco está em outro
+campo de entrada do PDV (cliente, desconto, recebido, parcelas, divisão de
+pagamento); e sem permissão de vender. **O PDV não tem modal de pagamento** — o
+pagamento é inline na barra lateral — então o único modal a respeitar é o de
+cliente.
+
+Consequência que obrigou a mexer nos atalhos: `handleKeyDown` da janela
+ignorava tudo enquanto o foco estivesse num `INPUT`/`TEXTAREA`. Antes isso era
+estado passageiro; com o foco travado passa a ser o estado **normal** do PDV, e
+manter a guarda seria o mesmo que desligar o F4 de confirmar venda. Agora:
+
+- **F2 e F4** valem sempre — são teclas de função, não têm significado como
+  texto, então nada se perde atendendo-as mesmo com o cursor num campo.
+- **Escape** com busca digitada limpa a busca (o que o operador espera de um
+  campo de texto, e o que o `<input type="search">` faria sozinho); só com a
+  busca vazia é que remove o último item, como antes. Sem essa distinção, o
+  foco travado transformaria cada Escape de "apagar o que digitei" num item
+  sumindo do carrinho. Escape em **outro** campo continua sendo daquele campo.
+
+#### Outras decisões pequenas, e uma armadilha de cadastro
+
+- **Clonar produto não copia o GTIN** — é o único campo que a clonagem deixa de
+  fora. GTIN identifica um item de comércio específico e é único por filial;
+  copiá-lo faria o clone morrer na constraint, ou (com a migration ainda não
+  aplicada) nascer duplicado em silêncio. Clonar é atalho para "produto
+  parecido", e produto parecido tem outro código de barras.
+- **`gtin` é `text`, não número** — zeros à esquerda fazem parte do código
+  (`01234567890128` é um GTIN-14 dos exemplos da própria GS1). Mesma armadilha
+  que A9 documentou para o CNPJ `00000000000191`.
+- **`buildProductInput` apara espaço em volta do GTIN** — ele é chave de
+  comparação em dois lugares que não perdoam espaço (a constraint de unicidade
+  e o casamento exato do scanner). Um leitor que mande espaço antes do CR não
+  pode criar um cadastro que ele mesmo depois não acha.
+- **O filtro duplicado virou função** — `productMatchesSearch`, em
+  `products.ts`. Era a mesma condição copiada no PDV e no
+  `ProductPickerPanel`; agora o que entrar na busca entra nos dois de uma vez,
+  e dá para testar sem montar tela.
+- **`ProductPickerPanel` só ganhou busca por GTIN**, não modo scanner. Rajada e
+  foco travado são do PDV, conforme o plano.
+
+#### O que ficou deliberadamente fora
+
+- **GTIN na NF-e.** O item da NF-e tem `cEAN`/`cEANTrib` (que pedem o literal
+  `SEM GTIN` quando não há código), e **nenhum dos dois existe hoje** no núcleo
+  fiscal — conferido, `cEAN` não aparece em arquivo nenhum. Ligar os dois é
+  mexer no payload fiscal, que desde A1 só se escreve pela Edge Function e com
+  bateria própria. A coluna fica pronta para quando for.
+- **Scanner por câmera** — declinado, motivo acima.
+- **Prefixo/sufixo configurável por hardware** — declinado, motivo acima.
+- **Backfill de GTIN** — não há de onde. O dado não existe em lugar nenhum
+  deste banco, e `code` não é um GTIN disfarçado. Diferente de D3, que tinha
+  `cost_price` como fonte defensável, aqui qualquer backfill seria invenção.
+- **Índice de busca novo** — a busca por GTIN roda **no cliente**, sobre a
+  lista que `useProductsData` já carregou; não é query nova. E a constraint de
+  unicidade já cria o índice em `(branch_id, gtin)` de qualquer forma.
+- **Os dois outros botões da toolbar do PDV** ("Editar produto", "Capturar
+  foto") — continuam `(não implementado)`, são features não relacionadas.
+- **E6 (PDV offline-first)** — tarefa própria da mesma Etapa 5, nada tocado.
+- **O bug pré-existente da edição rápida do `ProductPickerPanel`** — o modal do
+  lápis mostra todos os campos de `show_in_form` mas só preenche parte deles,
+  então salvar apaga `replacementCost` (de D3), `cest`, `origemMercadoria`,
+  `cstIpi` e `minimumStock`. É anterior a E4 e ficou fora do escopo; E4 só
+  garantiu que `gtin` **não** entrasse nessa lista. Registrado como tarefa à
+  parte.
+
+#### Testes e o que é honestamente não verificável sem hardware
+
+Novos: `tests/unit/gtin.test.ts` (11), `scanDetection.test.ts` (17),
+`productSearch.test.ts` (9), `productForm.test.ts` (7) — 44 casos. **764 testes
+unitários passando** (720 antes + 44). `npm run build` (inclui `tsc -b`),
+`npm run lint` e `npm run test:unit` limpos; as 6 advertências do lint são as
+mesmas de antes desta tarefa.
+
+A procedência de cada vetor de `gtin.test.ts` está anotada no próprio arquivo,
+de propósito — "testei contra a minha implementação" não prova nada, porque
+uma conta invertida e um vetor invertido passam juntos. São eles: o exemplo
+trabalhado da Figura 7.9.1-2 da GS1 (`37610425002123456` → soma 101 → DV 9);
+três GTIN-14 tirados do corpo do próprio GenSpecs; o UPC-A `036000291452`; o
+EAN-13 real `9780132350884` (ISBN-13 de *Clean Code*); e o EAN-8 `96385074`,
+este último com procedência mais fraca — é o exemplo canônico da literatura de
+código de barras, não achei GTIN-8 no GenSpecs extraído, e está anotado como
+tal em vez de fingir que saiu do padrão.
+
+**Não havia leitor de código de barras físico nesta sessão** — mesma situação
+de E1 com a impressora. O que foi verificado de verdade:
+
+- O dígito verificador, contra a especificação da GS1 e contra códigos reais.
+  Isso é verificação de verdade, mas de **especificação**, não de hardware.
+- A lógica de decisão da rajada, contra sequências de valores com carimbo de
+  tempo. A única coisa simulada ali é o relógio; o texto que chega ao campo é o
+  que o navegador entregaria de qualquer jeito.
+- `npm run build`/`lint`/`test:unit` limpos.
+
+O que **não** foi verificado, e ninguém deve supor que foi:
+
+- Que um leitor real, de um fabricante real, emita na velocidade e com o sufixo
+  que a documentação diz. O limiar de 100 ms é defensável pela pesquisa, não
+  medido contra hardware.
+- **A tela do PDV não foi aberta com login real.** O servidor de
+  desenvolvimento subiu e a tela de login carregou sem erro no console, mas
+  esta sessão não tem credenciais e não as insere. Nada depois do login — o
+  foco travado, o Enter adicionando produto, o aviso de código não cadastrado,
+  o botão "Digitar código" — foi exercitado num navegador de verdade.
+- A migration não foi aplicada, então **nada disso rodou contra um banco com a
+  coluna `gtin` existindo**.
+
+Roteiro de verificação manual para quem tiver leitor e banco: aplicar a
+migration; cadastrar um produto com o GTIN da embalagem de algo que esteja à
+mão (conferindo que o formulário recusa um dígito trocado); abrir o PDV e
+passar o leitor sem clicar em lugar nenhum (deve entrar no carrinho e limpar a
+busca sozinho); passar o mesmo produto duas vezes seguidas (deve virar
+quantidade 2); clicar num cartão de produto e **em seguida** passar o leitor
+sem clicar de volta no campo — é esse o teste do foco travado; e passar um
+produto sem estoque, que deve recusar com aviso em vez de entrar.
+
+#### O que a revisão de código pegou, e que já está corrigido
+
+Quatro achados do `/code-review alto` sobre esta própria tarefa, todos
+corrigidos antes de reportá-la pronta. Ficam registrados porque três deles são
+consequência direta de decisões desta tarefa, e quem mexer nisso depois precisa
+saber que o caminho já foi percorrido:
+
+1. **Apagar o GTIN no formulário não apagava no banco.** `toUpdateRow` usava
+   `patch.gtin !== undefined`, o mesmo teste dos campos vizinhos — mas
+   `buildProductInput` devolve `undefined` para campo vazio, então a chave
+   sumia do update e o valor antigo ficava. Isolado seria chato; combinado com
+   a constraint de unicidade que esta tarefa criou, era **sem saída**: um GTIN
+   digitado no produto errado ficaria preso nele para sempre e bloquearia
+   cadastrá-lo no produto certo, sem caminho nenhum pela interface. Corrigido
+   com `"gtin" in patch`, que distingue "o formulário mandou vazio" de "este
+   patch não fala de GTIN" (ex.: `{ photoUrl }`). Os campos vizinhos
+   (`costPrice`, `replacementCost`, `minimumStock`) têm o mesmo padrão e o
+   mesmo problema, mas sem unicidade envolvida e desde antes de E4 — não foram
+   tocados aqui.
+
+2. **Leitura sem correspondência não limpava o campo.** Passar o leitor num
+   produto não cadastrado deixava o código no campo; a leitura seguinte era
+   digitada no fim dele, o campo virava dois GTIN grudados, e o produto bom
+   nunca entrava. No balcão isso apareceria como "o leitor parou de
+   funcionar". Agora o campo é limpo também quando a leitura falha — mas só
+   quando o texto era mesmo um GTIN: "coca" seguido de Enter continua sendo
+   busca, e apagar o que o operador digitou destruiria o filtro que ele quis.
+
+3. **A violação de GTIN único não dizia nada ao operador.** `handleCreateSubmit`
+   e `handleEditSubmit` não capturavam falha de gravação, e `RegistryFormModal`
+   nunca recebia a prop `submitError` que ele já sabia exibir — então a
+   rejeição do banco virava promise não tratada e o modal ficava aberto, mudo.
+   Era invisível antes porque falha de gravação de produto era rara (RLS,
+   rede); a constraint desta tarefa tornou comum um erro corriqueiro
+   (cadastrar o mesmo item duas vezes). Agora os dois capturam, o modal mostra
+   a mensagem sem perder o que foi digitado, e o `23505` em
+   `products_branch_id_gtin_key` é traduzido para "Este código de barras
+   (GTIN) já está cadastrado em outro produto desta filial" em vez do texto
+   cru do Postgres.
+
+4. **`posRootRef` morto** — sobra de uma versão em que o ouvinte de clique era
+   registrado no nó em vez de via `onClick`. Removido.

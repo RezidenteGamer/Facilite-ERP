@@ -4,11 +4,12 @@ import { SearchIcon } from "../../components/icons";
 import SearchCombobox from "../../components/form/SearchCombobox";
 import { useAuth } from "../auth/AuthContext";
 import { useProductsData } from "../products/useProductsData";
-import type { Product } from "../products/products";
+import { productMatchesSearch, type Product } from "../products/products";
 import type { Contact } from "../customers/contacts";
 import QuickContactFormModal from "../customers/QuickContactFormModal";
 import { fetchContactsByKind } from "../../lib/repositories/contactLookups";
 import { normalizeSearchText } from "../../lib/searchText";
+import { isValidGtin } from "../../lib/gtin";
 import {
   CancelSaleIcon,
   CardIcon,
@@ -26,6 +27,14 @@ import {
   SplitIcon,
 } from "./icons";
 import { formatMoney, productPlaceholder } from "./pos";
+import {
+  burstScanCode,
+  EMPTY_SCAN_PROGRESS,
+  SCAN_BURST_IDLE_MS,
+  submittedCode,
+  trackScanInput,
+  type ScanProgress,
+} from "./scanDetection";
 import { useOpenCashSession, usePosSale, type PosPaymentMethod } from "./usePosSale";
 import { usePrinter } from "./usePrinter";
 import "./PosPage.css";
@@ -49,6 +58,24 @@ const SPLIT_METHOD_LABEL: Record<PosPaymentMethod, string> = {
 
 function formatPausedTime(ms: number): string {
   return new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * O foco está num lugar onde tecla digitada significa alguma coisa? Campo de
+ * texto, `select` e conteúdo editável contam; botão e `div` não.
+ *
+ * É o que separa "o operador está preenchendo o desconto" de "o foco está
+ * largado num botão e a próxima rajada do leitor vai se perder" — ver o foco
+ * travado em `PosPage`.
+ */
+function ehCampoDeEntrada(element: Element | null): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  return (
+    element.tagName === "INPUT" ||
+    element.tagName === "TEXTAREA" ||
+    element.tagName === "SELECT" ||
+    element.isContentEditable
+  );
 }
 
 function productBadge(product: Product): { label: string; tone: "low" | "out" } | null {
@@ -91,6 +118,22 @@ export default function PosPage() {
   }, [sale.lastReceipt]);
 
   const [search, setSearch] = useState("");
+  /**
+   * Recado curto do modo scanner ("código não cadastrado", "sem estoque").
+   * Um só estado para todos eles de propósito: são mensagens efêmeras, e a
+   * seguinte sempre substitui a anterior — empilhar avisos num caixa é ruído.
+   */
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  /** Rajada em curso no campo de busca — ver `scanDetection.ts`. */
+  const scanProgressRef = useRef<ScanProgress>(EMPTY_SCAN_PROGRESS);
+  /** Espera pelo silêncio que fecha uma rajada de leitor sem sufixo. */
+  const scanIdleTimerRef = useRef<number | null>(null);
+  /**
+   * Mesma razão de `cartRef`: o timer da rajada é criado no `onChange` e
+   * dispara depois, e precisa enxergar a lista de produtos de agora — não a
+   * de quando o operador começou a passar o produto.
+   */
+  const productsRef = useRef(products);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sortMode, setSortMode] = useState<"recent" | "az" | "za">("recent");
   /* O texto digitado no campo de cliente e do campo, nao do contato
@@ -131,6 +174,10 @@ export default function PosPage() {
   }, [sale.cart]);
 
   useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  useEffect(() => {
     return () => {
       if (qtyHoldTimer.current !== null) window.clearInterval(qtyHoldTimer.current);
     };
@@ -168,8 +215,12 @@ export default function PosPage() {
     const term = normalizeSearchText(search.trim());
     const filtered = products.filter((product) => {
       if (!product.active) return false;
-      if (!term) return true;
-      return normalizeSearchText(product.description).includes(term) || normalizeSearchText(product.code).includes(term);
+      /* Desde E4 a busca também casa o `gtin`, cumprindo o que o placeholder
+         deste campo já prometia antes de existir coluna de código de barras.
+         Vale mesmo sem modo scanner nenhum: digitar os últimos dígitos do
+         código já acha o produto. A condição mora em `productMatchesSearch`
+         para ser a mesma que o `ProductPickerPanel` usa. */
+      return productMatchesSearch(product, term);
     });
     if (sortMode === "recent") return filtered;
     const sorted = [...filtered].sort((a, b) =>
@@ -177,6 +228,193 @@ export default function PosPage() {
     );
     return sortMode === "za" ? sorted.reverse() : sorted;
   }, [products, search, sortMode]);
+
+  /* ------------------------------------------------------------------
+     Modo scanner (E4)
+     ------------------------------------------------------------------ */
+
+  function cancelScanIdleTimer() {
+    if (scanIdleTimerRef.current !== null) {
+      window.clearTimeout(scanIdleTimerRef.current);
+      scanIdleTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => cancelScanIdleTimer, []);
+
+  /**
+   * Trata `code` como leitura de código de barras: se casar **exatamente um**
+   * produto pelo GTIN, adiciona ao carrinho, limpa a busca e devolve `true`.
+   *
+   * Exigir casamento exato de um só produto é o que torna o modo scanner
+   * seguro: nenhuma heurística de "parecido" põe item no carrinho sozinha.
+   * `products_branch_id_gtin_key` já garante que não haja dois na mesma
+   * filial, mas o caso é tratado assim mesmo — a constraint pode não estar
+   * aplicada neste banco ainda (ver a migration de E4), e um PDV não pode
+   * escolher no palpite qual dos dois cobrar.
+   *
+   * Devolver `false` significa "isto não era uma leitura" e a busca segue
+   * normal, com a lista filtrada: é o comportamento que o PDV já tinha.
+   */
+  function tryAddByGtin(code: string): boolean {
+    const alvo = code.trim();
+    if (!alvo) return false;
+
+    const casados = productsRef.current.filter((product) => product.active && product.gtin === alvo);
+
+    /* Um código lido que não deu em produto **tem que sair do campo mesmo
+       assim**. Se ficasse, a leitura seguinte seria digitada no fim dele: o
+       campo viraria dois GTIN grudados, que não são código de comprimento
+       nenhum, e o produto bom nunca entraria — no balcão isso aparece como
+       "o leitor parou de funcionar". Só vale para texto que é mesmo um GTIN;
+       "coca" seguido de Enter é busca, e apagar o que o operador digitou
+       seria destruir o filtro que ele queria. */
+    const eraMesmoUmCodigo = isValidGtin(alvo);
+
+    function limparParaProximaLeitura() {
+      setSearch("");
+      scanProgressRef.current = EMPTY_SCAN_PROGRESS;
+      cancelScanIdleTimer();
+      searchRef.current?.focus();
+    }
+
+    if (casados.length !== 1) {
+      if (eraMesmoUmCodigo) {
+        setScanNotice(
+          casados.length === 0
+            ? `Código de barras ${alvo} não está cadastrado em nenhum produto.`
+            : `Código de barras ${alvo} está em mais de um produto — corrija o cadastro.`,
+        );
+        limparParaProximaLeitura();
+      }
+      return false;
+    }
+
+    const product = casados[0];
+    /* Mesma regra do cartão de produto, que fica `disabled` sem estoque. O
+       scanner não pode ser uma porta dos fundos para vender o que a tela
+       recusa no clique. */
+    if (product.stock <= 0) {
+      setScanNotice(`${product.description} está sem estoque.`);
+      if (eraMesmoUmCodigo) limparParaProximaLeitura();
+      return false;
+    }
+
+    sale.addProduct(product);
+    /* Limpar e devolver o foco é o ciclo do balcão: o operador não confirma
+       item por item, só passa o próximo produto. */
+    setScanNotice(null);
+    limparParaProximaLeitura();
+    return true;
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (scanNotice) setScanNotice(null);
+
+    scanProgressRef.current = trackScanInput(scanProgressRef.current, value, performance.now());
+    cancelScanIdleTimer();
+    if (!scanProgressRef.current.burst) return;
+
+    /* Leitor configurado sem sufixo: não há Enter para avisar que acabou,
+       então o fim da leitura é o silêncio. O timer é recriado a cada
+       caractere, de modo que só o último da rajada chega a disparar. */
+    scanIdleTimerRef.current = window.setTimeout(() => {
+      scanIdleTimerRef.current = null;
+      const codigo = burstScanCode(scanProgressRef.current, performance.now());
+      if (codigo !== null) tryAddByGtin(codigo);
+    }, SCAN_BURST_IDLE_MS);
+  }
+
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    /* O sufixo de fábrica do leitor, e também o Enter de quem digitou o
+       código na mão — o mesmo caminho de propósito.
+
+       `event.currentTarget.value` e não o estado `search`: o campo é a fonte
+       da verdade do que o navegador entregou, e ler dele é o que garante que
+       nenhuma tecla da rajada fique de fora. */
+    event.preventDefault();
+    cancelScanIdleTimer();
+    const codigo = submittedCode(event.currentTarget.value);
+    if (codigo === null) return;
+    tryAddByGtin(codigo);
+  }
+
+  /**
+   * Botão "Digitar código": limpa o campo, devolve o foco e diz o que fazer.
+   *
+   * É o campo de busca mesmo, e não um segundo campo só para código: o
+   * placeholder já o anuncia como campo de scanner, o Enter dele já é o
+   * caminho de busca-e-adiciona, e um segundo lugar para digitar a mesma
+   * coisa seria um segundo lugar para manter. O botão existe para o caixa de
+   * tela sensível ao toque, onde não há F2 e tocar aqui é o que abre o
+   * teclado virtual.
+   */
+  function handleTypeCode() {
+    setSearch("");
+    scanProgressRef.current = EMPTY_SCAN_PROGRESS;
+    cancelScanIdleTimer();
+    setScanNotice("Digite o código de barras e pressione Enter.");
+    searchRef.current?.focus();
+  }
+
+  /**
+   * "Foco travado": o campo de busca recupera o foco sozinho sempre que
+   * ninguém com direito a ele o estiver usando.
+   *
+   * Sem isto, o modo scanner é frágil de um jeito silencioso: basta o
+   * operador clicar num cartão de produto para o foco ficar no botão, e a
+   * próxima rajada se perde — ou, pior, o Enter final do leitor "clica" o
+   * botão focado de novo e repete o item. F2 já existia, mas é um gesto
+   * manual: resolve uma vez, não entre um produto e o próximo.
+   *
+   * Quando ele **não** rouba o foco, de propósito:
+   *   * com o modal de cadastro rápido de cliente aberto por cima — as
+   *     teclas são dele, e roubá-las deixaria o cadastro impossível;
+   *   * quando o foco está em outro campo de entrada do PDV (cliente,
+   *     desconto, recebido, parcelas, divisão de pagamento) — o operador
+   *     está digitando ali de propósito;
+   *   * sem permissão de vender, quando não há venda a fazer.
+   */
+  useEffect(() => {
+    if (!canCreate || creatingContactName !== null) return;
+    searchRef.current?.focus();
+
+    /* O clique é o caminho comum de o foco sair do campo, e `handlePosClick`
+       dá conta dele. Este ouvinte cobre o outro, que não é clique nenhum: um
+       elemento focado que **some ou é desabilitado** joga o foco no `body`, e
+       a rajada seguinte se perderia inteira sem ninguém entender por quê. O
+       caso concreto no PDV é o botão "Retomar venda", que fica `disabled` no
+       instante em que a última venda pausada é retomada — com o próprio botão
+       ainda focado, porque foi nele que o operador acabou de clicar.
+
+       O `setTimeout(0)` não é superstição: durante o `focusout`,
+       `document.activeElement` é transitoriamente o `body` mesmo quando o
+       foco está indo para outro elemento. Perguntar antes disso responderia
+       "ninguém" sempre, e o campo de busca roubaria todo foco do PDV. */
+    let pendente: number | null = null;
+    function handleFocusOut() {
+      if (pendente !== null) window.clearTimeout(pendente);
+      pendente = window.setTimeout(() => {
+        pendente = null;
+        const ativo = document.activeElement;
+        if (ativo !== null && ativo !== document.body) return;
+        searchRef.current?.focus();
+      }, 0);
+    }
+    document.addEventListener("focusout", handleFocusOut);
+    return () => {
+      document.removeEventListener("focusout", handleFocusOut);
+      if (pendente !== null) window.clearTimeout(pendente);
+    };
+  }, [canCreate, creatingContactName]);
+
+  function handlePosClick() {
+    if (!canCreate || creatingContactName !== null) return;
+    if (ehCampoDeEntrada(document.activeElement)) return;
+    searchRef.current?.focus();
+  }
 
   const canConfirm =
     canCreate && !sessionLoading && !!openSession && sale.cart.length > 0 && sale.paymentValid && !sale.submitting;
@@ -187,23 +425,48 @@ export default function PosPage() {
   }
 
   useEffect(() => {
-    function isTypingInField() {
-      const active = document.activeElement;
-      return active instanceof HTMLElement && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
-    }
-
     function handleKeyDown(event: KeyboardEvent) {
-      if (isTypingInField()) return;
+      /* F2 e F4 valem mesmo com o cursor dentro de um campo. São teclas de
+         função: não têm significado nenhum como texto, então nada se perde
+         atendendo-as sempre.
+
+         Isso deixou de ser detalhe quando E4 travou o foco no campo de
+         busca. Antes, "está digitando num campo" era estado passageiro e
+         ignorar os atalhos nele quase não aparecia; agora o foco no campo de
+         busca é o estado **normal** do PDV, e manter a guarda antiga seria o
+         mesmo que desligar o F4 de confirmar venda. */
       if (event.key === "F2") {
         event.preventDefault();
         searchRef.current?.focus();
-      } else if (event.key === "F4") {
+        return;
+      }
+      if (event.key === "F4") {
         event.preventDefault();
         handleConfirm();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        sale.removeLast();
+        return;
       }
+      if (event.key !== "Escape") return;
+
+      /* Escape continua sendo de quem estiver digitando em OUTRO campo
+         (fechar o combobox de cliente, por exemplo) — só o campo de busca
+         entrega o Escape ao PDV. */
+      const ativo = document.activeElement;
+      if (ativo !== searchRef.current && ehCampoDeEntrada(ativo)) return;
+
+      event.preventDefault();
+      /* Com busca digitada, Escape limpa a busca — o que o operador espera de
+         um campo de texto, e o que o próprio `<input type="search">` faria
+         sozinho. Só com a busca vazia é que ele remove o último item, como
+         antes de E4. Sem essa distinção, o foco travado transformaria cada
+         Escape de "apagar o que eu digitei" num item some do carrinho. */
+      if (searchRef.current?.value) {
+        setSearch("");
+        scanProgressRef.current = EMPTY_SCAN_PROGRESS;
+        cancelScanIdleTimer();
+        setScanNotice(null);
+        return;
+      }
+      sale.removeLast();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -211,7 +474,7 @@ export default function PosPage() {
   }, [sale.cart, canConfirm]);
 
   return (
-    <div className="pos">
+    <div className="pos" onClick={handlePosClick}>
       <header className="pos__topbar">
         <div className="pos__brand">
           <CartIcon />
@@ -239,11 +502,18 @@ export default function PosPage() {
             <input
               ref={searchRef}
               type="search"
-              placeholder="Buscar produto por nome ou código (scanner)..."
+              placeholder="Buscar produto por nome, código ou código de barras (scanner)..."
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => handleSearchChange(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
             />
           </div>
+
+          {scanNotice && (
+            <p className="pos__scan-notice" role="status">
+              {scanNotice}
+            </p>
+          )}
 
           <div className="pos__filters">
             <select
@@ -315,10 +585,29 @@ export default function PosPage() {
           </div>
 
           <div className="pos__toolbar">
-            <button type="button" aria-label="Focar câmera" title="Scanner de código de barras (não implementado)">
+            {/* Scanner por câmera: continua desligado, agora com o motivo no
+                título em vez de "(não implementado)". A única rota sem
+                dependência nova seria o `BarcodeDetector` nativo, que é
+                "partial support" no Chrome de mesa justamente porque depende
+                de suporte do sistema operacional — existe em macOS, ChromeOS e
+                Android, e não no Windows, que é onde este PDV roda. É uma
+                fronteira mais estreita que a de E1 (WebUSB/WebSerial, que ao
+                menos funciona em Chromium no Windows): aqui seria Chromium no
+                sistema errado. Ver AGENTS.md. */}
+            <button
+              type="button"
+              aria-label="Focar câmera"
+              title="Scanner por câmera indisponível neste navegador — a API nativa (BarcodeDetector) não existe no Chrome para Windows. Use um leitor USB no campo de busca."
+              disabled
+            >
               <CropIcon />
             </button>
-            <button type="button" aria-label="Digitar código" title="Digitar código (não implementado)">
+            <button
+              type="button"
+              aria-label="Digitar código"
+              title="Digitar código de barras (o mesmo que F2)"
+              onClick={handleTypeCode}
+            >
               T
             </button>
             <button type="button" aria-label="Editar produto" title="Editar produto (não implementado)">
