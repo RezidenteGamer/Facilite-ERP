@@ -1,0 +1,18 @@
+17.11 (Debian 17.11-1.pgdg13+2)
+PASS controle negativo: a asserção central REPROVOU no schema pré-MT4
+PASS guarda de backfill: zero organizações recusadas; transação revertida
+PASS guarda de backfill: duas organizações recusadas; transação revertida
+PASS aplicação e reexecução da migration integral
+PASS backfill: 2 papéis, 25 permissões (22/3), 4 perfis
+PASS índices de cobertura das duas FKs compostas
+PASS mesmos nomes em A/B; duplicação local e default sem sessão recusados
+PASS RLS: SELECT/INSERT/UPDATE/DELETE estrangeiros e mudança de organização bloqueados
+PASS contratos do front sem organização, upsert, cascade e NO ACTION
+PASS FKs compostas sob SQL/service_role; provisionamento legítimo preservado
+PASS gestor de usuários só atribui o próprio papel ou NULL
+PASS admin, não gestor, gestor só de permissões, inativo e proteções MT3
+PASS joins explícitos dos 7 leitores mesmo com corrupção artificial sem FKs
+PASS ACLs e policies; private não foi movido/exposto
+PASS EXPLAIN JSON como authenticated: helpers dentro dos InitPlans (SELECT/UPDATE/DELETE)
+PASS reexecução após a segunda organização; config local mantém private fora do Data API
+PASS container e volumes descartáveis removidos
