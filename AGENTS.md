@@ -10300,3 +10300,235 @@ incluindo `can_manage_users_for` — continua sem checar organização, é
 MT3); MT9 em si (esta tarefa só contém o problema do bootstrap, não o
 resolve); qualquer tela nova; mover um usuário existente de uma
 organização para outra (não existe esse conceito hoje).
+
+### MT3 — organização entra em `has_branch_access`, `can_manage_branches` e `can_manage_users` (11/09/2026)
+
+Terceira e última tarefa da Etapa 1 de `facilite-multi-tenant-saas.md`, e a
+de maior alavancagem do plano inteiro. MT1 e MT2 eram fundação de dado e
+não mudavam regra de acesso nenhuma — as duas registraram "é MT3". Esta é
+a que cobra a promessa: migration escrita e **não aplicada** (mesma regra
+de D1/A11/D3/E4/MT1/MT2), em
+`00000000000021_mt3_organizacao_nas_funcoes_de_autorizacao.sql`.
+
+#### As 9 policies que mudaram, e a função que mudou com elas
+
+`has_branch_access(p_branch_id)` passou a exigir **duas** coisas: o vínculo
+em `user_branches` **e** a filial pertencer à mesma organização do perfil do
+chamador. Como ela é chamada por dezenas de policies e RPCs branch-scoped
+(vendas, compras, financeiro, caixa, notas fiscais, devoluções,
+condicionais, `module_records`, a view `stock_movements_view`), essa
+correção sozinha propaga a contenção por organização para quase todo o
+sistema sem tocar em mais nenhuma dessas policies.
+
+As policies reescritas (`drop policy if exists` + `create policy`, o padrão
+que A1 já usa aqui — `CREATE OR REPLACE POLICY` não existe no Postgres, e
+`ALTER POLICY` não é idempotente):
+
+| Tabela | Policy | O que ganhou |
+|---|---|---|
+| `branches` | `read accessible branches` | metade `can_manage_branches()` ganhou `AND organization_id = private.current_organization_id()` |
+| `branches` | `manage branches insert` | idem, no `WITH CHECK` |
+| `branches` | `manage branches update` | idem, em `USING` **e** `WITH CHECK` (sem o segundo, dava para *mover* a filial para outra organização) |
+| `branches` | `manage branches delete` | idem |
+| `user_branches` | `read own branch links` | metade `can_manage_branches()` ganhou `AND private.branch_in_current_organization(branch_id)` |
+| `user_branches` | `manage user_branches insert` | ganhou as **duas** pontas: `private.branch_in_current_organization(branch_id)` **e** `private.user_in_current_organization(user_id)` |
+| `user_branches` | `manage user_branches delete` | ganhou só a ponta da filial — decisão, ver abaixo |
+| `profiles` | `select profile` | metade `can_manage_users()` ganhou `AND organization_id = private.current_organization_id()` |
+| `profiles` | `update profile` | idem, em `USING` e `WITH CHECK` |
+
+**Decisão de forma, e por que ela é diferente nas duas famílias.** Em
+`branches` e `profiles`, comparação **direta de coluna**: a linha avaliada
+*é* a filial/o perfil, e `organization_id` está ali — um `EXISTS` re-buscaria
+por chave primária a mesma linha que o executor já tem em mãos. Em
+`user_branches`, a linha é só `(user_id, branch_id)` e não carrega
+organização nenhuma, então a checagem **precisa** de join — encapsulado em
+duas funções `security definer` novas
+(`private.branch_in_current_organization`, `private.user_in_current_organization`) e não
+escrito como `EXISTS` solto dentro da policy. O motivo é comportamental,
+não estético: um `exists (select 1 from profiles ...)` dentro de uma policy
+roda **com a RLS de `profiles` ligada**, e um usuário com
+`can_manage_branches` mas sem `can_manage_users` deixaria de enxergar o
+perfil alvo — perderia a capacidade de vincular outro usuário a uma filial,
+regressão de permissão que nada tem a ver com organização.
+
+**`insert` de `user_branches` confere as duas pontas; `select`/`delete`
+conferem só a filial.** Assimetria proposital: nenhuma linha nova nasce
+cruzando organização, mas uma linha cruzada que já exista (inserida por SQL
+direto antes desta migration) continua visível e apagável por quem
+administra a filial envolvida. Exigir as duas pontas no `delete`
+transformaria toda linha cruzada preexistente em lixo que só `service_role`
+removeria.
+
+**Função nova `private.current_organization_id()`** — a organização do chamador,
+lida de `profiles.organization_id`. `security definer` por dois motivos: sem
+isso, um subselect sobre `profiles` dentro das policies *de `profiles`*
+causaria recursão infinita de RLS; e encapsular a pergunta mantém cada
+policy dizendo uma coisa só depois que MT4-MT7 mexerem no resto.
+
+#### Dois achados que não estavam no plano, e foram corrigidos aqui
+
+1. **`branches.organization_id` ganhou `default private.current_organization_id()`.**
+   `createBranch` (`src/lib/repositories/branchesRepository.ts`), o único
+   caminho de criação de filial do produto, **não manda `organization_id`**
+   (nenhuma ocorrência em `src/`) — desde que MT1 tornou a coluna
+   `not null`, aquele `insert` já falhava. Resolver no servidor, e não
+   ensinando o front-end a mandar a organização, é o mesmo princípio que
+   MT2 aplicou em `admin-users`: valor de organização vindo do cliente é a
+   superfície de ataque que MT3 existe para fechar. Nenhuma linha de `src/`
+   mudou.
+2. **`prevent_role_escalation` passou a proteger `organization_id`.** Sem
+   isso as policies acima teriam um buraco por baixo: `update profile`
+   aprova a metade `id = auth.uid()` sem olhar organização (e tem de ser
+   assim), então qualquer usuário faria
+   `update profiles set organization_id = <outra org> where id = me` e
+   passaria a ser comparado contra a organização que escolhesse. Mesma
+   forma da regra de `role_id` que já estava ali (`service_role` e SQL
+   direto continuam podendo mover um usuário — MT9 e suporte precisam).
+
+#### `admin-users`: `reset-password` conferia o papel do chamador, mas não quem era o alvo
+
+Achado registrado no plano antes desta tarefa, e **corrigido aqui** — a
+entrada de MT2 neste arquivo diz "`reset-password` não precisava de nenhuma
+mudança", e isso estava errado: aquela conclusão era sobre criação de
+perfil, e passou por cima do problema de autorização. A ação conferia
+`can_manage_users_for(callerId)` e então chamava
+`admin.auth.admin.updateUserById(userId, ...)` com o `userId` vindo direto
+do payload do cliente. Era explorável **hoje**, antes de existir uma
+segunda organização: qualquer conta com `can_manage_users = true` trocava a
+senha de qualquer outra conta do sistema inteiro, de qualquer filial —
+inclusive a de um administrador, tomando a conta dele. Agora a função
+carrega `organization_id` do perfil do chamador e do perfil do alvo e
+recusa com 403 se não coincidirem. Alvo inexistente cai na mesma mensagem
+de propósito, para a ação não virar um enumerador de contas. Não dava para
+corrigir por RLS: a função roda com `service_role`, que passa por cima de
+policy por definição. `deno check` passou.
+
+#### Por que `can_manage_permissions`/`can_manage_modules`/`has_permission` ficaram de fora
+
+Não é esquecimento, e está documentado dentro da própria migration. As
+cinco tabelas que essas três funções gateiam — `roles`, `role_permissions`,
+`modules`, `module_fields`, `module_tabs` — **não têm `organization_id`
+ainda**: essa coluna só nasce na Etapa 2 (MT4 para `roles`/`role_permissions`,
+MT7 para `modules` e família). Escrever aqui uma checagem contra coluna
+inexistente não compila; inventar uma equivalente (derivar a organização do
+papel pelo perfil de quem o usa) criaria uma regra que nenhuma tarefa
+definiu e que MT4 teria de desfazer. **Consequência prática: papéis,
+permissões de papel e catálogo de módulos continuam globais entre
+organizações — a Etapa 1 sozinha não autoriza colocar uma segunda
+organização real neste banco.** `can_manage_users_for` também não mudou (o
+buraco era no uso, em `admin-users`, não na função), nem
+`has_facilite_developer_access` (acesso de desenvolvedor do Facilite é
+transversal a organizações de propósito — é a fundação da Etapa 6).
+
+#### Verificação
+
+A sessão que escreveu isto não pode aplicar migration nem rodar contra
+produção. Em vez de só raciocinar sobre o SQL, ela subiu um **Postgres 15
+em container** com um stub do schema (as 5 tabelas envolvidas no estado
+pós-MT1/MT2, as funções e as 9 policies copiadas bit a bit do baseline),
+aplicou a migration inteira numa transação só, e rodou contra ela o script
+de conferência descrito abaixo. Além disso rodou o mesmo script contra o
+schema **pré-MT3** como controle negativo — e foi esse controle que pegou
+um erro real no próprio script (a checagem central passava nos dois lados,
+provando nada, porque sem linha em `user_branches` o `has_branch_access`
+antigo já devolvia false por outro motivo). Depois de corrigido: as 9
+checagens substantivas reprovam no schema antigo e passam no novo.
+
+Os planos de execução foram **medidos, não deduzidos** (`explain`, 50 mil
+filiais / 20 mil perfis / 20 mil vínculos): `has_branch_access` faz três
+buscas por índice único (`user_branches_pkey`, `branches_pkey`,
+`profiles_pkey`), sem varredura sequencial; `select profile` usa
+`BitmapOr` de `profiles_pkey` com `profiles_organization_id_idx` (MT2). Um
+achado dessa medição corrigiu um comentário que a migration trazia errado:
+`read accessible branches` **não** usa `branches_organization_id_idx` e
+continua sendo varredura sequencial — a metade `has_branch_access(id)` é
+função arbitrária do `id` da própria linha, sem índice possível. É o mesmo
+plano de antes da migration (conferido no schema pré-MT3), então não houve
+degradação; só não havia o que melhorar.
+
+**`supabase/verificacao/mt3_isolamento_organizacao.sql`** (diretório novo,
+**fora de `supabase/migrations/`** de propósito — o runner aplica tudo que
+está lá, e este script escreve e apaga dado de teste). São três partes:
+preparo como `postgres`, 14 checagens rodando como `authenticated` de
+verdade (`set role` + `request.jwt.claims`, que é como o PostgREST entrega o
+JWT — sem isso a RLS nem liga, porque `postgres` é dona das tabelas), e uma
+limpeza idempotente que deve ser rodada **sempre**, inclusive quando as
+checagens falham no meio. **Não substitui MT8**, que constrói a bateria
+automatizada de verdade na Etapa 3; é um atalho para a conferência manual
+de quem aplicar a migration.
+
+#### O que fica de fora, de propósito
+
+`roles`, `contacts`, `tax_groups`/`tax_rules` e `modules` (Etapa 2,
+MT4-MT7); MT8 (bateria automatizada de isolamento entre organizações);
+MT9 (provisionamento — o bootstrap estreito de `admin-users` continua como
+MT2 o deixou); qualquer tela nova ou mudança de tela existente.
+
+### MT3 — rodada corretiva antes da aplicação (13/09/2026)
+
+Continuação de `facilite-multi-tenant-saas.md`; os arquivos de plano não
+foram editados nesta rodada. A migration 21 cria os três helpers em
+`private`: `private.current_organization_id()`,
+`private.branch_in_current_organization(uuid)` e
+`private.user_in_current_organization(uuid)`. Todos são STABLE SECURITY
+DEFINER, de postgres, com search_path vazio, referências qualificadas,
+PUBLIC/anon revogados e somente EXECUTE para authenticated/service_role.
+O schema concede somente USAGE a essas duas roles. `supabase/config.toml`
+expõe public/graphql_public, excluindo private. Essa configuração local não
+altera os schemas expostos do projeto remoto; manter private fora deles
+na aplicação coordenada. `public.has_branch_access(uuid)` permanece pública,
+com assinatura e permissões anteriores, usando o helper privado; o default
+de branches.organization_id também aponta para private.
+
+As mesmas nove policies da entrada anterior foram preservadas. Todas as
+chamadas independentes da linha a can_manage_branches, can_manage_users e
+private.current_organization_id estão envoltas em SELECT. Os helpers que
+recebem branch_id/user_id continuam dependentes da linha. STABLE sozinho
+não garante avaliação única: o subselect não correlacionado produz InitPlan,
+avaliado até uma vez por execução do plano que o contém, quando necessário.
+Isso não implica cache global dos helpers chamados uma vez por linha.
+
+Validação nesta rodada: Postgres 17 em container descartável, com schema
+mínimo pós-MT1/MT2 (não o banco Supabase completo). Migration executada e
+reexecutada com sucesso; 14 verificações positivas passaram. Controle
+negativo pré-MT3 reprovou na checagem 2a, com vínculo cruzado plantado.
+Limpeza confirmou 1 organização/filial/perfil/vínculo/auth.user, somente
+as fixtures iniciais, em ambos os bancos. `mt3_helpers_planos.sql` verificou
+ACLs, localização dos helpers e search_path; EXPLAIN VERBOSE como
+authenticated mostrou InitPlan para as três funções sem argumentos,
+BitmapOr com profiles_organization_id_idx e helper com branch_id no filtro.
+Saída preservada em `supabase/verificacao/mt3_helpers_planos.resultado.txt`.
+
+Revisão independente rigorosa, equivalente ao nível alto (o comando
+/code-review não está disponível neste ambiente), encontrou e corrigiu dois
+problemas no script: limpeza ampla por nome/código foi substituída por UUIDs
+reservados; WHEN OTHERS foi substituído por erros específicos de RLS/trigger,
+propagando unicidade, FK e demais erros. Checagem 11 documenta somente leitura.
+Releitura não encontrou problema funcional remanescente nos trechos corrigidos.
+
+`deno check --no-lock --node-modules-dir=none` passou; build passou; lint
+passou com sete avisos em arquivos fora da MT3; 37 arquivos de testes
+unitários / 832 testes passaram. As suítes de isolamento/concorrência não
+foram executadas porque acessam o Supabase real. Sem aplicação em banco
+real, deploy de admin-users, commit ou push.
+
+#### Aplicação coordenada (08/10/2026)
+
+A migration 21 foi aplicada no projeto `Facilite-ERP` e `admin-users` foi
+implantada como versão 6, preservando `verify_jwt: false` porque a própria
+função valida o token e mantém o bootstrap controlado. A conferência após a
+aplicação encontrou exatamente 9 policies reescritas, os 3 helpers em
+`private` com `search_path` vazio, `PUBLIC`/`anon` sem `EXECUTE`, somente
+`USAGE` no schema para `authenticated`/`service_role`, o default de
+`branches.organization_id` apontando para
+`private.current_organization_id()` e o trigger de proteção ativo.
+
+Os dados existentes permaneceram íntegros: 1 organização, 1 filial e 4
+perfis, nenhum `organization_id` nulo e nenhum vínculo filial-usuário entre
+organizações. Uma chamada real ao PostgREST com `Content-Profile: private`
+retornou `PGRST106` e confirmou que somente `public` e `graphql_public`
+estão expostos. Um smoke test sem token contra `admin-users` retornou 401
+`Não autenticado.`, confirmando que a versão 6 está ativa e que
+`verify_jwt: false` não abriu a função: a autenticação continua no corpo.
+Os advisors não apontaram achado novo ligado aos helpers privados ou às
+policies da MT3; os avisos retornados já pertenciam ao baseline.

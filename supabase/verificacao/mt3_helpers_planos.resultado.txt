@@ -1,0 +1,58 @@
+BEGIN
+DO
+psql:/tmp/plans.sql:44: NOTICE:  Helpers: localização, STABLE, SECURITY DEFINER, search_path e ACLs OK
+                                 set_config
+----------------------------------------------------------------------------
+ {"sub" : "44444444-4444-4444-8444-444444444444", "role" : "authenticated"}
+(1 row)
+
+SET
+                                                      QUERY PLAN
+----------------------------------------------------------------------------------------------------------------------
+ Seq Scan on public.branches
+   Output: branches.id
+   Filter: (has_branch_access(branches.id) OR ((InitPlan 1).col1 AND (branches.organization_id = (InitPlan 2).col1)))
+   InitPlan 1
+     ->  Result
+           Output: can_manage_branches()
+   InitPlan 2
+     ->  Result
+           Output: private.current_organization_id()
+(9 rows)
+
+                                                        QUERY PLAN
+--------------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on public.profiles
+   Output: profiles.id
+   Recheck Cond: ((profiles.id = (InitPlan 1).col1) OR (profiles.organization_id = (InitPlan 3).col1))
+   Filter: ((profiles.id = (InitPlan 1).col1) OR ((InitPlan 2).col1 AND (profiles.organization_id = (InitPlan 3).col1)))
+   InitPlan 1
+     ->  Result
+           Output: (((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text))::uuid
+   InitPlan 2
+     ->  Result
+           Output: can_manage_users()
+   InitPlan 3
+     ->  Result
+           Output: private.current_organization_id()
+   ->  BitmapOr
+         ->  Bitmap Index Scan on profiles_pkey
+               Index Cond: (profiles.id = (InitPlan 1).col1)
+         ->  Bitmap Index Scan on profiles_organization_id_idx
+               Index Cond: (profiles.organization_id = (InitPlan 3).col1)
+(18 rows)
+
+                                                                     QUERY PLAN
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ Seq Scan on public.user_branches
+   Output: user_branches.user_id, user_branches.branch_id
+   Filter: ((user_branches.user_id = (InitPlan 1).col1) OR ((InitPlan 2).col1 AND private.branch_in_current_organization(user_branches.branch_id)))
+   InitPlan 1
+     ->  Result
+           Output: (((NULLIF(current_setting('request.jwt.claims'::text, true), ''::text))::jsonb ->> 'sub'::text))::uuid
+   InitPlan 2
+     ->  Result
+           Output: can_manage_branches()
+(9 rows)
+
+ROLLBACK

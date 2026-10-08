@@ -196,6 +196,42 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "userId e newPassword são obrigatórios." }, 400);
     }
 
+    // MT3 (11/09/2026, ver facilite-multi-tenant-saas.md) — buraco que era
+    // explorável ANTES de existir uma segunda organização: até aqui, esta
+    // ação conferia só `can_manage_users_for(callerId)` (o papel de quem
+    // chama) e depois resetava a senha do `userId` que viesse no payload,
+    // sem nenhuma checagem sobre QUEM é esse usuário. Ou seja: qualquer
+    // conta com `can_manage_users = true` trocava a senha de qualquer outra
+    // conta do sistema inteiro, de qualquer filial — inclusive a de um
+    // administrador, tomando a conta dele. Não dava para corrigir na RLS:
+    // esta função roda com `service_role`, que passa por cima de policy por
+    // definição, então a checagem tem de estar aqui no código.
+    //
+    // `callerId` é sempre não-nulo neste ponto: `isBootstrap` exige
+    // `action === "create"`, então reset-password nunca entra pelo caminho
+    // de bootstrap e sempre passou pelo bloco de autenticação acima.
+    const { data: profilePair, error: profilePairError } = await admin
+      .from("profiles")
+      .select("id, organization_id")
+      .in("id", [callerId, userId]);
+    if (profilePairError) {
+      return jsonResponse({ error: `Erro ao verificar organização: ${profilePairError.message}` }, 500);
+    }
+
+    const callerOrganizationId = profilePair?.find((row) => row.id === callerId)?.organization_id ?? null;
+    const targetOrganizationId = profilePair?.find((row) => row.id === userId)?.organization_id ?? null;
+
+    // Perfil alvo inexistente cai aqui com a mesma mensagem de organização
+    // diferente, de propósito: responder "esse usuário não existe" de forma
+    // distinguível transformaria esta ação num enumerador de contas para
+    // quem já tem `can_manage_users` numa organização qualquer.
+    if (!callerOrganizationId || !targetOrganizationId || callerOrganizationId !== targetOrganizationId) {
+      return jsonResponse(
+        { error: "Você só pode redefinir a senha de usuários da sua própria organização." },
+        403,
+      );
+    }
+
     const { error: updateError } = await admin.auth.admin.updateUserById(userId, {
       password: newPassword,
     });

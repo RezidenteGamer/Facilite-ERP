@@ -10,6 +10,12 @@
 
 project_id = "ifmdedruuetbbqjbnrkd"
 
+[api]
+# MT3: helpers SECURITY DEFINER ficam em private, fora do Data API.
+# Esta configuração é local; manter a mesma exclusão nos schemas expostos
+# do projeto remoto quando a sessão de coordenação aplicar a migration.
+schemas = ["public", "graphql_public"]
+
 [db]
 # Versão do Postgres do projeto remoto — mantenha igual ao remoto para que
 # `supabase db diff` e `supabase db reset` locais reproduzam o mesmo schema.
